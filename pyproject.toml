@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinydit"
+version = "0.1.0"
+description = "A from-scratch toy text-to-image diffusion transformer"
+requires-python = ">=3.14"
+authors = [{ name = "Daniel Jonas Gaderbauer" }]
+dependencies = [
+    "torch>=2.15",
+    "usuitrack",
+    "diffusers>=0.42.1",
+    "transformers>=5.22.1",
+    "sentence-transformers>=6.2.0",
+    "webdataset>=1.0.2",
+    "safetensors>=0.8.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu132", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+usuitrack = { path = "../usuitrack", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]

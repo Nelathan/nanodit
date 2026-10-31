@@ -3,4 +3,14 @@ runs/
 *.safetensors
 *.pt
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
 .venv/
+.python-version
+.DS_Store
+.idea/
+.vscode/
+.claude
