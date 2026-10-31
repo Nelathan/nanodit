@@ -16,7 +16,7 @@ What each source establishes for this project.
 
 - **Primal VAE** — https://huggingface.co/ostris/primal_vae
   2× spatial to 1 or 2 channels, the DiT does the patching; ~80M params; moment and Gaussian order-statistic losses
-  keep the latent unit-normal per image and channel; trained with latent flip/rotation equivariance and noise-perturbed
+  keep the latent unit-normal per image and channel; trained with latent flip/rotation equivariance (measured: the decoder is, the encoder is not; FACTS) and noise-perturbed
   decode (σ ~ U(0, 0.5)); `patchify(·, compression)` is `pixel_unshuffle(compression / 2)`; sides multiple of 16.
 - **EmbeddingGemma 2** — https://huggingface.co/google/embeddinggemma-2 (released 2026-10-06, Apache 2.0)
   Text path: 24 layers, model dim 512, 130M transformer + 140M embedder, mean pooling, 512→768 projection,

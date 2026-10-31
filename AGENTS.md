@@ -5,7 +5,7 @@ Operating contract for agents in the tiny-dit repo.
 ## What this repo is
 
 A from-scratch toy text-to-image DiT on one consumer GPU. The design is agreed
-(`docs/SPEC.md`); nothing is implemented and nothing is measured yet. `README.md`
+(`docs/SPEC.md`); `docs/HANDOVER.md` says what is built and measured. `README.md`
 has the stages and layout.
 
 ## Documentation map

@@ -9,15 +9,16 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Item | Decision |
 |---|---|
 | Dataset | `jackyhate/text-to-image-2M`, the `data_512_2M` WebDataset shards (512×512 crops, ~2M pairs) |
+| Subset | the first few shards (50k pairs each), sized for ~50-min runs; more only once short runs are trusted |
 | Resolutions | 128 px and 256 px, resized from the 512 crops. 512 px skipped for now |
 | Captions | full caption, no truncation |
-| Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), bf16 (never fp16) |
+| Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
 | Text prefix | one fixed prefix for training and inference: `title: none \| text: {caption}` |
 | Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |
 | VAE | `ostris/primal_vae`, variant `2x2`: 2 channels at 2× downsample, deterministic, unit-normal per image and channel, no scale/shift factors. Image sides must be multiples of 16 |
-| Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16 |
+| Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16. Streamed per source shard: download, encode, write one Parquet file per shard and resolution (key, caption, embedding, latent), delete the shard |
 | Storage | latents 16 KB (128 px) + 64 KB (256 px) per image, ≈160 GB for 2M; embeddings 1.5 KB per image, ≈3 GB |
-| Augmentation | horizontal flip applied to the latent directly. Primal was trained with latent flip/rotation equivariance, so no re-encode |
+| Augmentation | none |
 | Shapes | square crops per stage, so shapes are static (CUDA-graph friendly via a preallocated input buffer) |
 
 ## 2. Tokens
@@ -48,7 +49,7 @@ Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectio
 | Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to shift/scale/gate, plus a small learned per-block table |
 | Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(√768 · e_text)` |
 | Final layer | adaLN-modulated norm → Linear 512 → 128, unpatchify |
-| Size | ≈30M parameters at 12 layers |
+| Size | ≈37M parameters at 12 layers (FACTS) |
 
 Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), DeepSeek sparse attention (no long context).
 
@@ -68,8 +69,8 @@ Default: fan-in normal, `std = 1/√fan_in`.
 |---|---|---|
 | Patch embed 128→512 | fan-in normal (inputs are already unit-normal) | no |
 | Timestep MLP | fan-in normal | no |
-| Text projection 768→512 | fan-in normal on input scaled by √768 (unit variance per dim) | no |
-| Null embedding | random unit vector (same distribution as real embeddings) | no |
+| Text projection 768→512 | fan-in normal on input scaled by √768 (unit RMS over entries) | no |
+| Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | no |
 | Q, K, V | fan-in normal | no |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | no |
 | Attention out-proj | fan-in normal | no |
@@ -86,6 +87,7 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 ## 6. Optimizer: UsuiTrack
 
 - Trust-region LR relative to weight norm; per-role target-norm override for zero-init roles (§5).
+- Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 
 ## 7. Training schedule
 
