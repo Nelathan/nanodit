@@ -1,0 +1,6 @@
+data/
+runs/
+*.safetensors
+*.pt
+__pycache__/
+.venv/
