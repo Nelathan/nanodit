@@ -9,6 +9,7 @@ from safetensors.torch import load_file, save_file
 from test_data import write_shard
 from tinydit.model import DiT
 from tinydit.objective import flow_loss as real_flow_loss
+from tinydit.objective import noisy, target
 from tinydit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
@@ -22,7 +23,7 @@ def train():
     return module
 
 
-def write_config(tmp_path, steps, eval_every, checkpoint_every=100):
+def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4):
     torch.manual_seed(0)
     write_shard(tmp_path / "s.parquet", torch.randn(16, 2, 16, 16).bfloat16(), torch.randn(16, 768).bfloat16())
     save_file({"null": torch.randn(768)}, tmp_path / "null.safetensors")
@@ -35,7 +36,8 @@ resolution = 32
 parquet_glob = "{tmp_path / '*.parquet'}"
 null_embedding = "{tmp_path / 'null.safetensors'}"
 depth = 2
-batch = 4
+batch = {batch}
+micro_batch = {micro_batch}
 steps = {steps}
 seed = 0
 usui_lr = 3e-3
@@ -71,7 +73,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
 
     log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
     assert [r["step"] for r in log] == [1, 2, 3]
-    assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 and r["grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
+    assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
     # step 1 sees exactly zero matrix gradients (the final linear starts at zero), so capture is 0 there
     assert all(0 <= r["usui"]["grad_capture"] <= 1 for r in log) and log[2]["usui"]["grad_capture"] > 0
     assert "tangent_live_fraction" in log[2]["usui"]
@@ -121,3 +123,66 @@ def test_non_finite_loss_stops_before_any_optimizer_step(train, tmp_path, monkey
     with pytest.raises(RuntimeError, match="non-finite"):
         train.main(str(config))
     assert not (tmp_path / "runs" / "smoke" / "train.jsonl").exists()
+
+
+def test_accumulated_batch_trains_logs_and_checkpoints(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    train.main(str(write_config(tmp_path, steps=3, eval_every=5, checkpoint_every=3, batch=8, micro_batch=2)))
+    run = tmp_path / "runs" / "smoke"
+    log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
+    assert [r["step"] for r in log] == [1, 2, 3]
+    assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 for r in log)
+    assert 0 < sum(v is not None for r in log for v in r["loss_by_t"]) <= 24  # 8 samples per step, 4 micro-batches
+    assert (run / "checkpoints" / "step_0000003" / "optimizer.pt").exists()
+
+
+def test_batch_must_be_a_multiple_of_micro_batch(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=1, eval_every=5, batch=6, micro_batch=4)
+    (tmp_path / "s.parquet").unlink()  # checked before the dataset is read
+    with pytest.raises(ValueError, match="multiple"):
+        train.main(str(config))
+    assert not (tmp_path / "runs" / "smoke").exists()
+
+
+class FixedBatches:
+    """Hands out the given micro-batches in order, like the Batcher does for one step."""
+
+    def __init__(self, chunks):
+        self.chunks, self.i = chunks, 0
+
+    def next(self):
+        self.i += 1
+        return self.chunks[(self.i - 1) % len(self.chunks)]
+
+
+def fixed_flow_loss(model, x, text, shift):
+    """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
+    t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
+    eps = x.flip(-1)
+    x_t = noisy(x, eps, t)
+    per_sample = (model(x_t, t, text) - target(x, eps, x_t)).square().flatten(1).mean(1)
+    return per_sample.mean(), per_sample, t
+
+
+def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train, monkeypatch):
+    monkeypatch.setattr(train, "flow_loss", fixed_flow_loss)
+    g = torch.Generator().manual_seed(0)
+    x = torch.randn(8, 2, 16, 16, generator=g)
+    text = torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
+    results = []
+    for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
+        torch.manual_seed(1)
+        model = DiT(torch.randn(768), depth=2)
+        torch.nn.init.normal_(model.final.weight, std=0.05)
+        build_optimizers(model, 3e-3, 0.95, 1e-3)
+        size = 8 // micro_batches
+        chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
+        loss, per_sample, t = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0)
+        results.append((loss, per_sample, t, [model.final.weight.grad, model.final.bias.grad, model.final_table.grad]))
+    (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
+    assert per4.shape == t4.shape == (8,)
+    assert torch.allclose(per1, per4, atol=1e-6) and torch.equal(t1, t4)
+    assert torch.allclose(loss1, loss4, atol=1e-6)
+    for full, accumulated in zip(grads1, grads4):
+        assert full.abs().max() > 0 and torch.allclose(full, accumulated, atol=1e-6)

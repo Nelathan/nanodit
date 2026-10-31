@@ -35,6 +35,7 @@ class Config:
     null_embedding: str
     depth: int
     batch: int
+    micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int
     seed: int
     usui_lr: float
@@ -71,8 +72,7 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
     n_prompts, n_seeds = len(text), len(noise)
     noise = noise.repeat(n_prompts, 1, 1, 1).to(device)  # row-major: prompt p, seed s at p * n_seeds + s
     text = text.repeat_interleave(n_seeds, dim=0).to(device)
-    with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
-        latents = euler_sample(model, noise, text, cfg.sampler_steps, cfg.guidance)
+    latents = euler_sample(model, noise, text, cfg.sampler_steps, cfg.guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)
     images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P*S, 3, res, res]
     grid = images.reshape(n_prompts, n_seeds, 3, cfg.resolution, cfg.resolution).transpose(0, 3, 1, 4, 2)
@@ -95,17 +95,34 @@ def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
     torch.save([o.state_dict() for o in optimizers], path / "optimizer.pt")
 
 
+def accumulate_gradients(model, batcher: Batcher, micro_batches: int, shift: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
+    mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean loss and the
+    per-sample losses and t of every sample."""
+    losses, per_samples, ts = [], [], []
+    for _ in range(micro_batches):
+        x, text = batcher.next()
+        loss, per_sample, t = flow_loss(model, x, text, shift)
+        (loss / micro_batches).backward()
+        losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t)
+    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts)
+
+
 def main(config_path: str) -> None:
     with open(config_path, "rb") as f:
         cfg = Config(**tomllib.load(f))
     torch.manual_seed(cfg.seed)
+    # fp32 weights and activations, TF32 matmuls on CUDA: Molegrad's backward fails under bf16 autocast (PLAN C4).
+    torch.set_float32_matmul_precision("high")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = Path(cfg.runs_dir) / cfg.name
     if run_dir.exists():
         raise FileExistsError(run_dir)  # never overwrite an earlier run
 
+    if cfg.batch % cfg.micro_batch:
+        raise ValueError(f"batch {cfg.batch} is not a multiple of micro_batch {cfg.micro_batch}")
     latents, embeddings = load_shards(sorted(glob.glob(cfg.parquet_glob)), cfg.resolution)
-    batcher = Batcher(latents, embeddings, cfg.batch, device, torch.float32)
+    batcher = Batcher(latents, embeddings, cfg.micro_batch, device, torch.float32)
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.fallback_lr)
     prompts_path = Path(config_path).parent / cfg.eval_prompts
@@ -115,28 +132,28 @@ def main(config_path: str) -> None:
     shutil.copy(config_path, run_dir / "config.toml")
     shutil.copy(prompts_path, run_dir / "eval_prompts.txt")
 
+    accumulate = cfg.batch // cfg.micro_batch
     for step in range(1, cfg.steps + 1):
         start = time.perf_counter()
-        x, text = batcher.next()
-        with torch.autocast(device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
-            loss, per_sample, t = flow_loss(model, x, text, cfg.shift)
-        loss.backward()
+        loss, per_sample, t = accumulate_gradients(model, batcher, accumulate, cfg.shift)
         loss_value = loss.item()
-        grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters()]).item()
+        # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
+        fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
+        grad_norm = torch.nn.utils.get_total_norm(fallback_grads).item()
         # UsuiTrack zeroes non-finite gradients but the AdamW fallback does not: stop before either steps.
         if not (math.isfinite(loss_value) and math.isfinite(grad_norm)):
-            raise RuntimeError(f"non-finite loss {loss_value} or gradient norm {grad_norm} at step {step}")
+            raise RuntimeError(f"non-finite loss {loss_value} or fallback gradient norm {grad_norm} at step {step}")
         for optimizer in optimizers:
             optimizer.step()
             optimizer.zero_grad()
-        buckets = loss_by_t_bucket(per_sample.detach(), t, T_BUCKETS).tolist()
+        buckets = loss_by_t_bucket(per_sample, t, T_BUCKETS).tolist()
         append_jsonl(run_dir / "train.jsonl", dict(
             step=step,
             loss=loss_value,
             loss_by_t=[None if v != v else v for v in buckets],
             lr_usui=optimizers[0].param_groups[0]["lr"],
             lr_fallback=optimizers[1].param_groups[0]["lr"],
-            grad_norm=grad_norm,
+            fallback_grad_norm=grad_norm,
             usui=optimizers[0].pop_diagnostics(),
             imgs_per_s=cfg.batch / (time.perf_counter() - start),
         ))

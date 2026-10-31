@@ -40,10 +40,10 @@ class Batcher:
 
     def next(self) -> tuple[Tensor, Tensor]:
         index = torch.randint(len(self.latents), (len(self.x),))
-        # The staging buffers are rewritten here while the previous non_blocking copy may still read them:
-        # safe only because every step synchronises (loss.item() in the train loop) before the next batch.
         torch.index_select(self.latents, 0, index, out=self.stage_latents)
         torch.index_select(self.embeddings, 0, index, out=self.stage_embeddings)
-        self.x.copy_(self.stage_latents, non_blocking=True)
-        self.text.copy_(self.stage_embeddings, non_blocking=True)
+        # Blocking copies: the staging buffers are rewritten by the next call, and a non_blocking copy from
+        # pinned memory could still be reading them (micro-batches follow each other with no other sync).
+        self.x.copy_(self.stage_latents)
+        self.text.copy_(self.stage_embeddings)
         return self.x, self.text

@@ -81,6 +81,18 @@ reference run.
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
 
+### C4. Training precision on the GPU (open, Daniel)
+
+Molegrad's backward fails under bf16 autocast (`usuitrack/molegrad.py` `_Projected`:
+the saved fp32 weight meets a bf16 grad, `expected m1 and m2 to have the same dtype`;
+reproduced on CPU autocast, Usui's README calls autocast untested). Whole-model
+`.bfloat16()` also fails in tiny-dit (some buffers stay fp32). `train.py` therefore runs
+fp32 with TF32 matmuls, provisionally. Options: (1) keep fp32 + TF32, about half
+the tensor-core peak of bf16 on the 4070 Super; (2) bf16 weights with Usui's stochastic
+rounding, needing dtype fixes in the model and the fallback; (3) an autocast fix in
+Molegrad, in usuitrack. Settle: measured step time once the GPU is free decides
+whether (1) is fast enough for the C1 budget.
+
 ---
 
 ## Group D. Sampling and eval
