@@ -1,8 +1,6 @@
-# Decisions
+# Design session, 2026-10-31
 
-Decided in the design session of 2026-10-31. Each entry: what, and why.
-
-## Decided
+Closed in the design session of 2026-10-31. Each entry: what, and why.
 
 | # | Decision | Reason |
 |---|---|---|
@@ -10,7 +8,7 @@ Decided in the design session of 2026-10-31. Each entry: what, and why.
 | 2 | x0 velocity target | Ostris reports sharper results at high compression; drop-in for flow-matching samplers |
 | 3 | Primal VAE, 2x2 variant | Card shows 2x2 matching or beating the Flux.2 VAE at the same budget; 2x1 trails on texture and its per-image std drifts |
 | 4 | EmbeddingGemma 2, pooled 768-d only; per-token maybe later | Simplest conditioning path |
-| 5 | Full captions | Daniel judges EmbeddingGemma 2 capable of embedding them; length mismatch noted as a risk (SPEC §1) |
+| 5 | Full captions | Daniel judges EmbeddingGemma 2 capable of embedding them; length mismatch noted as a risk (PLAN B3) |
 | 6 | text-to-image-2M | Ready-to-stream WebDataset at 512 px; fastest path to images. Trade-off: largely synthetic images |
 | 7 | Width 512, 12 layers (→24) | Small, fast to train; scale depth once it works |
 | 8 | MHA 8×64 | Head dim 64. GQA saves nothing without a KV cache |
@@ -29,15 +27,9 @@ Decided in the design session of 2026-10-31. Each entry: what, and why.
 | 21 | Pure PyTorch, no HF Trainer, no ai-toolkit | Usui's layerwise autograd, checkpointing and regional compile sit exactly where frameworks take control; one GPU needs none of what they offer |
 | 22 | LR sweep at 128 px: 1e-3, 3e-3, 1e-2 relative | LFM's 4e-5 is a fine-tuning rate; from scratch needs larger relative steps (estimate) |
 
-## Open
+## Understanding of x0 velocity (from discussion, untested)
 
-| Item | State |
-|---|---|
-| EMA weights | Daniel leans no. Option on the table: render the eval grid from both raw and EMA weights and drop EMA if they match |
-| Batch size, step budget per stage | Rides on Usui and the LR sweep |
-| Guidance scale | Tuned on the eval grid |
-| Eval prompt set | Not chosen |
-| How Usui treats 1-D params (norm gains, biases, null embedding) | Assumed fallback path; verify against UsuiTrack |
-| Timestep shift values per stage | Rule agreed (√ token ratio); base value not chosen |
-| Short-caption second embedding | Only if short prompts get ignored |
-| Repo name | `tiny-dit` is a placeholder |
+Worked out in discussion, not empirically tested here.
+x0 velocity is velocity prediction with a hardwired output skip, i.e. preconditioning with `c_skip = 1, c_out = -1`.
+Same objective, same optimum. Any benefit comes from inductive bias. The "image-shaped at every t" claim holds only
+partly: the target carries a `(1 - t)·ε` term, largest near the clean end.

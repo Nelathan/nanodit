@@ -1,6 +1,5 @@
 # tiny-dit — Design Spec
 
-Status: agreed design, nothing implemented. Every change to this file is a design change and goes to Daniel.
 Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, velocity `v = ε - x`.
 
 ---
@@ -20,9 +19,6 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Storage | latents 16 KB (128 px) + 64 KB (256 px) per image, ≈160 GB for 2M; embeddings 1.5 KB per image, ≈3 GB |
 | Augmentation | horizontal flip applied to the latent directly. Primal was trained with latent flip/rotation equivariance, so no re-encode |
 | Shapes | square crops per stage, so shapes are static (CUDA-graph friendly via a preallocated input buffer) |
-
-Known risk: training captions are paragraph-length, inference prompts are short. If short prompts get ignored,
-add a second embedding per image from the first sentence and sample 50/50 (another ~3 GB). Not built now.
 
 ## 2. Tokens
 
@@ -64,11 +60,6 @@ Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), D
 - Timestep sampling: logit-normal. Shift grows with resolution, scaled by √(token ratio) per stage.
 - Prompt dropout: 10%, replaced by a learned null embedding → classifier-free guidance at sampling.
 
-Understanding (worked out in discussion, not empirically tested here):
-x0 velocity is velocity prediction with a hardwired output skip, i.e. preconditioning with `c_skip = 1, c_out = -1`.
-Same objective, same optimum. Any benefit comes from inductive bias. The "image-shaped at every t" claim holds only
-partly: the target carries a `(1 - t)·ε` term, largest near the clean end.
-
 ## 5. Initialization
 
 Default: fan-in normal, `std = 1/√fan_in`.
@@ -87,7 +78,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | adaLN **gate** rows (shared projection and per-block table) | zero | **yes** |
 | Depthwise conv | zero | **yes** |
 | Final linear 512→128 | zero | **yes** |
-| QK-RMSNorm gains, final norm gain | ones | n/a (assumed handled by Usui's 1-D fallback path; verify) |
+| QK-RMSNorm gains, final norm gain | ones | n/a |
 
 Override target for a zero-initialized role: the norm a fan-in init of the same shape would have.
 Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0 (plain velocity would give `v̂ = 0`).
@@ -95,21 +86,11 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 ## 6. Optimizer: UsuiTrack
 
 - Trust-region LR relative to weight norm; per-role target-norm override for zero-init roles (§5).
-- Reference point: LFM runs use `lr 4e-5 × norm`, beta 0.95, at 16k tokens per step.
-- **LR is the first experiment.** 4e-5 relative was right for adapting a pretrained LFM. From scratch, typical
-  recipes imply per-step relative updates of roughly 5e-3 to 5e-2 (estimate, not measured on Usui). At 4e-5 a gate
-  needs ≥25k aligned steps to reach its target norm; around 1e-2 it needs ~100.
-- Sweep at 128 px: `1e-3, 3e-3, 1e-2`.
-- At 128 px, batch 256 gives 64 × 256 ≈ 16k tokens per step, matching the LFM setup on tokens.
-  Open whether tokens are the right noise unit for diffusion (t sampling adds its own gradient noise).
 
 ## 7. Training schedule
 
 1. 128 px — LR sweep, then the main run.
 2. 256 px — continue from the 128 px checkpoint, timestep shift raised.
-
-Throughput estimate (≈30M params, 6·params·tokens FLOPs per image, ~10 TFLOPS effective, unbenchmarked):
-~900 img/s at 128 px, ~200 img/s at 256 px. One epoch over 2M images: ~40 min at 128 px, ~3 h at 256 px.
 
 ## 8. Sampling and eval
 

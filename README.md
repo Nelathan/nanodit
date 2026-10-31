@@ -15,11 +15,14 @@ Nothing is built yet. This repo holds the agreed design so implementation starts
 
 ```
 docs/SPEC.md          the design: data, model, init, training, eval
-docs/DECISIONS.md     every decision with its reason, and what is still open
+docs/PLAN.md          open questions, grouped, and how each would be settled
+docs/FACTS.md         measured numbers with source and date
+docs/archive/         closed decisions and questions, one note per session
+docs/HANDOVER.md      where things stand, next steps, traps
 docs/REFERENCES.md    sources (papers, model cards, datasets) and what each one establishes
 docs/references/      source material kept verbatim (the x0 velocity thread)
-CLAUDE.md             working rules for agents implementing this
-src/tinydit/          model, objective, data, sampler (empty)
+AGENTS.md             working rules for agents implementing this (CLAUDE.md imports it)
+src/tinydit/          model, objective, data, sampler
 scripts/              precompute, train, sample (empty)
 configs/              run configs (empty)
 ```
@@ -30,7 +33,7 @@ configs/              run configs (empty)
 2. LR sweep at 128 px.
 3. Train 128 px, then 256 px. 512 px is out of scope for now.
 
-## Dependencies (expected)
+## Setup
 
-PyTorch (2.15 targeted), `diffusers` (Primal VAE loads via `AutoModel` with `trust_remote_code`),
-`sentence-transformers` / `transformers` (EmbeddingGemma 2), `webdataset`, UsuiTrack (local).
+`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index; usuitrack is an editable path dependency from `../usuitrack`.
+Primal VAE loads via `diffusers` `AutoModel` with `trust_remote_code`; EmbeddingGemma 2 via `sentence-transformers` / `transformers`.
