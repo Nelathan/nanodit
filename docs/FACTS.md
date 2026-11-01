@@ -151,3 +151,54 @@ The same run with the final linear in its own Usui group at rank fraction 1.0 (r
 - The gap narrows but holds at about 0.010 from step 7000 on, one seed each. Over steps 8901–9000 the r = 64 run is lower by 0.011 to 0.021 in every bucket below t = 0.6, by 0.007 at 0.6–0.7, and level above.
 - Its final linear's frame also settles: overlap 0.981 to 0.993 per 1000 steps; stable rank 23.9 at 1000 to 15.7 at 9000; 121 to 126 of 128 directions above 10% of s₁; 11–14% of ‖W‖² outside the frame.
 - The eval grid at step 9000 has more fine texture than the r = 13 grid; the vertical streaks and the horizontal banding are there in both, so the r = 13 frame does not cause them.
+
+## Runs at usui lr 2e-3 (2026-11-01)
+
+`configs/128_smoke.toml` at `e8ca690`: usui lr 2e-3, beta 0.9, rank fraction 0.1 (r = 64 on the final linear), warmup 100, batch 256 as 4 × 64, shards 0–3, records every 100 steps. Against the 2e-2 runs this changes four things at once (lr, beta 0.95 → 0.9, warmup 450 → 100, rank fraction 0.05 → 0.1 for every matrix but the final linear), so no single one is isolated. Configs and logs next to the runs.
+
+### `128_fixed_2e-3_9k`, stopped at step 4300
+
+Stopped by hand at 356–400 img/s per record, with the CPU precompute (about 10 cores) running alongside; the next run, alone, did 850 img/s. wandb run `jdixfisn`. Means per window, against the two 2e-2 runs:
+
+| steps | loss 2e-3 | loss 2e-2 r64 | loss 2e-2 r13 | `grad_moment_cosine` 2e-3 | 2e-2 r64 | `projected_grad_norm` 2e-3 | 2e-2 r64 |
+|---|---|---|---|---|---|---|---|
+| 501–1000 | 1.544 | 1.545 | 1.726 | −0.39 | −0.36 | 0.029 | 0.018 |
+| 1001–2000 | 1.461 | 1.481 | 1.577 | −0.45 | −0.33 | 0.042 | 0.013 |
+| 3001–4000 | 1.388 | 1.426 | 1.448 | −0.43 | −0.34 | 0.044 | 0.012 |
+| 4001–4300 | 1.377 | 1.414 | 1.431 | −0.42 | −0.34 | 0.042 | 0.012 |
+
+- `grad_capture` ≈ 1.00 (0.87 at 2e-2); `relative_step` 0.0008 (window means 0.0031–0.0047); `tangent_live_fraction` 0.994–0.998 (1.000).
+- The two-seed grid at step 4000 follows each prompt in colour and scene (the night street dark blue with vertical streaks, the frog green, the woman in red on green); the 2e-2 r64 grid at the same step has more high-frequency clutter and a shared window-like layout across prompts. The 4×4 grid of the new prompt set (seed 42), rendered from both step-4000 checkpoints into `<run>/eval_4x4/` by `runs/render_grid_4x4.py`: 2e-3 matches the monochrome warrior, the explosion in the park, the beach, the snowy mountains, the white studio backdrop and the desert; 2e-2 is busier, with blue clutter for the bear and the bulldog.
+
+Fallback parameters, relative change ‖W_b − W_a‖/‖W_b‖ between checkpoints, mean over the parameters of a group:
+
+| group | 1000→2000 | 2000→3000 | 3000→4000 |
+|---|---|---|---|
+| null embedding | 0.194 | 0.160 | 0.148 |
+| final table | 0.358 | 0.139 | 0.092 |
+| block tables | 0.353 | 0.236 | 0.191 |
+| conv | 0.328 | 0.207 | 0.175 |
+| biases | 0.253 | 0.156 | 0.119 |
+| norm gains | 0.053 | 0.038 | 0.034 |
+| Usui matrices, for scale | 0.161 | 0.125 | 0.108 |
+
+- The null embedding's cosine to its init (the empty caption's embedding) is 0.763 at step 1000, then 0.778, 0.803, 0.819 at 2000–4000; its norm goes 1.058, 0.984, 0.927, 0.872 (init 1.000).
+
+### `128_fixed_2e-3_b099_1k`: beta 0.99, 1000 steps
+
+The same config at beta 0.99. wandb run `facr413t`, 850 img/s with nothing else running. Against `128_fixed_2e-3_9k` at the same step:
+
+| step | loss β 0.99 | loss β 0.9 | `grad_moment_cosine` β 0.99 | β 0.9 | `projected_grad_norm` β 0.99 | β 0.9 |
+|---|---|---|---|---|---|---|
+| 300 | 1.769 | 1.720 | +0.09 | −0.19 | 0.011 | 0.019 |
+| 500 | 1.652 | 1.613 | −0.01 | −0.35 | 0.012 | 0.022 |
+| 1000 | 1.513 | 1.511 | −0.10 | −0.41 | 0.015 | 0.032 |
+
+- Per t bucket at step 1000, beta 0.99 is lower by 0.024 below t = 0.1, by 0.013 at 0.1–0.2, and up to 0.007 higher at 0.3–0.7.
+- `tangent_live_fraction` 0.997–0.999.
+- The 4×4 grids at step 1000 (`eval_4x4/`) are close; the same compositions under the same noise.
+
+### GPU precompute
+
+- `scripts/precompute.py 128` on the RTX 4070 Super, both encoders fp32, TF32 convolutions on (the cuDNN default), shard 4: about 137 rows/s, the GPU at 99%, about 6 min per 50k-row shard plus its download.
+- 32 latents of shard 0 decoded by Primal and encoded again: GPU with TF32 against CPU fp32 differ by 0.25% relative per latent (max 0.73%), against 0.17% for rounding the CPU latent to bf16; GPU with TF32 off matches CPU to 2e-6. The precompute now turns TF32 off; shard 4 is encoded again.
