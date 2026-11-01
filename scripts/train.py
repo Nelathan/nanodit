@@ -12,6 +12,7 @@ import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 import wandb
 from PIL import Image
@@ -49,7 +50,7 @@ class Config:
     checkpoint_every: int
     eval_every: int
     eval_prompts: str
-    eval_seeds: list[int]
+    eval_seed: int
     guidance: float
     sampler_steps: int
     wandb_project: str
@@ -71,21 +72,23 @@ def load_decoder(device: torch.device):
 
 @torch.no_grad()
 def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
-    """Fixed prompts x fixed seeds: one PNG grid, a row per prompt and a column per seed."""
+    """Fixed prompts, one fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
     side = cfg.resolution // 2
-    noise = torch.stack([torch.randn(2, side, side, generator=torch.Generator().manual_seed(seed)) for seed in cfg.eval_seeds])
-    n_prompts, n_seeds = len(text), len(noise)
-    noise = noise.repeat(n_prompts, 1, 1, 1).to(device)  # row-major: prompt p, seed s at p * n_seeds + s
-    text = text.repeat_interleave(n_seeds, dim=0).to(device)
-    latents = euler_sample(model, noise, text, cfg.sampler_steps, cfg.guidance)
+    n_prompts = len(text)
+    noise = torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed)).repeat(n_prompts, 1, 1, 1)
+    latents = euler_sample(model, noise.to(device), text.to(device), cfg.sampler_steps, cfg.guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)
-    images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P*S, 3, res, res]
-    grid = images.reshape(n_prompts, n_seeds, 3, cfg.resolution, cfg.resolution).transpose(0, 3, 1, 4, 2)
+    images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P, 3, res, res]
+    cols = math.ceil(math.sqrt(n_prompts))
+    rows = math.ceil(n_prompts / cols)
+    cells = np.zeros((rows * cols, 3, cfg.resolution, cfg.resolution), np.uint8)  # black past the last prompt
+    cells[:n_prompts] = images
+    grid = cells.reshape(rows, cols, 3, cfg.resolution, cfg.resolution).transpose(0, 3, 1, 4, 2)
     path = run_dir / "eval" / f"step_{step:07d}.png"
     path.parent.mkdir(exist_ok=True)
-    Image.fromarray(grid.reshape(n_prompts * cfg.resolution, n_seeds * cfg.resolution, 3)).save(path)
-    append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seeds=cfg.eval_seeds))
-    wandb.log({"eval": wandb.Image(str(path), caption="prompts down, seeds across")}, step=step)
+    Image.fromarray(grid.reshape(rows * cfg.resolution, cols * cfg.resolution, 3)).save(path)
+    append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seed=cfg.eval_seed))
+    wandb.log({"eval": wandb.Image(str(path), caption="prompts row-major in eval_prompts.txt order")}, step=step)
 
 
 def append_jsonl(path: Path, record: dict) -> None:

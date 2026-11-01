@@ -27,7 +27,7 @@ def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, mic
     torch.manual_seed(0)
     write_shard(tmp_path / "s.parquet", torch.randn(16, 2, 16, 16).bfloat16(), torch.randn(16, 768).bfloat16())
     save_file({"null": torch.randn(768)}, tmp_path / "null.safetensors")
-    (tmp_path / "prompts.txt").write_text("a red apple\na blue car\n")
+    (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
     config.write_text(f"""
 name = "smoke"
@@ -50,7 +50,7 @@ log_every = {log_every}
 checkpoint_every = {checkpoint_every}
 eval_every = {eval_every}
 eval_prompts = "prompts.txt"
-eval_seeds = [0, 1, 2]
+eval_seed = 42
 guidance = 2.0
 sampler_steps = 2
 wandb_project = "test"
@@ -99,7 +99,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (FACTS, GPU smoke runs)
     assert all(0.5 < r["usui"]["grad_capture"] < 1.5 for r in log)
     assert "tangent_live_fraction" in log[1]["usui"]
-    assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\n"
+    assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\na cat\n"
     assert [r["lr_usui"] for r in log] == [3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [1e-3, 1e-3]  # the last step's, past warmup 2
 
     curves = [(step, data) for step, data in sent if "eval" not in data]
@@ -113,7 +113,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
     from PIL import Image
-    assert Image.open(evals[0]["image"]).size == (3 * 32, 2 * 32)  # seeds across, prompts down
+    grid = Image.open(evals[0]["image"])
+    assert grid.size == (2 * 32, 2 * 32)  # three prompts, two columns, row-major
+    assert grid.crop((32, 32, 64, 64)).getextrema() == ((0, 0),) * 3  # the cell past the last prompt stays black
 
     checkpoint = run / "checkpoints" / "step_0000003"
     first = load_file(run / "checkpoints" / "step_0000002" / "model.safetensors")

@@ -59,7 +59,10 @@ images, or test whether training on flipped latents hurts. Evidence: FACTS only.
 
 ### C1. Batch size and step budget per stage
 
-Rides on Usui and the LR sweep. Open whether tokens are the right noise unit for
+Rides on Usui and the LR sweep. A batch-64 ablation at a constant number of images
+(4× the steps, warmup and intervals; archive 2026-11-01, eval grid, beta 0.99) asks whether 256 is needed; a
+smaller batch may want a lower lr, and a lower rank fraction if `tangent_live_fraction`
+falls (0.994 at batch 256, rank fraction 0.1). Open whether tokens are the right noise unit for
 diffusion (t sampling adds its own gradient noise). Evidence: at 128 px, batch 256
 gives 64 × 256 ≈ 16k tokens per step, matching the LFM setup on tokens. Throughput
 at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. Settle: the sweep in C2.
@@ -68,14 +71,14 @@ at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. Settle: the
 
 The lr is Usui's fixed step (SPEC §6): a moment that fills its rank writes
 `‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
-and beta 0.9, Daniel's "for now" after 2e-2 read too high; under 2e-2,
-`grad_moment_cosine` stayed near −0.3 through 9000 steps (FACTS, Fixed-step runs),
-which Usui reads as overshoot. Settle: a sweep around 2e-3 at 128 px once the run
-length is set by the data (each image seen once, archive 2026-11-01). Warmup is 100 steps; the common rule,
+and beta 0.99, Daniel's "for now" after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
+negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: a sweep around 2e-3 at 128 px once the run
+length is set by the data (each image seen once, archive 2026-11-01, final frame and smoke settings). Warmup is 100 steps; the common rule,
 Daniel's note, is 5% of the run. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The conv, the adaLN tables and the null embedding
-train on the fallback at `fallback_lr`, a second sweep axis; the null embedding
-(elements ≈0.036) takes full-size Adam steps from the 10% dropped rows, so it may leave
-the encoder's manifold fast unless its LR is set apart. No AdamW reference run. The
+train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep axis; they move
+faster than the Usui matrices, and the null embedding turns away from its init in the
+first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
+think. unless you say it evolves fine. probably also its beta." No AdamW reference run. The
 harness has no decay; Usui's README recommends one.
 
 ### C3. Timestep shift values per stage
@@ -94,10 +97,6 @@ weights and drop EMA if they match.
 ### D2. Guidance scale
 
 Tuned on the eval grid.
-
-### D3. Eval prompt set
-
-Not chosen.
 
 ### D4. Sampler step schedule
 

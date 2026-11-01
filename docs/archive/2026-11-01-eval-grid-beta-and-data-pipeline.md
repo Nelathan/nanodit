@@ -1,0 +1,11 @@
+# Eval grid, beta 0.99 and the data pipeline, 2026-11-01
+
+Decided by Daniel after the 2e-3 run was stopped at step 4300 and a 1000-step counter-test at beta 0.99 (FACTS, Runs at usui lr 2e-3). Each entry: what, and why.
+
+| # | Decision | Reason |
+|---|---|---|
+| 1 | Eval grid (PLAN D3): 16 fixed prompts, one noise from seed 42, Euler 30 steps, CFG 4, one 4×4 grid in `configs/eval_prompts.txt` order. Prompts: "cat", Daniel's five ai-toolkit sample prompts without their anime quality tags, and ai-toolkit's ten default sample prompts | Daniel: "do just one seed 42 on 10 fixed prompts like we have on ai-toolkit, mine and default. arrange as 4x4. yes euler 30steps cfg 4 is default"; "drop the masterpiece tags because thats just how anima is trained"; "for prompt 16 or 1 just use 'cat'". One grid, not one image per prompt: "its actually well comparable". No CFG 1 column. No labels on the grid; the order is known |
+| 2 | Usui beta 0.99 in the smoke config | At 2e-3, beta 0.9 held `grad_moment_cosine` near −0.4; beta 0.99 brought it to about −0.1 over 1000 steps at the same loss. Daniel: "higher beta recovers cosine. so we keep 0.99 for now. we usually said it makes the moment stale, but here with so many steps it recovers stucture for polar to chew on." |
+| 3 | Ablations run 1000 steps, not 9000 | Daniel: "dont do 9k steps for simple ablations". His read of the lr: "overshooting lr gains early loss but not long term because it forgets much more. it walks more than the signal supports." |
+| 4 | Batch 64 is an ablation, at a constant number of images: 4× the steps, warmup and intervals | Daniel: "batch 64 is a ablation if we dont need such big batch size. i fine tuned anima with 16"; "lower bs would mean also update intervals and step count, so the amount of images stays constant"; a smaller batch may want a lower lr and "could also ask for rank 0.05 again" |
+| 5 | Data: precompute on the GPU into one Parquet per source shard; shuffle all shards into one Parquet; training streams it block-wise, latents and embeddings together | Daniel: "by having a parquet per shard we can add shards later and just need to reshuffle." Parquet over a raw mmap file: read in order, block by block, mmap has no advantage, and Parquet keeps one format. The CPU precompute (about 11 rows/s) slowed training to 370 img/s and would take about 50 h |
