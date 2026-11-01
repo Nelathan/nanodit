@@ -19,19 +19,6 @@ matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`);
 go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
 reading, and the harness runs that split (`src/tinydit/optim.py`). Daniel to close.
 
-### A3. Does the zero-initialized final linear get the rank it needs under Usui?
-
-Usui writes each step inside its frame, r = 13 for the final linear `[128, 512]`, so the
-matrix only gains rank as the frame rotates. At 300 steps its stable rank is near the
-frame's rank, and its loss below t ≈ 0.7 lags; a rank-64 frame on the same code closes
-most of the gap to the final linear on the fallback, at either step size. Early loss does not decide it: over 9000 steps (`128_fixed_2e-2_9k`)
-the low-t loss catches up while the frame stops rotating after about step 1000 and the
-weight concentrates in it. A rank-64 frame on the same 9000 steps settles too, keeps
-nearly every output direction, and ends about 0.010 lower, all of it below t ≈ 0.7; the
-eval grids' streaks are in both (FACTS, Fixed-step runs). Settle: Daniel decides between
-the default frame, a larger frame for this matrix, or another route, on whether 0.010 at
-one seed is worth a per-matrix rank.
-
 ---
 
 ## Group B. Data and conditioning
@@ -79,19 +66,17 @@ at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. Settle: the
 
 ### C2. Which LR from scratch, and how long a warmup?
 
-The first experiment. The lr is Usui's fixed step (SPEC §6): a moment that fills
-its rank writes `‖ΔW‖ = lr·√(max(1, out/in)·r)`. At 2e-2 that is a nominal relative step of
-0.45–0.64% for the fan-in matrices at init and 1.9% for the shared adaLN
-projection (its rows start at std 0.02, F2), against 0.3% for the earlier relative
-3e-3. Proposed sweep at 128 px: 1e-2, 2e-2, 5e-2. Warmup: the smoke config uses 50
-steps; the common rule, Daniel's note, is 5% of the run, and the run length is not set. The 300-step
-reads of 20, 50 and 100 are in FACTS (Fixed-step runs); a longer run reads it better. The conv, the adaLN tables and the
-null embedding train on the fallback at `fallback_lr`, a second sweep axis; the null
-embedding (elements ≈0.036) takes full-size Adam steps from the 10% dropped rows, so
-it may leave the encoder's manifold fast unless its LR is set apart. Under the
-relative step at 3e-3, constant, `grad_moment_cosine` turned negative after about
-step 100 (FACTS, GPU smoke runs), which Usui reads as overshoot. No AdamW reference
-run. The harness has no decay; Usui's README recommends one.
+The lr is Usui's fixed step (SPEC §6): a moment that fills its rank writes
+`‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
+and beta 0.9, Daniel's "for now" after 2e-2 read too high; under 2e-2,
+`grad_moment_cosine` stayed near −0.3 through 9000 steps (FACTS, Fixed-step runs),
+which Usui reads as overshoot. Settle: a sweep around 2e-3 at 128 px once the run
+length is set by the data (each image seen once, archive 2026-11-01). Warmup is 100 steps; the common rule,
+Daniel's note, is 5% of the run. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The conv, the adaLN tables and the null embedding
+train on the fallback at `fallback_lr`, a second sweep axis; the null embedding
+(elements ≈0.036) takes full-size Adam steps from the 10% dropped rows, so it may leave
+the encoder's manifold fast unless its LR is set apart. No AdamW reference run. The
+harness has no decay; Usui's README recommends one.
 
 ### C3. Timestep shift values per stage
 

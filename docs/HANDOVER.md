@@ -11,13 +11,12 @@ Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt
 ## Waiting on Daniel
 
 - **F1, F2.** Model choices SPEC leaves open (PLAN group F). F3 is the session's to settle (Next).
-- **A3**, on the 9000-step read.
 - **B1, B2, A2.** Evidence is in; each needs a close or a follow-up.
 - **Not chosen yet:** C3 shift base, D3 eval prompts (16 drafts in `configs/eval_prompts.txt`), D4 sampler grid, LR decay and the warmup length (C2), `fallback_lr` as a sweep axis.
 
 ## Next
 
-1. PLAN A3 with Daniel: the final linear's frame, on the 9000-step read.
+1. The settings of archive 2026-11-01 (final frame and smoke settings) at 9000 steps, with the final linear on its rank-64 frame and, for comparison, on the fallback (a scratch launcher, as for the rank-64 arms; `build_optimizers` has no switch for it).
 2. F3 (the final layer's shift/scale from the shared adaLN projection) and the text RMS norm.
 3. The LR sweep (C2). A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 

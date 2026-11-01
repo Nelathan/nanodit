@@ -9,7 +9,7 @@ from tinydit.optim import build_optimizers
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
     model = DiT(torch.randn(768), depth=2)
-    matrix, fallback = build_optimizers(model, 1e-3, 0.95, 1e-3)
+    matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     names = {id(p): n for n, p in model.named_parameters()}
     usui = {names[id(p)] for g in matrix.param_groups for p in g["params"]}
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
@@ -22,7 +22,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
 
 def test_residual_stream_output_matrices_track_their_left_side():
     model = DiT(torch.randn(768), depth=2)
-    matrix, _ = build_optimizers(model, 1e-3, 0.95, 1e-3)
+    matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     names = {id(p): n for n, p in model.named_parameters()}
     side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
     for name in ("blocks.0.out.weight", "blocks.1.w_down.weight", "patch_embed.weight"):
@@ -34,7 +34,7 @@ def test_residual_stream_output_matrices_track_their_left_side():
 def test_the_first_step_moves_only_the_zero_init_final_linear_and_fits_only_its_frame():
     torch.manual_seed(0)
     model = DiT(torch.randn(768), depth=2).bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 1e-3)
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
     matrices = {n: p.detach().clone() for n, p in model.named_parameters() if id(p) in tracked}
     train_step(model, optimizers, *batch(0))
@@ -44,6 +44,7 @@ def test_the_first_step_moves_only_the_zero_init_final_linear_and_fits_only_its_
     framed = {n for n, p in model.named_parameters() if "frame" in optimizers[0].state.get(p, {})}
     assert len(matrices) > 10 and moved == framed == {"final.weight"}
     rank = optimizers[0].state[model.final.weight]["frame"].shape[-1]
+    assert rank == 64  # the largest frame of [128, 512], half its shorter side
     # the fixed step of [128, 512] (aspect factor 1), up to bf16 rounding
     assert abs(model.final.weight.float().norm() / (3e-3 * rank**0.5) - 1) < 0.05
 
@@ -54,7 +55,7 @@ def trained_model(steps=2):
     model = DiT(torch.randn(768), depth=2)
     torch.nn.init.normal_(model.final.weight, std=0.05)
     model.bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 1e-3)
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
     for _ in range(steps):
         train_step(model, optimizers, *batch(0))
     return model, optimizers
@@ -83,6 +84,7 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
     train_step(model, optimizers, *batch(1))
     assert qkv.grad is None and not qkv.requires_grad
     assert not torch.equal(qkv, before)
+    assert optimizers[0].state[qkv]["frame"].shape[-1] == round(0.1 * (1536 * 512) ** 0.5)  # rank_fraction 0.1
     assert model.blocks[0].conv.weight.requires_grad  # fallback parameters keep their gradients
 
 
@@ -93,7 +95,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
         torch.manual_seed(1)
         model = DiT(torch.randn(768), depth=2)
         torch.nn.init.normal_(model.final.weight, std=0.05)
-        build_optimizers(model.bfloat16(), 3e-3, 0.95, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
         t, eps = torch.rand(8), torch.randn_like(x)
         for i in range(0, 8, micro_batch):
@@ -115,7 +117,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
 
     restored = DiT(torch.zeros(768), depth=2).bfloat16()
     restored.load_state_dict(state[0])
-    resumed = build_optimizers(restored, 3e-3, 0.95, 1e-3)
+    resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     for optimizer, saved in zip(resumed, state[1]):
         optimizer.load_state_dict(saved)
     qkv = restored.blocks[0].qkv

@@ -78,7 +78,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
 | Depthwise conv | zero | fallback |
-| Final linear 512→128 | zero | Usui |
+| Final linear 512→128 | zero | Usui, the largest frame (§6) |
 | QK-RMSNorm gains, final norm gain, biases | ones / zero | fallback |
 
 Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0 (plain velocity would give `v̂ = 0`).
@@ -86,6 +86,7 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 ## 6. Optimizer: UsuiTrack
 
 - Usui's fixed step on every matrix: sized by `lr` and the matrix's shape, not relative to its norm, since a model trained from scratch has zero-initialized matrices with no norm to be relative to.
+- Frame size: a rank fraction for every matrix, except the final linear, which takes Usui's largest frame (half its shorter side, r = 64): it builds its whole map from Usui's steps, starting from zero.
 - Linear LR warmup on both optimizers.
 - Everything that is not a 2-D Linear weight, and the adaLN tables, trains on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.

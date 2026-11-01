@@ -41,6 +41,7 @@ class Config:
     seed: int
     usui_lr: float  # Usui's fixed step (SPEC §6)
     beta: float
+    rank_fraction: float  # Usui's frame size; the final linear takes the largest (SPEC §6)
     fallback_lr: float
     warmup: int  # steps of linear lr warmup from lr / warmup, both optimizers
     shift: float  # timestep shift, PLAN C3
@@ -135,7 +136,7 @@ def main(config_path: str) -> None:
     batcher = Batcher(latents, embeddings, cfg.micro_batch, device, torch.float32)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
-    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.fallback_lr)
+    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)

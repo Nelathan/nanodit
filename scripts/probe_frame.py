@@ -1,4 +1,4 @@
-"""Does Usui's frame on one matrix rotate into new directions or stay in its subspace (PLAN A3)? Reads a run's
+"""Does Usui's frame on one matrix rotate into new directions or stay in its subspace? Reads a run's
 checkpoints; prints, writes nothing.
 
 usage: probe_frame.py RUN_DIR [PARAM]   (PARAM defaults to final.weight)
@@ -22,7 +22,7 @@ run, name = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "final.weight"
 with open(f"{run}/config.toml", "rb") as f:
     depth = tomllib.load(f)["depth"]
 model = DiT(torch.zeros(768), depth)
-matrix, _ = build_optimizers(model, 1e-3, 0.95, 1e-3)
+matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
 # optimizer.pt keys its state by position across the param groups
 placed = [(id(p), g["side"]) for g in matrix.param_groups for p in g["params"]]
 index = [key for key, _ in placed].index(id(model.get_parameter(name)))
