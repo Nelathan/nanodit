@@ -115,3 +115,22 @@ Uncommitted tiny-dit code, by its diff the same as `b3adad8` in `src/` and `scri
 - `grad_capture` over steps 101–300: 0.94 / 0.92 / 0.89 (w20 / w50 / w100), 0.94 on the fallback run. `grad_moment_cosine` over 251–300: −0.34 / −0.34 / −0.33, −0.37 on the fallback run.
 - The final linear at step 300 (`[128, 512]`; stable rank Σs²/s₁², and singular values above 10% of s₁): w20 stable rank 12.9, 41 of 128; r64 26.9, 93; fallback 45.9, 128; `128_smoke_bf16` 41.7, 128.
 - How the r = 13 frame on the final linear moves (`scripts/probe_frame.py`; w50 at 100 / 200 / 300): stable rank 9.5 / 9.7 / 11.3; directions above 10% 20 / 32 / 38; share of ‖W‖² outside the current frame 0.17 / 0.27 / 0.37; ‖F_prevᵀ F‖²/r against the checkpoint 100 steps earlier 0.80 / 0.89. Under r = 64 (the same reads, the final linear indexed in its own last group) that overlap is 0.98 / 0.99 and 3–10% of ‖W‖² lies outside the frame.
+
+### `128_fixed_2e-2_9k` (2026-11-01)
+
+The committed design at `b3adad8` plus the wandb unit as first written (its diff is next to the run, `128_fixed_2e-2_9k.uncommitted.diff`; it differs from `ac730aa` only in logging, tests and docs): `configs/128_smoke.toml` with 9000 steps, warmup 450, eval every 500, checkpoint every 1000. About 200k rows sampled with replacement, so each seen about 11 times. 13:42 to 14:29, median 846 img/s from step 11. wandb `pink-marker/tiny-dit`, run `w0j9lfhv`.
+
+| steps | loss | t < 0.1 | 0.1–0.2 | 0.2–0.3 | 0.3–0.4 | 0.4–0.5 | 0.5–0.6 | 0.6–0.7 | 0.7–0.8 | 0.8–0.9 | > 0.9 | `grad_capture` | `grad_moment_cosine` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 201–300 | 1.9587 | 2.985 | 2.719 | 2.441 | 2.212 | 2.024 | 1.829 | 1.681 | 1.508 | 1.337 | 1.177 | 0.95 | −0.22 |
+| 901–1000 | 1.6702 | 2.166 | 2.046 | 1.918 | 1.812 | 1.717 | 1.631 | 1.535 | 1.429 | 1.276 | 1.149 | 0.90 | −0.38 |
+| 1901–2000 | 1.5275 | 1.671 | 1.636 | 1.623 | 1.609 | 1.569 | 1.543 | 1.493 | 1.413 | 1.277 | 1.163 | 0.90 | −0.37 |
+| 2901–3000 | 1.4663 | 1.467 | 1.484 | 1.508 | 1.517 | 1.522 | 1.505 | 1.458 | 1.386 | 1.268 | 1.164 | 0.88 | −0.34 |
+| 4901–5000 | 1.4197 | 1.307 | 1.373 | 1.425 | 1.460 | 1.472 | 1.455 | 1.438 | 1.387 | 1.267 | 1.136 | 0.87 | −0.32 |
+| 6901–7000 | 1.3878 | 1.267 | 1.329 | 1.380 | 1.415 | 1.427 | 1.430 | 1.419 | 1.370 | 1.261 | 1.150 | 0.87 | −0.31 |
+| 8901–9000 | 1.3695 | 1.247 | 1.304 | 1.356 | 1.394 | 1.398 | 1.408 | 1.402 | 1.365 | 1.265 | 1.132 | 0.85 | −0.29 |
+
+- The low-t gap of the 300-step reads closes with time: the t < 0.1 bucket goes 2.99 → 1.25, the buckets above t = 0.7 barely move. Loss still falls at 9000 (−0.012 over the last 1000 steps); constant lr, no decay.
+- The final linear's frame (`scripts/probe_frame.py`), checkpoints 1000 to 9000: overlap with the previous checkpoint 0.992 to 0.995 every 1000 steps; stable rank 14.0 / 12.7 / 11.4 / 10.8 / 9.6 / 8.7 / 9.0 / 8.3 / 7.8; directions above 10% of s₁ 48 / 65 / 70 / 73 / 67 / 65 / 68 / 66 / 63 of 128; share of ‖W‖² outside the current frame 0.44 / 0.42 / 0.40 / 0.38 / 0.36 / 0.35 / 0.34 / 0.33 / 0.33. After step 1000 the frame holds its subspace; the weight's energy concentrates in it, and what lies outside was written before step 1000.
+- The eval grid at step 9000 (16 prompts × 2 seeds, guidance 4): colour, light and coarse layout per prompt, no recognisable objects; strong vertical streaks, mostly in the seed-0 column, and blocky horizontal banding.
+- The log ends with `shutdown can only be called once` after wandb's sync; exit code 0, all 9000 steps and checkpoints written.

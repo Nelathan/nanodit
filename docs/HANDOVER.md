@@ -4,20 +4,20 @@ Written 2026-10-31, night; updated 2026-11-01. Orientation only; `PLAN.md` carri
 
 ## Where it stands
 
-Built and tested (`uv run python -m pytest tests/`, 47 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui (fixed step, every matrix) + StochasticAdamW split with Molegrad and gradient accumulation, linear LR warmup, `scripts/train.py` training a pure bf16 model and streaming its curves to wandb, the precompute and the probes. 300-step smoke runs at 128 px are in FACTS: five under the earlier relative step (GPU smoke runs), five under the fixed step at 2e-2 (Fixed-step runs: three warmup lengths, two with a rank-64 frame on the final linear). A 9000-step run of the committed design, `128_fixed_2e-2_9k`, started 2026-11-01 13:42 for PLAN A3 (wandb project `tiny-dit`).
+Built and tested (`uv run python -m pytest tests/`, 47 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui (fixed step, every matrix) + StochasticAdamW split with Molegrad and gradient accumulation, linear LR warmup, `scripts/train.py` training a pure bf16 model and streaming its curves to wandb, the precompute and the probes. 300-step smoke runs at 128 px are in FACTS: five under the earlier relative step (GPU smoke runs), five under the fixed step at 2e-2 (Fixed-step runs: three warmup lengths, two with a rank-64 frame on the final linear). A 9000-step run of the committed design, `128_fixed_2e-2_9k` (FACTS; wandb project `tiny-dit`), reached 1.37 with the low-t gap closed; its final linear's frame stopped rotating after about step 1000.
 
 Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt/mars/ai/tiny-dit/precomputed/precompute_128.log`): `/mnt/mars/ai/tiny-dit/precomputed/128/data_00000{0..3}.parquet`, the tars deleted. Two image sources, half each (FACTS, Sample and shard), row counts and sizes there too. Shard 0's parquet is checked against its tar (FACTS). The null embedding is at `precomputed/null_embedding.safetensors`.
 
 ## Waiting on Daniel
 
 - **F1, F2.** Model choices SPEC leaves open (PLAN group F). F3 is the session's to settle (Next).
-- **A3** once the 9000-step run is read.
+- **A3**, on the 9000-step read.
 - **B1, B2, A2.** Evidence is in; each needs a close or a follow-up.
 - **Not chosen yet:** C3 shift base, D3 eval prompts (16 drafts in `configs/eval_prompts.txt`), D4 sampler grid, LR decay and the warmup length (C2), `fallback_lr` as a sweep axis.
 
 ## Next
 
-1. Read `128_fixed_2e-2_9k` for PLAN A3: the final linear's rank per checkpoint (`scripts/probe_frame.py`) and the low-t loss; Daniel decides the final linear's frame.
+1. PLAN A3 with Daniel: the final linear's frame, on the 9000-step read.
 2. F3 (the final layer's shift/scale from the shared adaLN projection) and the text RMS norm.
 3. The LR sweep (C2). A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 

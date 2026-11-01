@@ -24,11 +24,13 @@ reading, and the harness runs that split (`src/tinydit/optim.py`). Daniel to clo
 Usui writes each step inside its frame, r = 13 for the final linear `[128, 512]`, so the
 matrix only gains rank as the frame rotates. At 300 steps its stable rank is near the
 frame's rank, and its loss below t ≈ 0.7 lags; a rank-64 frame on the same code closes
-most of the gap to the final linear on the fallback, at either step size. At r = 13 the frame rotated into new directions through step 300; whether
-it keeps doing so or settles is the question (FACTS, Fixed-step runs). Early loss may not decide it. Settle: the 9000-step run
-`128_fixed_2e-2_9k`, read for whether the final linear's rank and the low-t loss catch up,
-then Daniel decides between the default frame, a larger frame for this matrix, or
-another route.
+most of the gap to the final linear on the fallback, at either step size. Early loss does not decide it: over 9000 steps (`128_fixed_2e-2_9k`)
+the low-t loss catches up while the frame stops rotating after about step 1000 and the
+weight concentrates in it (FACTS, Fixed-step runs). Open: whether a final linear held
+near a 13-dimensional subspace costs anything the loss does not show (the eval grid's
+streaks are one candidate, F1 another). Settle: Daniel decides between the default
+frame, a larger frame for this matrix, or another route; a same-length rank-64 arm
+would compare.
 
 ---
 
