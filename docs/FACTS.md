@@ -134,3 +134,20 @@ The committed design at `b3adad8` plus the wandb unit as first written (its diff
 - The final linear's frame (`scripts/probe_frame.py`), checkpoints 1000 to 9000: overlap with the previous checkpoint 0.992 to 0.995 every 1000 steps; stable rank 14.0 / 12.7 / 11.4 / 10.8 / 9.6 / 8.7 / 9.0 / 8.3 / 7.8; directions above 10% of s₁ 48 / 65 / 70 / 73 / 67 / 65 / 68 / 66 / 63 of 128; share of ‖W‖² outside the current frame 0.44 / 0.42 / 0.40 / 0.38 / 0.36 / 0.35 / 0.34 / 0.33 / 0.33. After step 1000 the frame holds its subspace; the weight's energy concentrates in it, and what lies outside was written before step 1000.
 - The eval grid at step 9000 (16 prompts × 2 seeds, guidance 4): colour, light and coarse layout per prompt, no recognisable objects; strong vertical streaks, mostly in the seed-0 column, and blocky horizontal banding.
 - The log ends with `shutdown can only be called once` after wandb's sync; exit code 0, all 9000 steps and checkpoints written.
+
+### `128_fixed_2e-2_final_r64_9k` (2026-11-01)
+
+The same run with the final linear in its own Usui group at rank fraction 1.0 (r = 64), full fixed step: code `e9f156f` plus the scratch launcher copied next to the run (`128_fixed_2e-2_final_r64_9k.launcher.py`). 14:30 to 15:16, median 872 img/s from step 11. wandb run `h483k5gj`. Against `128_fixed_2e-2_9k`, loss and the t < 0.1 bucket:
+
+| steps | r = 64 loss | r = 13 loss | r = 64, t < 0.1 | r = 13, t < 0.1 |
+|---|---|---|---|---|
+| 201–300 | 1.6985 | 1.9587 | 1.976 | 2.985 |
+| 901–1000 | 1.5146 | 1.6702 | 1.474 | 2.166 |
+| 2901–3000 | 1.4369 | 1.4663 | 1.310 | 1.467 |
+| 4901–5000 | 1.4048 | 1.4197 | 1.257 | 1.307 |
+| 6901–7000 | 1.3749 | 1.3878 | 1.238 | 1.267 |
+| 8901–9000 | 1.3591 | 1.3695 | 1.226 | 1.247 |
+
+- The gap narrows but holds at about 0.010 from step 7000 on, one seed each. Over steps 8901–9000 the r = 64 run is lower by 0.011 to 0.021 in every bucket below t = 0.6, by 0.007 at 0.6–0.7, and level above.
+- Its final linear's frame also settles: overlap 0.981 to 0.993 per 1000 steps; stable rank 23.9 at 1000 to 15.7 at 9000; 121 to 126 of 128 directions above 10% of s₁; 11–14% of ‖W‖² outside the frame.
+- The eval grid at step 9000 has more fine texture than the r = 13 grid; the vertical streaks and the horizontal banding are there in both, so the r = 13 frame does not cause them.

@@ -26,11 +26,11 @@ matrix only gains rank as the frame rotates. At 300 steps its stable rank is nea
 frame's rank, and its loss below t ≈ 0.7 lags; a rank-64 frame on the same code closes
 most of the gap to the final linear on the fallback, at either step size. Early loss does not decide it: over 9000 steps (`128_fixed_2e-2_9k`)
 the low-t loss catches up while the frame stops rotating after about step 1000 and the
-weight concentrates in it (FACTS, Fixed-step runs). Open: whether a final linear held
-near a 13-dimensional subspace costs anything the loss does not show (the eval grid's
-streaks are one candidate, F1 another). Settle: Daniel decides between the default
-frame, a larger frame for this matrix, or another route; a same-length rank-64 arm
-would compare.
+weight concentrates in it. A rank-64 frame on the same 9000 steps settles too, keeps
+nearly every output direction, and ends about 0.010 lower, all of it below t ≈ 0.7; the
+eval grids' streaks are in both (FACTS, Fixed-step runs). Settle: Daniel decides between
+the default frame, a larger frame for this matrix, or another route, on whether 0.010 at
+one seed is worth a per-matrix rank.
 
 ---
 
