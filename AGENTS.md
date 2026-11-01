@@ -49,9 +49,9 @@ Work one PLAN group at a time: the questions in a group share runs or code.
   Primal latent stats, EmbeddingGemma 2 output norm, Usui's handling of 1-D
   params.
 - Never discard a working state without isolating the cause of a problem.
-- Pure PyTorch. No HF Trainer, no Accelerate, no ai-toolkit, no wandb.
+- Pure PyTorch. No HF Trainer, no Accelerate, no ai-toolkit.
 - Logs are JSONL in the run directory, one object per line, so they can be read
-  directly.
+  directly. wandb mirrors them for live curves (SPEC §8); the JSONL is the record.
 - EmbeddingGemma 2 runs in bf16 or fp32, never fp16.
 - Reports say what was verified, what was assumed, and what is still open.
 
@@ -69,6 +69,10 @@ From the repo root, `uv sync`. torch 2.15 comes from the PyTorch cu132 index.
 usuitrack is an editable path dependency from `../usuitrack-zero-init`, the worktree
 of usuitrack branch `zero-init` (archive, 2026-11-01), so it runs whatever is checked
 out there.
+
+A run streams to wandb (project `wandb_project` in its config) with the entity and key
+from `$WANDB_ENTITY` and `$WANDB_API_KEY`; `WANDB_MODE=offline` runs without the network.
+A run whose `wandb.init` fails leaves its run directory behind: delete it before rerunning.
 
 Datasets, latents, embeddings and runs live under `/mnt/mars/ai/tiny-dit/`, not in
 the repo: `/home` has too little space for ~160 GB of latents.

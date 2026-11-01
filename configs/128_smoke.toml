@@ -20,3 +20,4 @@ eval_prompts = "eval_prompts.txt"
 eval_seeds = [0, 1]
 guidance = 4.0
 sampler_steps = 30
+wandb_project = "tiny-dit"

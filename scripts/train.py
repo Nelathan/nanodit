@@ -9,10 +9,11 @@ import shutil
 import sys
 import time
 import tomllib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
+import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
@@ -49,6 +50,7 @@ class Config:
     eval_seeds: list[int]
     guidance: float
     sampler_steps: int
+    wandb_project: str
 
 
 def embed_prompts(prompts: list[str]) -> torch.Tensor:
@@ -81,12 +83,21 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
     path.parent.mkdir(exist_ok=True)
     Image.fromarray(grid.reshape(n_prompts * cfg.resolution, n_seeds * cfg.resolution, 3)).save(path)
     append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seeds=cfg.eval_seeds))
+    wandb.log({"eval": wandb.Image(str(path), caption="prompts down, seeds across")}, step=step)
 
 
 def append_jsonl(path: Path, record: dict) -> None:
     with open(path, "a") as f:
         f.write(json.dumps(record) + "\n")
         f.flush()
+
+
+def wandb_scalars(record: dict) -> dict:
+    """A train.jsonl record, flat: one series per t bucket, named by its lower edge, and Usui's reads under
+    `usuitrack/`, as ai-toolkit names them."""
+    scalars = {key: value for key, value in record.items() if key not in ("step", "loss_by_t", "usui")}
+    scalars |= {f"loss_by_t/{i / T_BUCKETS:.1f}": v for i, v in enumerate(record["loss_by_t"]) if v is not None}
+    return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
 
 
 def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
@@ -132,6 +143,8 @@ def main(config_path: str) -> None:
     run_dir.mkdir(parents=True)
     shutil.copy(config_path, run_dir / "config.toml")
     shutil.copy(prompts_path, run_dir / "eval_prompts.txt")
+    # Entity and key come from $WANDB_ENTITY and $WANDB_API_KEY.
+    wandb.init(project=cfg.wandb_project, name=cfg.name, config=asdict(cfg), dir=run_dir)
 
     accumulate = cfg.batch // cfg.micro_batch
     for step in range(1, cfg.steps + 1):
@@ -150,7 +163,7 @@ def main(config_path: str) -> None:
             optimizer.zero_grad()
             schedule.step()
         buckets = loss_by_t_bucket(per_sample, t, T_BUCKETS).tolist()
-        append_jsonl(run_dir / "train.jsonl", dict(
+        record = dict(
             step=step,
             loss=loss_value,
             loss_by_t=[None if v != v else v for v in buckets],
@@ -159,11 +172,14 @@ def main(config_path: str) -> None:
             fallback_grad_norm=grad_norm,
             usui=optimizers[0].pop_diagnostics(),
             imgs_per_s=cfg.batch / (time.perf_counter() - start),
-        ))
+        )
+        append_jsonl(run_dir / "train.jsonl", record)
+        wandb.log(wandb_scalars(record), step=step)
         if step % cfg.eval_every == 0 or step == cfg.steps:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
         if step % cfg.checkpoint_every == 0 or step == cfg.steps:
             save_checkpoint(model, optimizers, step, run_dir)
+    wandb.finish()
 
 
 if __name__ == "__main__":

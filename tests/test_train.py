@@ -51,6 +51,7 @@ eval_prompts = "prompts.txt"
 eval_seeds = [0, 1, 2]
 guidance = 2.0
 sampler_steps = 2
+wandb_project = "test"
 """)
     return config
 
@@ -63,12 +64,18 @@ class StubDecoder:
 
 
 def stub_models(monkeypatch, train):
+    monkeypatch.setenv("WANDB_MODE", "disabled")  # tests never reach the network
     monkeypatch.setattr(train, "embed_prompts", lambda prompts: torch.nn.functional.normalize(torch.randn(len(prompts), 768), dim=-1))
     monkeypatch.setattr(train, "load_decoder", lambda device: StubDecoder())
 
 
 def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
+    sent = []
+    # wandb.init rebinds wandb.log to its run's, so the run is stubbed whole
+    monkeypatch.setattr(train.wandb, "init", lambda **kwargs: None)
+    monkeypatch.setattr(train.wandb, "log", lambda data, step: sent.append((step, data)))
+    monkeypatch.setattr(train.wandb, "finish", lambda: None)
     train.main(str(write_config(tmp_path, steps=3, eval_every=2, checkpoint_every=1)))
     run = tmp_path / "runs" / "smoke"
 
@@ -80,6 +87,14 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert "tangent_live_fraction" in log[2]["usui"]
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\n"
     assert [r["lr_usui"] for r in log] == [1.5e-3, 3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [5e-4, 1e-3, 1e-3]  # warmup 2
+
+    curves = [(step, data) for step, data in sent if "eval" not in data]
+    assert [step for step, _ in curves] == [1, 2, 3] and [data["loss"] for _, data in curves] == [r["loss"] for r in log]
+    for (_, data), r in zip(curves, log):  # the same values as train.jsonl, empty t buckets left out
+        expected = {key: r[key] for key in ("loss", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
+        expected |= {f"loss_by_t/{b / 10:.1f}": v for b, v in enumerate(r["loss_by_t"]) if v is not None}
+        assert data == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
+    assert [step for step, data in sent if "eval" in data] == [2, 3]
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
