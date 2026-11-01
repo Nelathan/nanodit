@@ -200,5 +200,5 @@ The same config at beta 0.99. wandb run `facr413t`, 850 img/s with nothing else 
 
 ### GPU precompute
 
-- `scripts/precompute.py 128` on the RTX 4070 Super, both encoders fp32, TF32 convolutions on (the cuDNN default), shard 4: about 137 rows/s, the GPU at 99%, about 6 min per 50k-row shard plus its download.
-- 32 latents of shard 0 decoded by Primal and encoded again: GPU with TF32 against CPU fp32 differ by 0.25% relative per latent (max 0.73%), against 0.17% for rounding the CPU latent to bf16; GPU with TF32 off matches CPU to 2e-6. The precompute now turns TF32 off; shard 4 is encoded again.
+- `scripts/precompute.py 128` on the RTX 4070 Super, both encoders fp32, TF32 convolutions on (the cuDNN default), shard 4: about 137 rows/s, the GPU at 99%, about 6 min per 50k-row shard plus its download (4 min 45 s for shard 4's 11.1 GB, about 39 MB/s). With the next download overlapping: 141 rows/s over shard 4's first 5k rows (2026-11-01).
+- 32 latents of shard 0 decoded by Primal and encoded again: GPU with TF32 against CPU fp32 differ by 0.25% relative per latent (max 0.73%), against 0.17% for rounding the CPU latent to bf16; GPU with TF32 off matches CPU to 2e-6, at about 75 rows/s over shard 4's first 15k rows (2026-11-01).
