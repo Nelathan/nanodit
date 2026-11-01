@@ -5,8 +5,8 @@ says what the design is; `FACTS.md` holds measured numbers; `archive/` holds
 everything closed. See `AGENTS.md` for how this file is worked.
 
 Questions are grouped so a session can take **one group** and leave the rest
-alone. Inside a group the items share runs or code. Only 300-step smoke runs have trained; each
-"how to settle" is a proposal, not an agreed arm.
+alone. Inside a group the items share runs or code. Each "how to settle" is a proposal, not an
+agreed arm.
 
 ---
 
@@ -60,13 +60,16 @@ images, or test whether training on flipped latents hurts. Evidence: FACTS only.
 
 ### C1. Batch size and step budget per stage
 
-Rides on Usui and the LR sweep. A batch-64 ablation at a constant number of images
-(4× the steps, warmup and intervals; archive 2026-11-01, eval grid, beta 0.99) asks whether 256 is needed; a
-smaller batch may want a lower lr, and a lower rank fraction if `tangent_live_fraction`
-falls (0.994 at batch 256, rank fraction 0.1). Open whether tokens are the right noise unit for
+Rides on Usui and the LR sweep. Is batch 256 needed? A smaller batch may want a lower lr,
+and a lower rank fraction if `tangent_live_fraction` falls (0.993–0.996 at batch 256,
+rank fraction 0.1). Open whether tokens are the right noise unit for
 diffusion (t sampling adds its own gradient noise). Evidence: at 128 px, batch 256
 gives 64 × 256 ≈ 16k tokens per step, matching the LFM setup on tokens. Throughput
-at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. Settle: the sweep in C2.
+at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. The 1000-step
+ablation at a constant number of images (FACTS, 1000-step ablations; one seed): batch 64,
+at the same lr, is 0.127 lower per image and about a tie per training time against a
+batch-256 run of the earlier model, at 353 img/s against about 850; `tangent_live_fraction`
+does not fall. Settle: the sweep in C2.
 
 ### C2. Which LR from scratch, and how long a warmup?
 
@@ -80,11 +83,23 @@ train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep ax
 faster than the Usui matrices, and the null embedding turns away from its init in the
 first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
 think. unless you say it evolves fine. probably also its beta." No AdamW reference run. The
-harness has no decay; Usui's README recommends one.
+harness has no decay; Usui's README recommends one. The 1000-step ablation (FACTS,
+1000-step ablations; one seed): fallback lr 3e-4 is worse than 1e-3 by 0.014 overall and
+in every t bin (0.005 to 0.044), near the 0.011 yardstick there; betas (0.9, 0.999)
+cannot be told from (0.9, 0.99).
 
 ### C3. Timestep shift values per stage
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
+
+### C4. The final linear: Usui's frame or the fallback?
+
+SPEC §6 gives the final linear Usui's largest frame, r = 64 (archive 2026-11-01, final
+frame and smoke settings: at 9000 steps r = 64 ended about 0.010 below r = 13, the low-t
+gap closing). In the 1000-step ablation (FACTS, 1000-step ablations) the final linear on
+the fallback is 0.076 lower over steps 501–1000 (one seed), mostly in t bins 1–3, tapering
+to none by bin 8 (bin 1: 1.19 against 1.54). Unknown whether the lead holds or closes over a full run. Settle: the two arms
+over one pass or more of the data. Daniel decides.
 
 ---
 
