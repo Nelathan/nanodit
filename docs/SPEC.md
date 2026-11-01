@@ -47,8 +47,8 @@ Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectio
 | Position | 2D axial RoPE on **half** of each head's dims (32 of 64: 16 for rows, 16 for columns). The other half is position-free, for content matching |
 | Local mixing | 3×3 depthwise conv over the token grid, applied to the normed block input before QKV, as a zero-initialized residual (starts as identity). Carries local relative position; RoPE carries global layout |
 | MLP | SwiGLU, hidden 1024 |
-| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to shift/scale/gate, plus a small learned per-block table |
-| Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(√768 · e_text)` |
+| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's shift/scale/gate and the final layer's shift/scale, plus a small learned table per block and one for the final layer |
+| Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |
 | Final layer | adaLN-modulated norm → Linear 512 → 128, unpatchify |
 | Size | ≈37M parameters at 12 layers (FACTS) |
 
@@ -70,13 +70,13 @@ Default: fan-in normal, `std = 1/√fan_in`.
 |---|---|---|
 | Patch embed 128→512 | fan-in normal (inputs are already unit-normal) | Usui |
 | Timestep MLP | fan-in normal | Usui |
-| Text projection 768→512 | fan-in normal on input scaled by √768 (unit RMS over entries) | Usui |
+| Text projection 768→512 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
 | Q, K, V | fan-in normal | Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |
-| adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
+| adaLN shift / scale rows, blocks and final layer | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
 | Depthwise conv | zero | fallback |
 | Final linear 512→128 | zero | Usui, the largest frame (§6) |

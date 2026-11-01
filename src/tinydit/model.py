@@ -20,6 +20,7 @@ ROPE_BASE = 10000.0
 ADALN_STD = 0.02  # "small random" shift/scale rows
 N_MOD = 6  # shift, scale, gate for attention, then for the MLP
 GATE_ROWS = (2, 5)
+N_FINAL = 2  # shift, scale for the final norm, after the blocks' rows in the shared projection
 
 
 def patchify(x: Tensor) -> tuple[Tensor, int, int]:
@@ -93,9 +94,9 @@ class DiT(nn.Module):
         self.patch_embed = nn.Linear(TOKEN_DIM, DIM)
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, DIM), nn.SiLU(), nn.Linear(DIM, DIM))
         self.text_proj = nn.Linear(TEXT_DIM, DIM)
-        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(DIM, N_MOD * DIM))
+        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(DIM, (N_MOD + N_FINAL) * DIM))
         self.blocks = nn.ModuleList(Block() for _ in range(depth))
-        self.final_table = nn.Parameter(torch.zeros(2, DIM))
+        self.final_table = nn.Parameter(torch.zeros(N_FINAL, DIM))
         self.final_norm = nn.RMSNorm(DIM)
         self.final = nn.Linear(DIM, TOKEN_DIM)
         self.init_weights()
@@ -110,8 +111,8 @@ class DiT(nn.Module):
             elif isinstance(m, nn.Conv2d):
                 m.weight.zero_()
         mod = self.ada[1]
-        mod.weight.view(N_MOD, DIM, DIM)[:] = ADALN_STD * torch.randn(N_MOD, DIM, DIM)
-        mod.weight.view(N_MOD, DIM, DIM)[list(GATE_ROWS)] = 0
+        mod.weight.view(N_MOD + N_FINAL, DIM, DIM)[:] = ADALN_STD * torch.randn(N_MOD + N_FINAL, DIM, DIM)
+        mod.weight.view(N_MOD + N_FINAL, DIM, DIM)[list(GATE_ROWS)] = 0
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
@@ -125,14 +126,14 @@ class DiT(nn.Module):
         fp32 up to the sinusoid, whose phases need the precision."""
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
-        c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj((math.sqrt(TEXT_DIM) * text).to(dtype))
-        mod = self.ada(c).view(-1, N_MOD, DIM)
+        c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj(F.rms_norm(text, (TEXT_DIM,)).to(dtype))
+        mod = self.ada(c).view(-1, N_MOD + N_FINAL, DIM)
         rope = rope_angles(h, w, x.device)
 
         tokens = self.patch_embed(tokens)
         for block in self.blocks:
-            tokens = block(tokens, mod, rope, h, w)
+            tokens = block(tokens, mod[:, :N_MOD], rope, h, w)
 
-        shift, scale = (self.final_table + c[:, None]).unbind(1)
+        shift, scale = (mod[:, N_MOD:] + self.final_table).unbind(1)
         tokens = self.final_norm(tokens) * (1 + scale[:, None]) + shift[:, None]
         return unpatchify(self.final(tokens), h, w).float()

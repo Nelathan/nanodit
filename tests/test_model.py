@@ -66,11 +66,45 @@ def test_conv_acts_on_the_token_grid_of_a_non_square_image(model, row, col):
 
 
 def test_gate_rows_start_at_zero_and_shift_scale_rows_do_not(model):
-    weight = model.ada[1].weight.view(6, 512, 512)
+    weight = model.ada[1].weight.view(8, 512, 512)
     table = model.blocks[0].table
     for rows in (weight, table):
         assert (rows[[2, 5]] == 0).all()
         assert (rows[[0, 1, 3, 4]] != 0).any(dim=-1).all()
+    assert (weight[[6, 7]] != 0).any(dim=-1).all() and (model.final_table != 0).any(dim=-1).all()  # the final shift, scale
+
+
+def test_the_final_modulation_starts_near_identity(model, text):
+    """The final norm's shift/scale come through the shared projection like the blocks', so its
+    gain `1 + scale` starts near 1, not spread by raw `c` (std 1.07, |scale| up to 4; FACTS, adaLN at init)."""
+    seen = {}
+    model.final_norm.register_forward_hook(lambda module, args, out: seen.update(normed=out))
+    model.final.register_forward_pre_hook(lambda module, args: seen.update(modulated=args[0]))
+    model(torch.randn(3, 2, 64, 64), torch.rand(3), text)
+    n = seen["normed"] - seen["normed"].mean(1, keepdim=True)
+    y = seen["modulated"] - seen["modulated"].mean(1, keepdim=True)
+    scale = (n * y).sum(1) / n.square().sum(1) - 1  # per sample and channel, the slope over tokens
+    assert scale.std() < 0.5 and scale.abs().max() < 2
+
+
+def test_the_last_two_rows_of_the_shared_projection_modulate_the_final_norm_only(model, text):
+    seen = {}
+    model.blocks[0].register_forward_pre_hook(lambda module, args: seen.update(block=args[1].clone()))
+    model.final.register_forward_pre_hook(lambda module, args: seen.update(final=args[0].clone()))
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    model(x, t, text)
+    before = dict(seen)
+    with torch.no_grad():
+        model.ada[1].weight.view(8, 512, 512)[6:] += 0.1
+    model(x, t, text)
+    assert torch.equal(seen["block"], before["block"]) and not torch.allclose(seen["final"], before["final"])
+
+
+def test_the_text_enters_at_unit_rms_whatever_its_scale(model, text):
+    torch.nn.init.normal_(model.final.weight, std=0.05)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, text)
+    assert (model(x, t, 3 * text) - base).norm() < 1e-4 * base.norm()  # equal up to fp32 rounding in the norm
 
 
 def test_text_and_timestep_condition_the_network_once_trained(model, text):
@@ -122,7 +156,7 @@ def test_gradient_reaches_every_zero_init_role(model, text):
     assert model.final.weight.abs().max() > 0
     assert block.conv.weight.abs().max() > 0
     assert block.table[[2, 5]].abs().max() > 0
-    assert model.ada[1].weight.view(6, 512, 512)[[2, 5]].abs().max() > 0
+    assert model.ada[1].weight.view(8, 512, 512)[[2, 5]].abs().max() > 0
 
 
 class TestRope:

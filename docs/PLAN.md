@@ -32,9 +32,10 @@ std. Evidence: FACTS "Primal 2x2" (statistics, flips, stability under small chan
 
 ### B2. What is EmbeddingGemma 2's output norm?
 
-SPEC §1 stores the embedding L2-normalized as the model returns it; §5 scales it
-by √768 for the text projection and initializes the null embedding from the
-encoder's empty caption. Unsure the model returns unit norm. Settle: a script that embeds a
+SPEC §1 stores the embedding L2-normalized as the model returns it; §3 feeds it
+to the text projection through `rms_norm`, which is ×√768 for a unit-norm
+embedding, and §5 initializes the null embedding from the encoder's empty caption.
+Unsure the model returns unit norm. Settle: a script that embeds a
 sample of captions in bf16 and fp32 and reports the norm distribution. Evidence:
 FACTS "EmbeddingGemma 2": unit norm comes from the Normalize module; per dim, the
 √768-scaled embedding is far from unit variance. Daniel to close.
@@ -120,16 +121,10 @@ would use them.
 
 ### F2. adaLN shift/scale init scale
 
-SPEC says "small random". Std 0.02 on the shared 512→3072 projection makes the
-blocks' shift/scale far from zero at init (FACTS, init), so `1 + scale` starts far
-from 1. A fan-in-scaled or 10× smaller init would start near identity.
-
-### F3. Final-layer modulation input
-
-The final layer adds raw `c` to its table (PixArt); the blocks use `SiLU(c)` through
-the shared projection. Raw `c` is of order 1 per element, for real and random texts
-alike (FACTS, init), so the final `1 + scale` starts far from 1, of either sign. The
-final linear is zero, so `F = 0` still holds; the scale sets how fast it leaves zero.
+SPEC says "small random". Std 0.02 on the shared 512→4096 projection makes the
+blocks' and the final layer's shift/scale far from zero at init (FACTS, init), so
+`1 + scale` starts far from 1. A fan-in-scaled or 10× smaller init would start near
+identity.
 
 ---
 
