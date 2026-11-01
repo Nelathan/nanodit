@@ -4,7 +4,7 @@ Written 2026-10-31, night; updated 2026-11-01. Orientation only; `PLAN.md` carri
 
 ## Where it stands
 
-Built and tested (`uv run python -m pytest tests/`, 46 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui + StochasticAdamW split with Molegrad and gradient accumulation, `scripts/train.py` training a pure bf16 model, the precompute and the probes. Three 300-step smoke runs at 128 px are in FACTS (GPU smoke runs): fp32 at two seeds, bf16 at one.
+Built and tested (`uv run python -m pytest tests/`, 47 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui (fixed step, every matrix) + StochasticAdamW split with Molegrad and gradient accumulation, linear LR warmup, `scripts/train.py` training a pure bf16 model, the precompute and the probes. Five 300-step smoke runs at 128 px are in FACTS (GPU smoke runs), all under the earlier relative step and constant LR: fp32 at two seeds, bf16, and two A1 builds.
 
 Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt/mars/ai/tiny-dit/precomputed/precompute_128.log`): `/mnt/mars/ai/tiny-dit/precomputed/128/data_00000{0..3}.parquet`, the tars deleted. Two image sources, half each (FACTS, Sample and shard), row counts and sizes there too. Shard 0's parquet is checked against its tar (FACTS). The null embedding is at `precomputed/null_embedding.safetensors`.
 
@@ -12,12 +12,13 @@ Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt
 
 - **F1, F2.** Model choices SPEC leaves open (PLAN group F). F3 is the session's to settle (Next).
 - **B1, B2, A2.** Evidence is in; each needs a close or a follow-up.
-- **Not chosen yet:** C3 shift base, D3 eval prompts (16 drafts in `configs/eval_prompts.txt`), D4 sampler grid, an LR schedule (C2), `fallback_lr` as a sweep axis.
+- **Not chosen yet:** C3 shift base, D3 eval prompts (16 drafts in `configs/eval_prompts.txt`), D4 sampler grid, LR decay and the warmup length (C2), `fallback_lr` as a sweep axis.
 
 ## Next
 
-1. A1, decided by Daniel 2026-11-01, being built: the final linear on Usui with a norm floor, and no frame fit from a zero gradient, both on usuitrack branch `zero-init`; then F3 and the text RMS norm.
-2. The LR sweep (C2). A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
+1. Smoke runs of the fixed step at lr 2e-2 with 20, 50 and 100 warmup steps (PLAN C2).
+2. F3 (the final layer's shift/scale from the shared adaLN projection) and the text RMS norm.
+3. The LR sweep (C2). A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 
 ## Traps
 

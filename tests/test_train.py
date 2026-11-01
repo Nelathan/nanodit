@@ -43,6 +43,7 @@ seed = 0
 usui_lr = 3e-3
 beta = 0.95
 fallback_lr = 1e-3
+warmup = 2
 shift = 1.0
 checkpoint_every = {checkpoint_every}
 eval_every = {eval_every}
@@ -74,11 +75,11 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
     assert [r["step"] for r in log] == [1, 2, 3]
     assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
-    # step 1 sees exactly zero matrix gradients (the final linear starts at zero), so capture is 0 there
-    assert all(0 <= r["usui"]["grad_capture"] <= 1 for r in log) and log[2]["usui"]["grad_capture"] > 0
+    # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (FACTS, GPU smoke runs)
+    assert all(0.5 < r["usui"]["grad_capture"] < 1.5 for r in log)
     assert "tangent_live_fraction" in log[2]["usui"]
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\n"
-    assert log[0]["lr_usui"] == 3e-3 and log[0]["lr_fallback"] == 1e-3
+    assert [r["lr_usui"] for r in log] == [1.5e-3, 3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [5e-4, 1e-3, 1e-3]  # warmup 2
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
@@ -180,7 +181,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         size = 8 // micro_batches
         chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
         loss, per_sample, t = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0)
-        results.append((loss, per_sample, t, [model.final.weight.grad, model.final.bias.grad, model.final_table.grad]))
+        results.append((loss, per_sample, t, [model.final.bias.grad, model.final_table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
     # bf16 batches the same samples differently, so equal only up to rounding; a lost or doubled

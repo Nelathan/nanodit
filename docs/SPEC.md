@@ -65,28 +65,29 @@ Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), D
 
 Default: fan-in normal, `std = 1/√fan_in`.
 
-| Role | Init | Usui target-norm override |
+| Role | Init | Optimizer (§6) |
 |---|---|---|
-| Patch embed 128→512 | fan-in normal (inputs are already unit-normal) | no |
-| Timestep MLP | fan-in normal | no |
-| Text projection 768→512 | fan-in normal on input scaled by √768 (unit RMS over entries) | no |
-| Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | no |
-| Q, K, V | fan-in normal | no |
-| Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | no |
-| Attention out-proj | fan-in normal | no |
-| SwiGLU up / gate / down | fan-in normal | no |
-| adaLN shift / scale rows | small random | no |
-| adaLN **gate** rows (shared projection and per-block table) | zero | **yes** |
-| Depthwise conv | zero | **yes** |
-| Final linear 512→128 | zero | **yes** |
-| QK-RMSNorm gains, final norm gain | ones | n/a |
+| Patch embed 128→512 | fan-in normal (inputs are already unit-normal) | Usui |
+| Timestep MLP | fan-in normal | Usui |
+| Text projection 768→512 | fan-in normal on input scaled by √768 (unit RMS over entries) | Usui |
+| Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
+| Q, K, V | fan-in normal | Usui |
+| Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
+| Attention out-proj | fan-in normal | Usui |
+| SwiGLU up / gate / down | fan-in normal | Usui |
+| adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
+| adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
+| Depthwise conv | zero | fallback |
+| Final linear 512→128 | zero | Usui |
+| QK-RMSNorm gains, final norm gain, biases | ones / zero | fallback |
 
-Override target for a zero-initialized role: the norm a fan-in init of the same shape would have.
 Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0 (plain velocity would give `v̂ = 0`).
 
 ## 6. Optimizer: UsuiTrack
 
-- Trust-region LR relative to weight norm; per-role target-norm override for zero-init roles (§5).
+- Usui's fixed step on every matrix: sized by `lr` and the matrix's shape, not relative to its norm, since a model trained from scratch has zero-initialized matrices with no norm to be relative to.
+- Linear LR warmup on both optimizers.
+- Everything that is not a 2-D Linear weight, and the adaLN tables, trains on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
 

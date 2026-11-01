@@ -1,4 +1,4 @@
-"""Optimizers. PROVISIONAL: this split is option (a) of PLAN A1, pending Daniel's decision."""
+"""Optimizers: UsuiTrack for the 2-D Linear weights, StochasticAdamW for the rest (SPEC §5, §6)."""
 
 from torch import nn
 from usuitrack import Molegrad, StochasticAdamW, UsuiTrack
@@ -6,22 +6,25 @@ from usuitrack import Molegrad, StochasticAdamW, UsuiTrack
 # Weights on the residual stream's output side track their output (left) side; the rest read it or
 # have no stream side, and follow Usui's shape rule. Same convention as ai-toolkit's usuitrack.py.
 LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")
-# UsuiTrack never moves a zero-norm matrix (usuitrack SPEC "Limit"), and tables are not shared linear maps.
-USUI_EXCLUDED = ("final.weight", "table")
+# Tables are not shared linear maps.
+USUI_EXCLUDED = ("table",)
 
 
 def build_optimizers(model: nn.Module, usui_lr: float, beta: float, fallback_lr: float) -> tuple[UsuiTrack, StochasticAdamW]:
     """UsuiTrack for the 2-D Linear weights, StochasticAdamW (AdamW whose bf16 updates round stochastically)
-    for everything else (1-D, biases, conv, tables, null embedding, final linear); betas (0.9, 0.99), no
-    weight decay, as in usuitrack SPEC "Fallback path".
+    for everything else (1-D, biases, conv, tables, null embedding); betas (0.9, 0.99), no weight decay,
+    as in usuitrack SPEC "Fallback path".
     Molegrad is attached to the model (which must already be on its device), so the tracked matrices
-    never get a `.grad`; it hooks the optimizer, which stays the only handle."""
+    never get a `.grad`; it hooks the optimizer, which stays the only handle.
+    Every matrix takes Usui's fixed step: trained from scratch, the zero-initialized final linear has no
+    norm to step relative to, and one lr unit holds for all (SPEC §6)."""
     sided, fallback = {"left": [], "auto": []}, []
     for name, param in model.named_parameters():
         if param.ndim == 2 and not any(key in name for key in USUI_EXCLUDED):
             sided["left" if name.endswith(LEFT_SIDE) else "auto"].append(param)
         else:
             fallback.append(param)
-    matrix = UsuiTrack([{"params": params, "side": side} for side, params in sided.items()], lr=usui_lr, beta=beta, diagnostics=True)
+    groups = [{"params": params, "side": side, "step_rule": "fixed"} for side, params in sided.items()]
+    matrix = UsuiTrack(groups, lr=usui_lr, beta=beta, diagnostics=True)
     Molegrad(model, matrix)
     return matrix, StochasticAdamW(fallback, lr=fallback_lr, betas=(0.9, 0.99), weight_decay=0.0)

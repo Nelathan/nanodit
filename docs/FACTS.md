@@ -67,7 +67,7 @@ Source: the two probe scripts, 2026-10-31, 16-core CPU with other processes runn
 
 - Parameters at depth 12: 37,194,624. Blocks 34.70M (qkv 9.44M, SwiGLU 18.87M, sigmoid gate 3.15M, out-proj 3.15M, conv 55k, tables 37k); shared adaLN projection 1.58M; time MLP 394k; text projection 394k; patch embed 66k; final linear 66k. 2-D 37.13M, 1-D 8,064, 4-D (conv) 55,296.
 - Usui on `lab`, 5 steps at lr 1e-2: a zero-init 128×512 matrix stays at norm 0.0; a (512,1,3,3) conv weight and a (64,) vector are rejected; a shared-projection-like matrix with zero gate rows and std-0.02 shift/scale rows grows its gate rows 0 → 0.074 (matrix norm 2.56); a [6, 512] table is accepted (frame [6, 3]). In the zero-init case the fan-in matrix feeding the zero one does not move either: its gradient is zero while the other is.
-- Molegrad and accumulation, wiring check only (synthetic latents, depth 2, CPU, batch 32, usui lr 3e-3, fallback lr 1e-3, 60 steps, identical batches per arm; scratch script, not in the repo, so not reproducible from it): Molegrad 1×32 and 4×8 agree to 4 digits at every step (loss 2.5807 → 2.0579). Step 1: every tracked gradient exactly zero, nothing tracked moves. By step 10 `tangent_live_fraction` 0.91, `relative_step` ≈ 98% of lr. After 60 steps `blocks.0.qkv` shares 0.38 of its step-1 frame (G path without Molegrad: 0.50, loss 2.0544).
+- Molegrad and accumulation, wiring check only (synthetic latents, depth 2, CPU, batch 32, usui lr 3e-3, fallback lr 1e-3, 60 steps, identical batches per arm; scratch script, not in the repo, so not reproducible from it): Molegrad 1×32 and 4×8 agree to 4 digits at every step (loss 2.5807 → 2.0579). Step 1 (final linear on the fallback): every tracked gradient exactly zero, nothing tracked moves. By step 10 `tangent_live_fraction` 0.91, `relative_step` ≈ 98% of lr. After 60 steps `blocks.0.qkv` shares 0.38 of its step-1 frame (G path without Molegrad: 0.50, loss 2.0544).
 
 ## adaLN at init (2026-10-31, `scripts/probe_init.py`)
 
@@ -75,18 +75,25 @@ Depth 12, seed 0, 16 timesteps spread over (0, 1), text = the null embedding or 
 
 ## GPU smoke runs at 128 px (2026-11-01)
 
-RTX 4070 Super, `configs/128_smoke.toml` (300 steps, batch 256 as 4 × 64, usui lr 3e-3, beta 0.95, fallback lr 1e-3, shift 1.0, shards 0–3), Usui `lab` at `be3f298`, option (a) split. The fp32 runs are tiny-dit `61448e4`; the bf16 run is the commit that adds this section. Runs and JSONL logs in `/mnt/mars/ai/tiny-dit/runs/<name>/`; the summary script is not in the repo. Mean loss per step window, median img/s from step 11:
+RTX 4070 Super, `configs/128_smoke.toml` as it was then (300 steps, batch 256 as 4 × 64, usui lr 3e-3, beta 0.95, fallback lr 1e-3, shift 1.0, shards 0–3), Usui `lab` at `be3f298`, option (a) split. The fp32 runs are tiny-dit `61448e4`; the bf16 run is the commit that adds this section. Runs and JSONL logs in `/mnt/mars/ai/tiny-dit/runs/<name>/`; the summary script is not in the repo. Mean loss per step window, median img/s from step 11:
 
 | run | precision | seed | 1–50 | 51–100 | 101–200 | 201–300 | img/s |
 |---|---|---|---|---|---|---|---|
 | `128_smoke` | fp32 + TF32 | 0 | 2.0918 | 1.7427 | 1.5986 | 1.5422 | 756 |
 | `128_smoke_fp32_seed1` | fp32 + TF32 | 1 | 2.0888 | 1.7419 | 1.6002 | 1.5429 | 745 |
 | `128_smoke_bf16` | bf16 model, stochastic rounding | 0 | 2.0981 | 1.7439 | 1.5949 | 1.5389 | 862 |
+| `128_smoke_zero_init` | bf16; final linear on Usui with a norm floor √128, zero-gradient rule | 0 | 2.4039 | 2.1247 | 1.9701 | 1.8528 | 843 |
+| `128_smoke_nofit_final_adam` | bf16; zero-gradient rule, final linear on the fallback | 0 | 2.0715 | 1.7203 | 1.5857 | 1.5340 | 849 |
+
+The last two ran on usuitrack `zero-init` at `a32658b` from uncommitted tiny-dit code (the floor build of A1; the second with a scratch launcher putting the final linear back on the fallback); neither split is in the tree now.
 
 - Run-to-run spread (the two fp32 seeds): at most 0.003 per window, 0.0007 over steps 201–300.
 - bf16 against fp32 at seed 0: +0.006 over steps 1–50, −0.0033 over 201–300. Over the last 100 steps, per t-bucket, bf16 is within 0.012 of fp32 in every bucket but the lowest (t < 0.1: 1.283 against 1.307 and 1.313). One bf16 seed; a 100-step window mean has a standard error near 0.002, so the late difference is not resolved.
 - Loss by t bucket, steps 201–300 (fp32 seed 0): 1.31 at t < 0.1, peaking at 1.65 around t = 0.5, 1.16 at t > 0.9.
 - Usui frame after the step-1 zero gradient, `grad_capture` (mean over matrices, then over steps; fp32 seed 0, seed 1, bf16): 0 at step 1, 0.017 at step 2, 0.33 / 0.32 / 0.33 over steps 3–11, 0.58 / 0.57 / 0.59 over 21–30, 0.80 / 0.78 / 0.80 over 51–60, 0.96 / 0.96 / 0.95 over 101–300. Under Molegrad the raw gradient norm is a probed estimate, so single steps exceed 1 (37–51 of 300 per run, max 1.16).
 - `grad_moment_cosine` (same windows): +0.44 to +0.51 over steps 3–11, −0.07 to −0.10 over 91–100, −0.23 to −0.26 over 101–150, −0.36 to −0.39 over 151–300, in all three runs. Usui reads negative as overshoot, to be read against lr; only 3e-3 has run.
+- Final linear Frobenius norm at steps 100 / 200 / 300: 3.88 / 3.80 / 3.65 on the fallback (`128_smoke_bf16`), 3.56 / 3.54 / 3.50 (`128_smoke_nofit_final_adam`), 1.85 / 2.09 / 1.74 under the floor (`128_smoke_zero_init`), which it never reached.
+- With the zero-gradient rule, `grad_capture` over steps 3–11 is 0.92 (final linear on the fallback) and 1.02 (on Usui), against 0.33 without; over steps 21–60 the first dips to 0.79–0.82, and from step 101 it reads 0.94–0.97 in all runs.
+- Loss by t bucket under the floor, steps 201–300: 2.70 at t < 0.1 against 1.28 for `128_smoke_bf16`, the gap shrinking to 0.01 above t = 0.8.
 - The eval grid at step 300 follows each prompt's colour and mood, no shapes yet; faint vertical streaks.
 - Step time with random data, model only (scratch script, 40 steps): fp32 + TF32 792 img/s, 2.58 GiB peak; bf16 autocast (Molegrad fix uncommitted in the usuitrack worktree `molegrad-autocast`, not used) 879 img/s, 2.17 GiB.

@@ -38,9 +38,10 @@ class Config:
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int
     seed: int
-    usui_lr: float
+    usui_lr: float  # Usui's fixed step (SPEC §6)
     beta: float
     fallback_lr: float
+    warmup: int  # steps of linear lr warmup from lr / warmup, both optimizers
     shift: float  # timestep shift, PLAN C3
     checkpoint_every: int
     eval_every: int
@@ -124,6 +125,7 @@ def main(config_path: str) -> None:
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.fallback_lr)
+    schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
 
@@ -142,16 +144,18 @@ def main(config_path: str) -> None:
         # UsuiTrack zeroes non-finite gradients but the AdamW fallback does not: stop before either steps.
         if not (math.isfinite(loss_value) and math.isfinite(grad_norm)):
             raise RuntimeError(f"non-finite loss {loss_value} or fallback gradient norm {grad_norm} at step {step}")
-        for optimizer in optimizers:
+        lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
+        for optimizer, schedule in zip(optimizers, schedules):
             optimizer.step()
             optimizer.zero_grad()
+            schedule.step()
         buckets = loss_by_t_bucket(per_sample, t, T_BUCKETS).tolist()
         append_jsonl(run_dir / "train.jsonl", dict(
             step=step,
             loss=loss_value,
             loss_by_t=[None if v != v else v for v in buckets],
-            lr_usui=optimizers[0].param_groups[0]["lr"],
-            lr_fallback=optimizers[1].param_groups[0]["lr"],
+            lr_usui=lr_usui,
+            lr_fallback=lr_fallback,
             fallback_grad_norm=grad_norm,
             usui=optimizers[0].pop_diagnostics(),
             imgs_per_s=cfg.batch / (time.perf_counter() - start),

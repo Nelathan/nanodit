@@ -1216,7 +1216,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = ">=0.29.2" },
     { name = "torchvision", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=0.29.2", index = "https://download.pytorch.org/whl/cu132" },
     { name = "transformers", specifier = ">=5.22.1" },
-    { name = "usuitrack", editable = "../usuitrack" },
+    { name = "usuitrack", editable = "../usuitrack-zero-init" },
     { name = "webdataset", specifier = ">=1.0.2" },
 ]
 
@@ -1442,7 +1442,7 @@ wheels = [
 [[package]]
 name = "usuitrack"
 version = "0.1.0"
-source = { editable = "../usuitrack" }
+source = { editable = "../usuitrack-zero-init" }
 dependencies = [
     { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.15.0+cu132", source = { registry = "https://download.pytorch.org/whl/cu132" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

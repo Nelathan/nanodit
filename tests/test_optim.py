@@ -15,8 +15,9 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"final.weight", "null_embedding", "final_table", "blocks.0.table", "blocks.0.conv.weight", "final.bias"} <= adam
-    assert {"ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
+    assert {"null_embedding", "final_table", "blocks.0.table", "blocks.0.conv.weight", "final.bias"} <= adam
+    assert {"final.weight", "ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
+    assert {g["step_rule"] for g in matrix.param_groups} == {"fixed"}
 
 
 def test_residual_stream_output_matrices_track_their_left_side():
@@ -28,6 +29,23 @@ def test_residual_stream_output_matrices_track_their_left_side():
         assert side[name] == "left"
     for name in ("blocks.0.qkv.weight", "blocks.0.w_up.weight", "ada.1.weight"):
         assert side[name] == "auto"
+
+
+def test_the_first_step_moves_only_the_zero_init_final_linear_and_fits_only_its_frame():
+    torch.manual_seed(0)
+    model = DiT(torch.randn(768), depth=2).bfloat16()
+    optimizers = build_optimizers(model, 3e-3, 0.95, 1e-3)
+    tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
+    matrices = {n: p.detach().clone() for n, p in model.named_parameters() if id(p) in tracked}
+    train_step(model, optimizers, *batch(0))
+    moved = {n for n, before in matrices.items() if not torch.equal(model.get_parameter(n), before)}
+    # every other tracked matrix sits behind the zero final linear or a zero gate: its gradient is exactly
+    # zero, so it fits no frame yet and waits for a real gradient
+    framed = {n for n, p in model.named_parameters() if "frame" in optimizers[0].state.get(p, {})}
+    assert len(matrices) > 10 and moved == framed == {"final.weight"}
+    rank = optimizers[0].state[model.final.weight]["frame"].shape[-1]
+    # the fixed step of [128, 512] (aspect factor 1), up to bf16 rounding
+    assert abs(model.final.weight.float().norm() / (3e-3 * rank**0.5) - 1) < 0.05
 
 
 def trained_model(steps=2):
@@ -65,7 +83,7 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
     train_step(model, optimizers, *batch(1))
     assert qkv.grad is None and not qkv.requires_grad
     assert not torch.equal(qkv, before)
-    assert model.final.weight.requires_grad  # fallback parameters keep their gradients
+    assert model.blocks[0].conv.weight.requires_grad  # fallback parameters keep their gradients
 
 
 def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
@@ -83,7 +101,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
             x_t = noisy(x[sl], eps[sl], t[sl])
             loss = (model(x_t, t[sl], text[sl]) - target(x[sl], eps[sl], x_t)).square().mean()
             (loss * micro_batch / 8).backward()
-        grads.append(model.final.weight.grad.clone())
+        grads.append(model.final_table.grad.clone())
     # bf16 sums the split batch in a different order, so equal only up to rounding; a lost or doubled
     # micro-batch would be off by tens of percent
     assert grads[0].abs().max() > 0 and (grads[0].float() - grads[1].float()).norm() < 0.03 * grads[0].float().norm()  # measured 0.003

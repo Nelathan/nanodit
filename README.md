@@ -6,7 +6,7 @@ The question it answers: can a small DiT built on this season's promising pieces
 - **Target:** Ostris's *x0 velocity* parameterization of rectified flow
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched by the DiT itself
 - **Conditioning:** **EmbeddingGemma 2**, mean-pooled 768-d text embedding (per-token later, maybe)
-- **Optimizer:** **UsuiTrack** (trust-region LR relative to weight norm)
+- **Optimizer:** **UsuiTrack** (its fixed step, sized by lr and the matrix shape)
 - **Framework:** pure PyTorch, single GPU, no trainer framework
 
 The model, objective, sampler and training harness are built and tested; 300-step smoke runs at 128 px are in `docs/FACTS.md`. `docs/HANDOVER.md` says where things stand.
@@ -35,5 +35,5 @@ configs/              run configs, eval prompts
 
 ## Setup
 
-`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index; usuitrack is an editable path dependency from `../usuitrack`.
+`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index; usuitrack is an editable path dependency (`AGENTS.md`, "Running things").
 Primal VAE loads via `diffusers` `AutoModel` with `trust_remote_code`; EmbeddingGemma 2 via `sentence-transformers` / `transformers`.

@@ -47,7 +47,7 @@ Work one PLAN group at a time: the questions in a group share runs or code.
 - Fail early: verify the risky assumption before building on it, with a small
   script, and report the numbers. The listed ones are in PLAN (groups A and B):
   Primal latent stats, EmbeddingGemma 2 output norm, Usui's handling of 1-D
-  params and target-norm overrides.
+  params.
 - Never discard a working state without isolating the cause of a problem.
 - Pure PyTorch. No HF Trainer, no Accelerate, no ai-toolkit, no wandb.
 - Logs are JSONL in the run directory, one object per line, so they can be read
@@ -66,8 +66,9 @@ intent or impact needs it. Pushing stays with Daniel.
 ## Running things
 
 From the repo root, `uv sync`. torch 2.15 comes from the PyTorch cu132 index.
-usuitrack is an editable path dependency from `../usuitrack`, so it runs whatever
-branch is checked out there (currently `lab`).
+usuitrack is an editable path dependency from `../usuitrack-zero-init`, the worktree
+of usuitrack branch `zero-init` (archive, 2026-11-01), so it runs whatever is checked
+out there.
 
 Datasets, latents, embeddings and runs live under `/mnt/mars/ai/tiny-dit/`, not in
 the repo: `/home` has too little space for ~160 GB of latents.
