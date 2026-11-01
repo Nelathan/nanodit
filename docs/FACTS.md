@@ -7,6 +7,7 @@ Measured numbers only: statistics, throughput, memory, run results. Each entry g
 Probe sample = first 256 images/captions of `data_512_2M/data_000000.tar` (not random), 128 px uses all 256, 256 px the first 128. Source: `scripts/probe_primal.py`, `scripts/probe_embeddinggemma.py`, 2026-10-31.
 
 - Shard 0: 7,475,189,760 bytes, 50,000 samples (50,000 `.jpg` + 50,000 `.json`), images 512×512, caption in `{"prompt": "..."}`, keys `flux_512_100k_<8 digits>`. Other shards are 7.5 to 11.1 GB (repo listing).
+- Shards 0–3, precomputed 2026-11-01 (`precompute.py` log, parquet keys): 0 and 1 are `flux_512_100k_*`, 50,000 pairs each; 2 and 3 are `dalle3_1m_*`, 49,985 and 49,982 pairs, keys numbered 0–49999 with gaps. Shard 2's tar (11.1 GB) was re-downloaded and listed: 49,985 complete jpg+json pairs, all in the parquet, so the gaps are in the source. Shard 3's tar was not re-checked.
 
 ## Primal 2x2 (B1)
 
@@ -58,7 +59,9 @@ Source: `scripts/probe_embeddinggemma.py`, `/mnt/mars/ai/tiny-dit/probes/embeddi
 
 Source: the two probe scripts, 2026-10-31, 16-core CPU with other processes running. EmbeddingGemma 2 text-only via ST, batch 16, 272 texts: fp32 15.2 captions/s, bf16 3.2 captions/s. Primal encode: see the Primal table. Extrapolated to 2M images: Primal encode ≈ 27 h at 128 px, ≈ 108 h at 256 px; embeddings ≈ 36 h in fp32.
 
-`scripts/precompute.py 128`, shard 0, 2026-10-31, 12 threads, machine shared (load ≈ 15): 9.0 rows/s for the first 2k rows, then a steady 8.2 rows/s (Primal encode and ST in series; 1/20.5 + 1/15.2 s per row would give 8.7), ≈ 100 min per 50k shard; peak RSS 9.9 GB (a 1024-row chunk held as fp32 at 512 px).
+`scripts/precompute.py 128`, shards 0–3, 2026-10-31 to 11-01, 12 threads, machine shared: 8.95 / 9.51 / 12.40 / 12.74 rows/s per shard (the log's rate is cumulative), about 93 / 88 / 67 / 65 min, the later ones on a less loaded machine. Shard 0 (load ≈ 15): cumulative rate 8.11 at its low after 4k rows, 8.95 at the end (Primal encode and ST in series; 1/20.5 + 1/15.2 s per row would give 8.7); output 912 MB. Read back against the source tar: 50,000 rows, unique keys in tar order; 9 sampled rows match their caption, re-encode to the stored latent (cosine 1.00000), embedding cosine 0.999999 to a fresh encode, decode PSNR 30.0 to 39.4 dB; peak RSS 9.9 GB (a 1024-row chunk held as fp32 at 512 px).
+
+`tinydit.data.load_shards` over shards 0–3 at 128 px, 2026-11-01, CPU, `uv run python -c` on `sorted(glob('.../precomputed/128/*.parquet'))` under `/usr/bin/time`: 199,967 rows, 3.6 GB of bf16 latents + embeddings, 19 s, peak RSS 11.4 GB (the machine has 31 GB). Latent std 1.06, embedding norm 1.000 (every 97th row).
 
 ## Model and Usui wiring (2026-10-31, `src/tinydit/model.py`, `scripts/probe_usui.py`)
 

@@ -6,7 +6,7 @@ Written 2026-10-31, night. Orientation only; `PLAN.md` carries the questions, `F
 
 Built and tested on CPU (`uv run python -m pytest tests/`, 43 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui + AdamW split with Molegrad and gradient accumulation, `scripts/train.py`, the precompute and the probes. Nothing has trained; the GPU was busy.
 
-Data: the 128 px precompute of shards 0–3 runs in the background on CPU (`scripts/precompute.py 128 0 1 2 3`, log `/mnt/mars/ai/tiny-dit/precomputed/precompute_128.log`, rate in FACTS, done around 06:00 on 2026-11-01). Output: `/mnt/mars/ai/tiny-dit/precomputed/128/data_00000N.parquet`, 50k rows each; each tar is deleted after its parquet is written. Shard 0's tar is also hard-linked as `data/data_512_2M/keep_data_000000.tar`, kept until shard 0's parquet is checked, then removed. The null embedding is at `precomputed/null_embedding.safetensors`.
+Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt/mars/ai/tiny-dit/precomputed/precompute_128.log`): `/mnt/mars/ai/tiny-dit/precomputed/128/data_00000{0..3}.parquet`, the tars deleted. Two image sources, half each (FACTS, Sample and shard), row counts and sizes there too. Shard 0's parquet is checked against its tar (FACTS). The null embedding is at `precomputed/null_embedding.safetensors`.
 
 ## Waiting on Daniel
 
@@ -28,4 +28,5 @@ Data: the 128 px precompute of shards 0–3 runs in the background on CPU (`scri
 
 - Precompute: one bad sample or an OOM restarts the shard from row 0 (the tar survives); a malformed tar entry is dropped or raises; nothing checks for 50k rows. Its peak RSS (FACTS) leaves little room to train alongside it.
 - The 256 px pass re-downloads each shard, because the 128 px pass deletes the tars (7.5 to 11 GB each, FACTS). Encoding both resolutions in one pass would avoid it.
+- `load_shards` peaks at about 3× the data size (FACTS); by the code, the Arrow tables, the per-shard copies and the cat result are alive at once. Fine for shards 0–3 at 128 px; about ten shards at 128 px, or shards 0–3 at 256 px, would not fit in 31 GB. Filling one preallocated tensor shard by shard would bring it near 1×.
 - GPU sharing, the data location and the editable usuitrack are in `AGENTS.md`, "Running things".
