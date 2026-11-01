@@ -71,8 +71,9 @@ Source: the two probe scripts, 2026-10-31, 16-core CPU with other processes runn
 ## First frame fit on the GPU (2026-11-01)
 
 - `test_accumulated_batch_trains_logs_and_checkpoints` (depth 2, micro-batch 2), a probe patched around `usuitrack.frame.fit`: `ada.1.weight` [3072, 512], bf16 gradient of matrix rank 5, its normalized side Gram with top eigenvalue 0.99997 and 510 of 512 below 1e-6, rank 125 asked. `torch.linalg.eigh` in fp32 on CUDA raises "failed to converge"; fp32 on CPU and fp64 on CUDA return.
-- The test fails on the GPU from `a984e20` on and passes before it (bisected by worktree); the whole suite passes on the CPU. Why that commit tips it is not isolated.
-- The fit runs once per matrix, at its first nonzero gradient, on one micro-batch's gradient (`usuitrack/molegrad.py`, `usuitrack/optimizer.py`). The 128 px runs (micro-batch 64) did not fail; at most 64 samples feed `ada`'s gradient there, so its rank is at most 64 of 512. Whether that is safe from the failure is untested.
+- The test failed on the GPU from `a984e20` until usuitrack `e7e5210`, and passed before it (bisected by worktree); the whole suite passes on the CPU. Why that commit tips it is not isolated.
+- The fit runs once per matrix, at its first nonzero gradient, on one micro-batch's gradient (`usuitrack/molegrad.py`, `usuitrack/optimizer.py`). The 128 px runs (micro-batch 64) did not fail; at most 64 samples feed `ada`'s gradient there, so its rank is at most 64 of 512.
+- Since usuitrack `e7e5210` the fit is a random range finder with no `eigh` (archive 2026-11-01, first frame fit); the suite passes on the GPU (50 tests, 2026-11-01). Its capture against the exact fit, on this gradient and on the 78 first fits of the depth-12 model, is in usuitrack `docs/REVIEW_zero-init.md`.
 
 ## adaLN at init (2026-10-31, `scripts/probe_init.py`)
 
