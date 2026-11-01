@@ -19,6 +19,17 @@ matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`);
 go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
 reading, and the harness runs that split (`src/tinydit/optim.py`). Daniel to close.
 
+### A3. Does the zero-initialized final linear get the rank it needs under Usui?
+
+Usui writes each step inside its frame, r = 13 for the final linear `[128, 512]`, so the
+matrix only gains rank as the frame rotates. At 300 steps its stable rank is near the
+frame's rank, and its loss below t ≈ 0.7 lags; a rank-64 frame on the same code closes
+most of the gap to the final linear on the fallback, at either step size. At r = 13 the frame rotated into new directions through step 300; whether
+it keeps doing so or settles is the question (FACTS, Fixed-step runs). Early loss may not decide it. Settle: the 9000-step run
+`128_fixed_2e-2_9k`, read for whether the final linear's rank and the low-t loss catch up,
+then Daniel decides between the default frame, a larger frame for this matrix, or
+another route.
+
 ---
 
 ## Group B. Data and conditioning
@@ -71,8 +82,8 @@ its rank writes `‖ΔW‖ = lr·√(max(1, out/in)·r)`. At 2e-2 that is a nomi
 0.45–0.64% for the fan-in matrices at init and 1.9% for the shared adaLN
 projection (its rows start at std 0.02, F2), against 0.3% for the earlier relative
 3e-3. Proposed sweep at 128 px: 1e-2, 2e-2, 5e-2. Warmup: the smoke config uses 50
-steps; the common rule, Daniel's note, is 5% of the run, and the run length is not set. Settle with
-smoke runs at 20, 50 and 100 warmup steps, read on loss and `grad_capture`. The conv, the adaLN tables and the
+steps; the common rule, Daniel's note, is 5% of the run, and the run length is not set. The 300-step
+reads of 20, 50 and 100 are in FACTS (Fixed-step runs); a longer run reads it better. The conv, the adaLN tables and the
 null embedding train on the fallback at `fallback_lr`, a second sweep axis; the null
 embedding (elements ≈0.036) takes full-size Adam steps from the 10% dropped rows, so
 it may leave the encoder's manifold fast unless its LR is set apart. Under the

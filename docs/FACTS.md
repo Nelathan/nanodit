@@ -97,3 +97,21 @@ The last two ran on usuitrack `zero-init` at `a32658b` from uncommitted tiny-dit
 - Loss by t bucket under the floor, steps 201–300: 2.70 at t < 0.1 against 1.28 for `128_smoke_bf16`, the gap shrinking to 0.01 above t = 0.8.
 - The eval grid at step 300 follows each prompt's colour and mood, no shapes yet; faint vertical streaks.
 - Step time with random data, model only (scratch script, 40 steps): fp32 + TF32 792 img/s, 2.58 GiB peak; bf16 autocast (Molegrad fix uncommitted in the usuitrack worktree `molegrad-autocast`, not used) 879 img/s, 2.17 GiB.
+
+## Fixed-step runs at 128 px (2026-11-01)
+
+Uncommitted tiny-dit code, by its diff the same as `b3adad8` in `src/` and `scripts/` (every matrix on Usui's fixed step at lr 2e-2, final linear included, frame rank fraction 0.05; linear warmup), usuitrack `zero-init` at `e746901`, otherwise `configs/128_smoke.toml` as it was then (300 steps, batch 256, fallback lr 1e-3, bf16, seed 0). The `final_r64` runs used a scratch launcher putting the final linear in its own Usui group at rank fraction 1.0 (r = 64, the cap at half the shorter side), at that group's full fixed step and at its step scaled by √(13/64) to the r = 13 step norm (`eq`). Same windows as above:
+
+| run | warmup | final linear | 1–50 | 51–100 | 101–200 | 201–300 | img/s |
+|---|---|---|---|---|---|---|---|
+| `128_fixed_2e-2_w20` | 20 | r = 13 | 2.4571 | 2.1345 | 1.9808 | 1.8644 | 778 |
+| `128_fixed_2e-2_w50` | 50 | r = 13 | 2.5553 | 2.1587 | 1.9963 | 1.8747 | 808 |
+| `128_fixed_2e-2_w100` | 100 | r = 13 | 2.6490 | 2.2037 | 2.0176 | 1.8919 | 749 |
+| `128_fixed_2e-2_final_r64` | 50 | r = 64 | 2.4175 | 1.8252 | 1.7158 | 1.6454 | 841 |
+| `128_fixed_2e-2_final_r64eq` | 50 | r = 64, r = 13 step norm | 2.5432 | 1.8422 | 1.7095 | 1.6417 | 799 |
+
+- Loss by t bucket, steps 201–300, lowest to highest t: w50 2.77 / 2.54 / 2.30 / 2.10 / 1.94 / 1.76 / 1.63 / 1.48 / 1.32 / 1.17; r64 1.85 / 1.80 / 1.77 / 1.75 / 1.73 / 1.66 / 1.60 / 1.47 / 1.32 / 1.17; `128_smoke_nofit_final_adam` (final linear on the fallback; also the earlier relative step at 3e-3 and no warmup, so not a same-code control) 1.27 / 1.37 / 1.50 / 1.59 / 1.64 / 1.64 / 1.58 / 1.46 / 1.31 / 1.15. The gap shrinks with t: 1.50 in the lowest bucket, 0.06 at 0.6–0.7, under 0.02 above.
+- Warmup length at 300 steps: 1.8644 / 1.8747 / 1.8919 over steps 201–300 (w20 / w50 / w100), spread 0.028, shorter lower.
+- `grad_capture` over steps 101–300: 0.94 / 0.92 / 0.89 (w20 / w50 / w100), 0.94 on the fallback run. `grad_moment_cosine` over 251–300: −0.34 / −0.34 / −0.33, −0.37 on the fallback run.
+- The final linear at step 300 (`[128, 512]`; stable rank Σs²/s₁², and singular values above 10% of s₁): w20 stable rank 12.9, 41 of 128; r64 26.9, 93; fallback 45.9, 128; `128_smoke_bf16` 41.7, 128.
+- How the r = 13 frame on the final linear moves (`scripts/probe_frame.py`; w50 at 100 / 200 / 300): stable rank 9.5 / 9.7 / 11.3; directions above 10% 20 / 32 / 38; share of ‖W‖² outside the current frame 0.17 / 0.27 / 0.37; ‖F_prevᵀ F‖²/r against the checkpoint 100 steps earlier 0.80 / 0.89. Under r = 64 (the same reads, the final linear indexed in its own last group) that overlap is 0.98 / 0.99 and 3–10% of ‖W‖² lies outside the frame.
