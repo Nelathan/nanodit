@@ -19,6 +19,13 @@ matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`);
 go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
 reading, and the harness runs that split (`src/tinydit/optim.py`). Daniel to close.
 
+### A3. Usui's first frame fit fails on the GPU for a low-rank gradient
+
+`frame.fit` takes the top eigenvectors of the side Gram with fp32 `eigh`, which fails to converge on
+CUDA for the depth-2 test model (FACTS, First frame fit on the GPU). Unsure whether real runs can
+meet it. Options: `eigh` in fp64 (the fit runs once per matrix), or a small diagonal jitter. Either
+changes usuitrack (`zero-init` worktree). Daniel to decide.
+
 ---
 
 ## Group B. Data and conditioning
