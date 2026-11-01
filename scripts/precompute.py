@@ -1,4 +1,4 @@
-"""Precompute Primal 2x2 latents and EmbeddingGemma 2 embeddings for text-to-image-2M data_512_2M shards (CPU).
+"""Precompute Primal 2x2 latents and EmbeddingGemma 2 embeddings for text-to-image-2M data_512_2M shards (GPU).
 
 usage: precompute.py RES SHARD [SHARD ...]
 
@@ -34,7 +34,8 @@ ROOT = Path("/mnt/mars/ai/tiny-dit")
 REPO = "jackyhate/text-to-image-2M"
 PREFIX = "title: none | text: "
 ROW_GROUP = 1024
-THREADS = 12  # the machine has 16 cores and is shared
+DEVICE = torch.device("cuda")
+torch.backends.cudnn.allow_tf32 = False  # TF32 convolutions move the latents by 0.25%, more than bf16 storage (FACTS)
 
 
 def samples(tar_path):
@@ -56,7 +57,7 @@ def write_null_embedding(st, path):
 
 def bf16_column(t, width):
     """[N, ...] float tensor -> fixed_size_binary column of the rows as bf16."""
-    raw = t.bfloat16().contiguous().view(torch.int16).numpy().tobytes()
+    raw = t.bfloat16().cpu().contiguous().view(torch.int16).numpy().tobytes()
     return pa.FixedSizeBinaryArray.from_buffers(pa.binary(width), len(t), [None, pa.py_buffer(raw)])
 
 
@@ -76,7 +77,7 @@ def write_shard(tar_path, out_path, res, vae, st, cached_path):
         x = torch.from_numpy(np.stack([np.array(Image.open(io.BytesIO(j)).convert("RGB")) for j in jpgs]))
         x = x.permute(0, 3, 1, 2).float() / 127.5 - 1
         x = F.interpolate(x, size=(res, res), mode="bicubic", antialias=True).clamp(-1, 1)
-        z = torch.cat([vae.encode(x[i : i + 32]) for i in range(0, len(x), 32)])
+        z = torch.cat([vae.encode(x[i : i + 32].to(DEVICE)) for i in range(0, len(x), 32)])
         if cached is None:
             e = st.encode(list(captions), prompt=PREFIX, batch_size=32, convert_to_tensor=True)
             embedding = bf16_column(e, 768 * 2)
@@ -100,11 +101,10 @@ def write_shard(tar_path, out_path, res, vae, st, cached_path):
 
 
 if __name__ == "__main__":
-    torch.set_num_threads(THREADS)
     res, shards = int(sys.argv[1]), [int(s) for s in sys.argv[2:]]
     assert res % 16 == 0
-    vae = AutoModel.from_pretrained("ostris/primal_vae", variant="2x2", trust_remote_code=True, torch_dtype=torch.float32)
-    st = SentenceTransformer("google/embeddinggemma-2", device="cpu", config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})  # default is bf16, 5x slower on CPU
+    vae = AutoModel.from_pretrained("ostris/primal_vae", variant="2x2", trust_remote_code=True, torch_dtype=torch.float32).to(DEVICE)
+    st = SentenceTransformer("google/embeddinggemma-2", device=DEVICE, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})  # fp32, as shards 0-3 were encoded
     null_path = ROOT / "precomputed" / "null_embedding.safetensors"
     if not null_path.exists():
         null_path.parent.mkdir(parents=True, exist_ok=True)
