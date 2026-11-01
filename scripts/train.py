@@ -1,8 +1,7 @@
-"""Train the DiT on precomputed shards.
+"""Train the DiT on a shuffled Parquet of precomputed rows.
 
 usage: train.py CONFIG.toml
 """
-import glob
 import json
 import math
 import shutil
@@ -18,7 +17,7 @@ import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
-from tinydit.data import Batcher, load_shards
+from tinydit.data import Stream
 from tinydit.model import DiT
 from tinydit.objective import flow_loss, loss_by_t_bucket
 from tinydit.optim import build_optimizers
@@ -33,7 +32,7 @@ class Config:
     name: str
     runs_dir: str
     resolution: int
-    parquet_glob: str
+    dataset: str  # one Parquet from scripts/shuffle.py
     null_embedding: str
     depth: int
     batch: int
@@ -141,13 +140,13 @@ class Interval:
         )
 
 
-def accumulate_gradients(model, batcher: Batcher, micro_batches: int, shift: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean loss and the
     per-sample losses and t of every sample."""
     losses, per_samples, ts = [], [], []
     for _ in range(micro_batches):
-        x, text = batcher.next()
+        x, text = stream.next()
         loss, per_sample, t = flow_loss(model, x, text, shift)
         (loss / micro_batches).backward()
         losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t)
@@ -168,8 +167,7 @@ def main(config_path: str) -> None:
     # a record checks for non-finite steps, so nothing is evaluated or saved past an unchecked one
     if cfg.eval_every % cfg.log_every or cfg.checkpoint_every % cfg.log_every:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
-    latents, embeddings = load_shards(sorted(glob.glob(cfg.parquet_glob)), cfg.resolution)
-    batcher = Batcher(latents, embeddings, cfg.micro_batch, device, torch.float32)
+    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
@@ -186,7 +184,7 @@ def main(config_path: str) -> None:
     accumulate = cfg.batch // cfg.micro_batch
     interval = Interval()
     for step in range(1, cfg.steps + 1):
-        loss, per_sample, t = accumulate_gradients(model, batcher, accumulate, cfg.shift)
+        loss, per_sample, t = accumulate_gradients(model, stream, accumulate, cfg.shift)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
         interval.add(loss, per_sample, t, torch.nn.utils.get_total_norm(fallback_grads))

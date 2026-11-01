@@ -2,7 +2,7 @@
 name = "128_smoke"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
-parquet_glob = "/mnt/mars/ai/tiny-dit/precomputed/128/*.parquet"
+dataset = "/mnt/mars/ai/tiny-dit/precomputed/128_shuffled_0-10.parquet"
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
 depth = 12
 batch = 256

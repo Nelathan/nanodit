@@ -23,13 +23,13 @@ docs/REFERENCES.md    sources (papers, model cards, datasets) and what each one 
 docs/references/      source material kept verbatim (the x0 velocity thread)
 AGENTS.md             working rules for agents implementing this (CLAUDE.md imports it)
 src/tinydit/          model, objective, sampler, data, optimizer split
-scripts/              precompute, probes, train
+scripts/              precompute, shuffle, probes, train
 configs/              run configs, eval prompts
 ```
 
 ## Stages
 
-1. Precompute Primal latents (128 px, 256 px) and EmbeddingGemma 2 caption embeddings for the first shards of text-to-image-2M.
+1. Precompute Primal latents (128 px, 256 px) and EmbeddingGemma 2 caption embeddings for the first shards of text-to-image-2M, then shuffle each resolution's shards into one Parquet.
 2. LR sweep at 128 px.
 3. Train 128 px, then 256 px. 512 px is out of scope for now.
 

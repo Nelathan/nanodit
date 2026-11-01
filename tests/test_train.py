@@ -33,7 +33,7 @@ def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, mic
 name = "smoke"
 runs_dir = "{tmp_path / 'runs'}"
 resolution = 32
-parquet_glob = "{tmp_path / '*.parquet'}"
+dataset = "{tmp_path / 's.parquet'}"
 null_embedding = "{tmp_path / 'null.safetensors'}"
 depth = 2
 batch = {batch}
@@ -195,7 +195,7 @@ def test_batch_must_be_a_multiple_of_micro_batch(train, tmp_path, monkeypatch):
 
 
 class FixedBatches:
-    """Hands out the given micro-batches in order, like the Batcher does for one step."""
+    """Hands out the given micro-batches in order, like the Stream does for one step."""
 
     def __init__(self, chunks):
         self.chunks, self.i = chunks, 0
