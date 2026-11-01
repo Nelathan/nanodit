@@ -213,5 +213,17 @@ The same config at beta 0.99. wandb run `facr413t`, 850 img/s with nothing else 
 
 - `scripts/shuffle.py` over shards 0–10 at 128 px: 549,945 rows, 9.98 GB out, 164 s, peak RSS 4.4 GB (log `precomputed/shuffle_128_0-10.log`).
 - `tinydit.data.Stream` on the CPU over that file, micro-batch 64 cast to fp32, with a training run alongside: 48k rows/s over 2000 micro-batches after one, peak RSS 2.4 GB for the whole process (a scratch probe under `/usr/bin/time`, not kept).
-- `128_2e-3_0-10_10ep`, the first run on the stream, trains at 746–804 img/s over its first 600 steps, against about 850 for `128_fixed_2e-3_b099_1k`; a 3-step probe ran alongside it for part of that. The cause of the gap is not isolated.
+- `128_2e-3_0-10_10ep`, the first run on the stream, trained at 746–846 img/s per 100-step record up to step 3700 and 847–862 from step 3800 to the end, against about 850 for `128_fixed_2e-3_b099_1k`. The slow records run past the first pass (step 2148), so a cold page cache does not explain them. The agent session's CPU test runs overlapped part of them (the suite at 22:25, about step 3400); what else ran is not recorded.
 - Every run above it drew its batches with replacement from shards 0–3 (about 200k rows); a run on the stream sees each of 550k rows once per pass. Losses do not compare across that line without saying so.
+
+### `128_2e-3_0-10_10ep`: 10 passes over shards 0–10 (2026-11-01)
+
+Launched 2026-11-01 22:06 from the uncommitted tree that became tiny-dit `727d94c` and usuitrack `e7e5210` (the range-finder fit; wandb records the base `5fa9ce4`); edits between the launch and those commits touched comments, docstrings and tests. The DiT is the one before the final layer's rows moved into the shared projection (`8eb82be`). The smoke settings (usui lr 2e-3, beta 0.99, rank fraction 0.1, fallback lr 1e-3, warmup 100, batch 256 as 4 × 64), 21,482 steps = 10 passes of the 549,945-row shuffled file. Records average 100 steps; a pass's mean is over the records that end in it. wandb run `q49embk5`; config, checkpoints every 2000 steps and the eval grid every 1000 in the run directory.
+
+| pass | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| mean loss | 1.692 | 1.479 | 1.441 | 1.419 | 1.405 | 1.396 | 1.390 | 1.385 | 1.380 | 1.377 |
+
+- Loss at the last record 1.375. Per t bin (10 bins, low t first): 1.167, 1.250, 1.308, 1.355, 1.378, 1.416, 1.457, 1.443, 1.340, 1.177; the peak moved from bin 6 at step 2100 (1.593; ends 1.281 and 1.215) to bin 7, where it is in every record from step 5900 on.
+- Usui, per record from step 1000 on: `grad_capture` 0.94–0.98, `grad_moment_cosine` −0.08 at step 1000, then −0.11 to −0.17; `tangent_live_fraction` 0.994–0.997; `relative_step` 0.0008 at step 1000 falling to 0.0005. No nonfinite gradients. `fallback_grad_norm` rises from 0.019 at step 1000 to 0.029–0.040 from step 10500.
+- The 4×4 grid (seed 42), step 4000 against the last: the last is more saturated, the teal of step 4000 mostly replaced by blue. The ice-cliff landscape reads as blue sky and cloud, the warrior and the woman in the dark hall keep their monochrome layout, the beach is blue sea under a figure, the studio shot a dark figure on white, and the sign prompt an orange rectangular object. No coherent anatomy or faces at either step.
