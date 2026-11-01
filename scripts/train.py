@@ -45,6 +45,7 @@ class Config:
     fallback_lr: float
     warmup: int  # steps of linear lr warmup from lr / warmup, both optimizers
     shift: float  # timestep shift, PLAN C3
+    log_every: int  # steps per train.jsonl record, averaged over them on the GPU
     checkpoint_every: int
     eval_every: int
     eval_prompts: str
@@ -108,6 +109,35 @@ def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
     torch.save([o.state_dict() for o in optimizers], path / "optimizer.pt")
 
 
+class Interval:
+    """The training reads of the steps since the last record, kept on the GPU; reading them is the one
+    device-to-host transfer per record."""
+
+    def __init__(self):
+        self.losses, self.per_samples, self.ts, self.grad_norms = [], [], [], []
+        self.start = time.perf_counter()
+
+    def add(self, loss, per_sample, t, grad_norm) -> None:
+        self.losses.append(loss), self.per_samples.append(per_sample), self.ts.append(t), self.grad_norms.append(grad_norm)
+
+    def report(self, step: int, batch: int) -> dict:
+        """Means over the interval. A non-finite step stops the run here: UsuiTrack zeroes non-finite
+        gradients, but the AdamW fallback has stepped on them since."""
+        losses, grad_norms = torch.stack(self.losses).tolist(), torch.stack(self.grad_norms).tolist()
+        first = step - len(losses) + 1
+        for i, (loss, grad_norm) in enumerate(zip(losses, grad_norms)):
+            if not (math.isfinite(loss) and math.isfinite(grad_norm)):
+                raise RuntimeError(f"non-finite loss {loss} or fallback gradient norm {grad_norm} at step {first + i}")
+        buckets = loss_by_t_bucket(torch.cat(self.per_samples), torch.cat(self.ts), T_BUCKETS).tolist()
+        return dict(
+            step=step,
+            loss=sum(losses) / len(losses),
+            loss_by_t=[None if v != v else v for v in buckets],
+            fallback_grad_norm=sum(grad_norms) / len(grad_norms),
+            imgs_per_s=batch * len(losses) / (time.perf_counter() - self.start),
+        )
+
+
 def accumulate_gradients(model, batcher: Batcher, micro_batches: int, shift: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean loss and the
@@ -132,6 +162,9 @@ def main(config_path: str) -> None:
 
     if cfg.batch % cfg.micro_batch:
         raise ValueError(f"batch {cfg.batch} is not a multiple of micro_batch {cfg.micro_batch}")
+    # a record checks for non-finite steps, so nothing is evaluated or saved past an unchecked one
+    if cfg.eval_every % cfg.log_every or cfg.checkpoint_every % cfg.log_every:
+        raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
     latents, embeddings = load_shards(sorted(glob.glob(cfg.parquet_glob)), cfg.resolution)
     batcher = Batcher(latents, embeddings, cfg.micro_batch, device, torch.float32)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
@@ -148,38 +181,28 @@ def main(config_path: str) -> None:
     wandb.init(project=cfg.wandb_project, name=cfg.name, config=asdict(cfg), dir=run_dir)
 
     accumulate = cfg.batch // cfg.micro_batch
+    interval = Interval()
     for step in range(1, cfg.steps + 1):
-        start = time.perf_counter()
         loss, per_sample, t = accumulate_gradients(model, batcher, accumulate, cfg.shift)
-        loss_value = loss.item()
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
-        grad_norm = torch.nn.utils.get_total_norm(fallback_grads).item()
-        # UsuiTrack zeroes non-finite gradients but the AdamW fallback does not: stop before either steps.
-        if not (math.isfinite(loss_value) and math.isfinite(grad_norm)):
-            raise RuntimeError(f"non-finite loss {loss_value} or fallback gradient norm {grad_norm} at step {step}")
+        interval.add(loss, per_sample, t, torch.nn.utils.get_total_norm(fallback_grads))
         lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
         for optimizer, schedule in zip(optimizers, schedules):
             optimizer.step()
             optimizer.zero_grad()
             schedule.step()
-        buckets = loss_by_t_bucket(per_sample, t, T_BUCKETS).tolist()
-        record = dict(
-            step=step,
-            loss=loss_value,
-            loss_by_t=[None if v != v else v for v in buckets],
-            lr_usui=lr_usui,
-            lr_fallback=lr_fallback,
-            fallback_grad_norm=grad_norm,
-            usui=optimizers[0].pop_diagnostics(),
-            imgs_per_s=cfg.batch / (time.perf_counter() - start),
-        )
-        append_jsonl(run_dir / "train.jsonl", record)
-        wandb.log(wandb_scalars(record), step=step)
+        if step % cfg.log_every == 0 or step == cfg.steps:
+            record = interval.report(step, cfg.batch) | dict(lr_usui=lr_usui, lr_fallback=lr_fallback, usui=optimizers[0].pop_diagnostics())
+            append_jsonl(run_dir / "train.jsonl", record)
+            wandb.log(wandb_scalars(record), step=step)
+            interval = Interval()
+        paused = time.perf_counter()
         if step % cfg.eval_every == 0 or step == cfg.steps:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
         if step % cfg.checkpoint_every == 0 or step == cfg.steps:
             save_checkpoint(model, optimizers, step, run_dir)
+        interval.start += time.perf_counter() - paused  # img/s counts training time only
     wandb.finish()
 
 

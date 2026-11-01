@@ -23,7 +23,7 @@ def train():
     return module
 
 
-def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4):
+def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4, log_every=1):
     torch.manual_seed(0)
     write_shard(tmp_path / "s.parquet", torch.randn(16, 2, 16, 16).bfloat16(), torch.randn(16, 768).bfloat16())
     save_file({"null": torch.randn(768)}, tmp_path / "null.safetensors")
@@ -46,6 +46,7 @@ rank_fraction = 0.1
 fallback_lr = 1e-3
 warmup = 2
 shift = 1.0
+log_every = {log_every}
 checkpoint_every = {checkpoint_every}
 eval_every = {eval_every}
 eval_prompts = "prompts.txt"
@@ -77,20 +78,32 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     monkeypatch.setattr(train.wandb, "init", lambda **kwargs: None)
     monkeypatch.setattr(train.wandb, "log", lambda data, step: sent.append((step, data)))
     monkeypatch.setattr(train.wandb, "finish", lambda: None)
-    train.main(str(write_config(tmp_path, steps=3, eval_every=2, checkpoint_every=1)))
+    step_losses = []
+
+    def accumulate_gradients(*args):
+        loss, per_sample, t = real_accumulate(*args)
+        step_losses.append(loss.item())
+        return loss, per_sample, t
+
+    real_accumulate = train.accumulate_gradients
+    monkeypatch.setattr(train, "accumulate_gradients", accumulate_gradients)
+    train.main(str(write_config(tmp_path, steps=3, eval_every=2, checkpoint_every=2, log_every=2)))
     run = tmp_path / "runs" / "smoke"
 
     log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
-    assert [r["step"] for r in log] == [1, 2, 3]
-    assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
+    assert [r["step"] for r in log] == [2, 3]  # every log_every, and the last step
+    # a record averages the steps since the last one
+    assert abs(log[0]["loss"] - sum(step_losses[:2]) / 2) < 1e-6 and abs(log[1]["loss"] - step_losses[2]) < 1e-6
+    assert sum(v is not None for v in log[0]["loss_by_t"]) <= 8  # 4 samples per step, two steps
+    assert all(len(r["loss_by_t"]) == 10 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
     # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (FACTS, GPU smoke runs)
     assert all(0.5 < r["usui"]["grad_capture"] < 1.5 for r in log)
-    assert "tangent_live_fraction" in log[2]["usui"]
+    assert "tangent_live_fraction" in log[1]["usui"]
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\n"
-    assert [r["lr_usui"] for r in log] == [1.5e-3, 3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [5e-4, 1e-3, 1e-3]  # warmup 2
+    assert [r["lr_usui"] for r in log] == [3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [1e-3, 1e-3]  # the last step's, past warmup 2
 
     curves = [(step, data) for step, data in sent if "eval" not in data]
-    assert [step for step, _ in curves] == [1, 2, 3] and [data["loss"] for _, data in curves] == [r["loss"] for r in log]
+    assert [step for step, _ in curves] == [2, 3] and [data["loss"] for _, data in curves] == [r["loss"] for r in log]
     for (_, data), r in zip(curves, log):  # the same values as train.jsonl, empty t buckets left out
         expected = {key: r[key] for key in ("loss", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
         expected |= {f"loss_by_t/{b / 10:.1f}": v for b, v in enumerate(r["loss_by_t"]) if v is not None}
@@ -103,7 +116,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert Image.open(evals[0]["image"]).size == (3 * 32, 2 * 32)  # seeds across, prompts down
 
     checkpoint = run / "checkpoints" / "step_0000003"
-    first = load_file(run / "checkpoints" / "step_0000001" / "model.safetensors")
+    first = load_file(run / "checkpoints" / "step_0000002" / "model.safetensors")
     last = load_file(checkpoint / "model.safetensors")
     assert not torch.equal(first["blocks.0.qkv.weight"], last["blocks.0.qkv.weight"])  # a UsuiTrack matrix moved
 
@@ -134,11 +147,18 @@ def test_failed_start_leaves_no_run_directory(train, tmp_path, monkeypatch):
     assert not (tmp_path / "runs" / "smoke").exists()
 
 
-def test_non_finite_loss_stops_before_any_optimizer_step(train, tmp_path, monkeypatch):
+def test_non_finite_loss_stops_the_run_at_the_next_record_and_names_its_step(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
-    config = write_config(tmp_path, steps=2, eval_every=5)
-    monkeypatch.setattr(train, "flow_loss", lambda *a: (lambda l, p, t: (l * float("nan"), p, t))(*real_flow_loss(*a)))
-    with pytest.raises(RuntimeError, match="non-finite"):
+    config = write_config(tmp_path, steps=3, eval_every=3, checkpoint_every=3, log_every=3)
+    calls = []
+
+    def flow_loss(*args):
+        loss, per_sample, t = real_flow_loss(*args)
+        calls.append(None)
+        return (loss * float("nan") if len(calls) == 2 else loss), per_sample, t
+
+    monkeypatch.setattr(train, "flow_loss", flow_loss)
+    with pytest.raises(RuntimeError, match="non-finite .* at step 2"):
         train.main(str(config))
     assert not (tmp_path / "runs" / "smoke" / "train.jsonl").exists()
 
@@ -150,8 +170,17 @@ def test_accumulated_batch_trains_logs_and_checkpoints(train, tmp_path, monkeypa
     log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
     assert [r["step"] for r in log] == [1, 2, 3]
     assert all(len(r["loss_by_t"]) == 10 and r["loss"] > 0 for r in log)
+    assert [r["lr_usui"] for r in log] == [1.5e-3, 3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [5e-4, 1e-3, 1e-3]  # warmup 2
     assert 0 < sum(v is not None for r in log for v in r["loss_by_t"]) <= 24  # 8 samples per step, 4 micro-batches
     assert (run / "checkpoints" / "step_0000003" / "optimizer.pt").exists()
+
+
+def test_eval_and_checkpoint_fall_on_a_record(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=4, eval_every=3, checkpoint_every=4, log_every=2)
+    with pytest.raises(ValueError, match="log_every"):
+        train.main(str(config))
+    assert not (tmp_path / "runs" / "smoke").exists()
 
 
 def test_batch_must_be_a_multiple_of_micro_batch(train, tmp_path, monkeypatch):

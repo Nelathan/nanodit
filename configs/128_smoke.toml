@@ -15,6 +15,7 @@ rank_fraction = 0.1
 fallback_lr = 1e-3
 warmup = 100
 shift = 1.0
+log_every = 100
 checkpoint_every = 100
 eval_every = 100
 eval_prompts = "eval_prompts.txt"
