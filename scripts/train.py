@@ -112,8 +112,6 @@ def main(config_path: str) -> None:
     with open(config_path, "rb") as f:
         cfg = Config(**tomllib.load(f))
     torch.manual_seed(cfg.seed)
-    # fp32 weights and activations, TF32 matmuls on CUDA: Molegrad's backward fails under bf16 autocast (PLAN C4).
-    torch.set_float32_matmul_precision("high")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = Path(cfg.runs_dir) / cfg.name
     if run_dir.exists():
@@ -123,7 +121,8 @@ def main(config_path: str) -> None:
         raise ValueError(f"batch {cfg.batch} is not a multiple of micro_batch {cfg.micro_batch}")
     latents, embeddings = load_shards(sorted(glob.glob(cfg.parquet_glob)), cfg.resolution)
     batcher = Batcher(latents, embeddings, cfg.micro_batch, device, torch.float32)
-    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device)
+    # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
+    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.fallback_lr)
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)

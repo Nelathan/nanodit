@@ -30,6 +30,14 @@ def test_guidance_combines_conditional_and_null_predictions(model, text):
     assert not torch.allclose(plain, guided)
 
 
+def test_sampler_runs_on_the_bf16_network_in_fp32(model, text):
+    torch.nn.init.normal_(model.final.weight, std=0.05)
+    noise = torch.randn(3, 2, 64, 64)
+    out = euler_sample(model.bfloat16(), noise, text, steps=2, guidance=3.0)
+    assert out.dtype == torch.float32 and out.shape == noise.shape
+    assert out.isfinite().all() and not torch.equal(out, noise)
+
+
 class Probe:
     """text rows are ones and the null is zeros: the net returns 2·[text is ones] + t, a different value
     for text and null that depends on t, and records the t it was called with."""

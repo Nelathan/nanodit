@@ -9,7 +9,7 @@ The question it answers: can a small DiT built on this season's promising pieces
 - **Optimizer:** **UsuiTrack** (trust-region LR relative to weight norm)
 - **Framework:** pure PyTorch, single GPU, no trainer framework
 
-The model, objective, sampler and training harness are built and tested on CPU; nothing has trained yet. `docs/HANDOVER.md` says where things stand.
+The model, objective, sampler and training harness are built and tested; 300-step smoke runs at 128 px are in `docs/FACTS.md`. `docs/HANDOVER.md` says where things stand.
 
 ## Layout
 

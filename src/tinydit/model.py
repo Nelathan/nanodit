@@ -119,9 +119,13 @@ class DiT(nn.Module):
         self.final.weight.zero_()
 
     def forward(self, x: Tensor, t: Tensor, text: Tensor) -> Tensor:
-        """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W]."""
-        tokens, h, w = patchify(x)
-        c = self.time_mlp(timestep_sinusoid(t)) + self.text_proj(math.sqrt(TEXT_DIM) * text)
+        """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W].
+        The network runs in the parameters' dtype (bf16 in training); x and text are cast on the way in
+        and F comes back fp32, so the objective and the sampler never see the network's dtype. t stays
+        fp32 up to the sinusoid, whose phases need the precision."""
+        dtype = self.patch_embed.weight.dtype
+        tokens, h, w = patchify(x.to(dtype))
+        c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj((math.sqrt(TEXT_DIM) * text).to(dtype))
         mod = self.ada(c).view(-1, N_MOD, DIM)
         rope = rope_angles(h, w, x.device)
 
@@ -131,4 +135,4 @@ class DiT(nn.Module):
 
         shift, scale = (self.final_table + c[:, None]).unbind(1)
         tokens = self.final_norm(tokens) * (1 + scale[:, None]) + shift[:, None]
-        return unpatchify(self.final(tokens), h, w)
+        return unpatchify(self.final(tokens), h, w).float()

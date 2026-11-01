@@ -88,6 +88,7 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 
 - Trust-region LR relative to weight norm; per-role target-norm override for zero-init roles (§5).
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
+- Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
 
 ## 7. Training schedule
 

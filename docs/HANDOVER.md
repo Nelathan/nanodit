@@ -1,28 +1,23 @@
 # Handover
 
-Written 2026-10-31, night. Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `AGENTS.md` how to run things.
+Written 2026-10-31, night; updated 2026-11-01. Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `AGENTS.md` how to run things.
 
 ## Where it stands
 
-Built and tested on CPU (`uv run python -m pytest tests/`, 43 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui + AdamW split with Molegrad and gradient accumulation, `scripts/train.py`, the precompute and the probes. Nothing has trained; the GPU was busy.
+Built and tested (`uv run python -m pytest tests/`, 46 pass): the DiT, the x0-velocity objective, the Euler/CFG sampler, the Parquet loader, the Usui + StochasticAdamW split with Molegrad and gradient accumulation, `scripts/train.py` training a pure bf16 model, the precompute and the probes. Three 300-step smoke runs at 128 px are in FACTS (GPU smoke runs): fp32 at two seeds, bf16 at one.
 
 Data: the 128 px precompute of shards 0–3 is done (2026-11-01 04:39, log `/mnt/mars/ai/tiny-dit/precomputed/precompute_128.log`): `/mnt/mars/ai/tiny-dit/precomputed/128/data_00000{0..3}.parquet`, the tars deleted. Two image sources, half each (FACTS, Sample and shard), row counts and sizes there too. Shard 0's parquet is checked against its tar (FACTS). The null embedding is at `precomputed/null_embedding.safetensors`.
 
 ## Waiting on Daniel
 
-- **A1, the optimizer split.** Built as option (a), provisional (`src/tinydit/optim.py`). Its costs, including the step-1 zero-gradient frame fit, are in PLAN A1.
-- **C4, training precision.** Molegrad fails under bf16 autocast; `train.py` runs fp32 + TF32, provisional.
-- **F1–F3.** Model choices SPEC leaves open. F3 is the sharpest: the final layer's `1 + scale` starts far from 1 (FACTS, adaLN at init).
+- **F1, F2.** Model choices SPEC leaves open (PLAN group F). F3 is the session's to settle (Next).
 - **B1, B2, A2.** Evidence is in; each needs a close or a follow-up.
-- **SPEC §5 wording.** The text-projection row said "unit variance per dim", which FACTS contradicts; it now says "unit RMS over entries". The design is unchanged; revert if you meant something else.
 - **Not chosen yet:** C3 shift base, D3 eval prompts (16 drafts in `configs/eval_prompts.txt`), D4 sampler grid, an LR schedule (C2), `fallback_lr` as a sweep axis.
 
 ## Next
 
-1. When the GPU is free and shards exist: the smoke run, in the background:
-   `cd /home/djg/Projects/tiny-dit && mkdir -p /mnt/mars/ai/tiny-dit/runs && nohup uv run python scripts/train.py configs/128_smoke.toml > /mnt/mars/ai/tiny-dit/runs/128_smoke.log 2>&1 &`
-   It measures step time and memory under fp32 + TF32 (C4, C1); the config's LRs are placeholders.
-2. The LR sweep (C2) once A1 and C4 are settled.
+1. A1, decided by Daniel 2026-11-01, being built: the final linear on Usui with a norm floor, and no frame fit from a zero gradient, both on usuitrack branch `zero-init`; then F3 and the text RMS norm.
+2. The LR sweep (C2). A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 
 ## Traps
 

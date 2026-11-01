@@ -5,14 +5,14 @@ says what the design is; `FACTS.md` holds measured numbers; `archive/` holds
 everything closed. See `AGENTS.md` for how this file is worked.
 
 Questions are grouped so a session can take **one group** and leave the rest
-alone. Inside a group the items share runs or code. Nothing has trained yet; each
+alone. Inside a group the items share runs or code. Only 300-step smoke runs have trained; each
 "how to settle" is a proposal, not an agreed arm.
 
 ---
 
 ## Group A. Usui wiring
 
-### A1. How do the zero-init roles train under Usui? (open, Daniel)
+### A1. How do the zero-init roles train under Usui? (decided 2026-11-01, being built)
 
 SPEC §5 assumes a per-role target-norm override. Usui has none, on any branch: the
 step is `W -= lr·‖W‖·lift(O)` (`usuitrack/optimizer.py` `_write_weight`), and its SPEC
@@ -23,8 +23,10 @@ through its non-zero rows, the per-block tables are accepted. The tables are put
 the fallback by analogy with Usui's README, which routes `nn.Embedding` tables there.
 Options: (a) zero-init roles (final linear, conv, tables) on
 the AdamW fallback, as Usui documents; (b) small non-zero init for them, giving up
-`F = 0` at step 0; (c) an override in Usui. Leaning (session): (a), built
-provisionally in `src/tinydit/optim.py`. Its costs: the zero-init roles grow only at
+`F = 0` at step 0; (c) an override in Usui. Decided by Daniel: (c), as a
+per-group norm floor in Usui, with no frame fit from a zero gradient, on usuitrack
+branch `zero-init`; this closes into the archive when built. Until then
+`src/tinydit/optim.py` runs (a). Its costs: the zero-init roles grow only at
 the absolute fallback LR, so `fallback_lr` becomes a second sweep axis beside C2; the
 null embedding (elements ≈0.036) takes full-size Adam steps from the 10% dropped rows,
 so it may leave the encoder's manifold fast unless its LR is set apart; and with the
@@ -84,35 +86,22 @@ images, or test whether training on flipped latents hurts. Evidence: FACTS only.
 Rides on Usui and the LR sweep. Open whether tokens are the right noise unit for
 diffusion (t sampling adds its own gradient noise). Evidence: at 128 px, batch 256
 gives 64 × 256 ≈ 16k tokens per step, matching the LFM setup on tokens. Throughput
-estimate (37M params, 6·params·tokens FLOPs per image, ~10 TFLOPS effective,
-unbenchmarked): ~700 img/s at 128 px, ~175 img/s at 256 px; one epoch over 2M
-images ~50 min at 128 px, ~3 h at 256 px. Settle: the sweep in C2 and measured
-throughput.
+at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. Settle: the sweep in C2.
 
 ### C2. Which relative LR from scratch?
 
 The first experiment. Sweep at 128 px: 1e-3, 3e-3, 1e-2 relative. Evidence: LFM
 runs use `lr 4e-5 × norm`, beta 0.95, at 16k tokens per step, a rate for adapting
 a pretrained model; from-scratch recipes imply per-step relative updates of roughly
-5e-3 to 5e-2 (estimate, not measured on Usui). Under A1 (a) the zero-init roles
-train on the fallback at `fallback_lr`, not at this rate. No AdamW reference run. The harness runs a constant LR, no warmup or decay; Usui's README
-recommends a schedule, and SPEC says nothing yet.
+5e-3 to 5e-2 (estimate, not measured on Usui). Until A1 is built, the zero-init roles
+train on the fallback at `fallback_lr`, not at this rate. At 3e-3 `grad_moment_cosine`
+turns negative after about step 100 (FACTS, GPU smoke runs), which Usui reads as
+overshoot. No AdamW reference run. The harness runs a constant LR, no warmup or
+decay; Usui's README recommends a schedule, and SPEC says nothing yet.
 
 ### C3. Timestep shift values per stage
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
-
-### C4. Training precision on the GPU (open, Daniel)
-
-Molegrad's backward fails under bf16 autocast (`usuitrack/molegrad.py` `_Projected`:
-the saved fp32 weight meets a bf16 grad, `expected m1 and m2 to have the same dtype`;
-reproduced on CPU autocast, Usui's README calls autocast untested). Whole-model
-`.bfloat16()` also fails in tiny-dit (some buffers stay fp32). `train.py` therefore runs
-fp32 with TF32 matmuls, provisionally. Options: (1) keep fp32 + TF32, nominally half
-the dense tensor-core rate of bf16 on Ada (NVIDIA's Ada whitepaper, not checked here); (2) bf16 weights with Usui's stochastic
-rounding, needing dtype fixes in the model and the fallback; (3) an autocast fix in
-Molegrad, in usuitrack. Settle: measured step time once the GPU is free decides
-whether (1) is fast enough for the C1 budget.
 
 ---
 

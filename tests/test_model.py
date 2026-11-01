@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 import torch
 
@@ -83,6 +85,18 @@ def test_text_and_timestep_condition_the_network_once_trained(model, text):
     assert not torch.allclose(base, model(x, t, text.flip(0)))
     assert not torch.allclose(base, model(x, 1 - t, text))
     assert not torch.allclose(base, model(x.flip(-1), t, text))
+
+
+def test_bf16_network_takes_fp32_inputs_and_returns_fp32_close_to_the_fp32_network(model, text):
+    torch.nn.init.normal_(model.final.weight, std=0.05)
+    for block in model.blocks:
+        torch.nn.init.normal_(block.conv.weight, std=0.1)
+        block.table.data[[2, 5]] = 0.5
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    reference = model(x, t, text)
+    out = copy.deepcopy(model).bfloat16()(x, t, text)
+    assert out.dtype == torch.float32 and out.shape == x.shape
+    assert (out - reference).norm() < 0.02 * reference.norm()  # measured 0.007
 
 
 def test_conv_mixes_neighbouring_tokens_only(model):

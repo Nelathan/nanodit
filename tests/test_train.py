@@ -90,8 +90,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     last = load_file(checkpoint / "model.safetensors")
     assert not torch.equal(first["blocks.0.qkv.weight"], last["blocks.0.qkv.weight"])  # a UsuiTrack matrix moved
 
-    restored = DiT(torch.zeros(768), depth=2)
-    restored.load_state_dict(load_file(checkpoint / "model.safetensors"))
+    assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
+    restored = DiT(torch.zeros(768), depth=2).bfloat16()
+    restored.load_state_dict(last)
     assert restored.final.weight.abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
     matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 1e-3)
@@ -175,14 +176,40 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         torch.manual_seed(1)
         model = DiT(torch.randn(768), depth=2)
         torch.nn.init.normal_(model.final.weight, std=0.05)
-        build_optimizers(model, 3e-3, 0.95, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 1e-3)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
         loss, per_sample, t = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0)
         results.append((loss, per_sample, t, [model.final.weight.grad, model.final.bias.grad, model.final_table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
-    assert torch.allclose(per1, per4, atol=1e-6) and torch.equal(t1, t4)
-    assert torch.allclose(loss1, loss4, atol=1e-6)
+    # bf16 batches the same samples differently, so equal only up to rounding; a lost or doubled
+    # micro-batch would be off by tens of percent
+    assert torch.allclose(per1, per4, rtol=0.02) and torch.equal(t1, t4)
+    assert torch.allclose(loss1, loss4, rtol=0.02)
     for full, accumulated in zip(grads1, grads4):
-        assert full.abs().max() > 0 and torch.allclose(full, accumulated, atol=1e-6)
+        assert full.abs().max() > 0 and (full.float() - accumulated.float()).norm() < 0.03 * full.float().norm()
+
+
+def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
+    torch.manual_seed(0)
+    model = DiT(torch.randn(768), depth=2)
+    torch.nn.init.normal_(model.final.weight, std=0.05)
+    model.bfloat16()
+    optimizers = build_optimizers(model, 3e-3, 0.95, 1e-3)
+    start = {n: p.detach().clone() for n, p in model.named_parameters()}
+    g = torch.Generator().manual_seed(0)
+    x = torch.randn(8, 2, 16, 16, generator=g)
+    text = torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
+    for _ in range(3):
+        loss, per_sample, t = train.accumulate_gradients(model, FixedBatches([(x[:4], text[:4]), (x[4:], text[4:])]), 2, shift=1.0)
+        assert loss.dtype == per_sample.dtype == torch.float32 and loss.isfinite() and per_sample.isfinite().all()
+        for optimizer in optimizers:
+            optimizer.step()
+            optimizer.zero_grad()
+    assert {p.dtype for p in model.parameters()} == {torch.bfloat16}
+    # The QK-norm gain (1.0, ulp 2^-7) takes AdamW steps of 1e-3, a fraction of an ulp: round-to-nearest
+    # leaves it bit-identical (checked: 0 of its elements move), stochastic rounding moves about a quarter.
+    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "final.weight")}
+    assert changed["blocks.0.q_norm.weight"] > 0.1
+    assert all(fraction > 0.02 for fraction in changed.values()), changed

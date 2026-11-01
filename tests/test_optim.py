@@ -31,10 +31,11 @@ def test_residual_stream_output_matrices_track_their_left_side():
 
 
 def trained_model(steps=2):
-    """A depth-2 model with a nonzero final layer (so every matrix gets a gradient), stepped `steps` times."""
+    """A depth-2 bf16 model with a nonzero final layer (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
     model = DiT(torch.randn(768), depth=2)
     torch.nn.init.normal_(model.final.weight, std=0.05)
+    model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 1e-3)
     for _ in range(steps):
         train_step(model, optimizers, *batch(0))
@@ -74,7 +75,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
         torch.manual_seed(1)
         model = DiT(torch.randn(768), depth=2)
         torch.nn.init.normal_(model.final.weight, std=0.05)
-        build_optimizers(model, 3e-3, 0.95, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 1e-3)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
         t, eps = torch.rand(8), torch.randn_like(x)
         for i in range(0, 8, micro_batch):
@@ -83,7 +84,9 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
             loss = (model(x_t, t[sl], text[sl]) - target(x[sl], eps[sl], x_t)).square().mean()
             (loss * micro_batch / 8).backward()
         grads.append(model.final.weight.grad.clone())
-    assert torch.allclose(*grads, atol=1e-6)
+    # bf16 sums the split batch in a different order, so equal only up to rounding; a lost or doubled
+    # micro-batch would be off by tens of percent
+    assert grads[0].abs().max() > 0 and (grads[0].float() - grads[1].float()).norm() < 0.03 * grads[0].float().norm()  # measured 0.003
 
 
 def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
@@ -92,7 +95,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(768), depth=2)
+    restored = DiT(torch.zeros(768), depth=2).bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 1e-3)
     for optimizer, saved in zip(resumed, state[1]):
@@ -103,4 +106,4 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(restored, resumed, *batch(1))
     for (name, a), (_, b) in zip(model.named_parameters(), restored.named_parameters()):
-        assert torch.allclose(a, b, atol=1e-6), name
+        assert torch.equal(a, b), name  # the stochastic rounding draws repeat under the same seed
