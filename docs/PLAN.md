@@ -175,7 +175,7 @@ and our per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run
 
 ### H1. Where do the 222 ms per step go?
 
-The GPU runs at about 22 % of peak (FACTS, Sweep throughput). Known: `Stream.next` drains the GPU queue twice per
+The GPU runs at about 22 % of peak (FACTS, Sweep throughput). About 140 ms of each step is fixed, independent of the batch (FACTS, same section), so the Usui step and per-parameter launches are the first suspects. Known: `Stream.next` drains the GPU queue twice per
 micro-batch. Unknown: the split between those waits, launch overhead (no `torch.compile`; Usui and StochasticAdamW
 loop per parameter) and the Usui step, and whether `eigh` in `frame.tangent_spectra` syncs. Settle: a
 `torch.profiler` trace of about 20 steps, after the pinned, non-blocking copy is in.
