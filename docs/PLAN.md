@@ -188,11 +188,19 @@ and our per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run
 About 140 ms of each step is fixed, independent of the batch, and the step is launch-bound: the Usui step is about
 14,700 of 19,500 launches and syncs 9 times, once per `eigh` (FACTS, Sweep throughput and host syncs). The blocks
 are compiled once every Molegrad frame has fit; that cut forward/backward from ~5,400 to ~3,400 launches, a modest
-share of the step. Daniel: "Simple blockwise compile worked well in the past. Cuda graph is also open." Open, each a
-usuitrack change and Daniel's to choose: batch the per-matrix loop over same-shape matrices (12 blocks per role); one
-`eigh` call for all rank groups instead of 9; diagnostics only on record steps; a CUDA graph around the step, which
-needs `eigh` either outside the graph or replaced by a sync-free solver. Also open: the pinned, non-blocking copy in
-`Stream` (4 syncs per step). Settle: a clean img/s benchmark when the GPU is free, then per option.
+share of the step. Daniel: "Simple blockwise compile worked well in the past. Cuda graph is also open."
+
+Daniel, 2026-11-02, on the Usui-step options: batching same-shape matrices and one `eigh` for all rank groups "we
+had that before but on anima we get oom from the intermediates" (usuitrack is built for full finetunes on small
+VRAM); diagnostics "or we disable it now. we already tuned it. but yes just every 500 would be a cheap meter but so
+noisy it might not be worth looking at"; a sync-free solver for the aim "in the past only eigh was able to get a
+stable aim. but with diagonal aim, mabye simpler solutions work too. thats a longer investigation, still worth a
+shot". On the waiting frame: "gradient is only zero for zero init pretraining, so we rather add an option to make it
+save rather than a fixed if(zero)": a random frame at init instead of the fit, the turn at `eta` 0.1 until the end of
+warmup and 0.01–0.02 after, and maybe a refit after about 100 steps ("is that easy or worth it?"). Each is a
+usuitrack SPEC change. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Settle: a clean img/s
+benchmark when the GPU is free; for the random frame, `grad_capture` over the first few hundred steps of a fresh run
+against the fitted frame.
 
 ---
 
