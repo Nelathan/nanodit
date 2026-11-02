@@ -30,13 +30,18 @@ def rows():
     return torch.randn(20, 2, 16, 16).bfloat16(), torch.randn(20, 768).bfloat16()
 
 
-def shuffle(tmp_path, rows, buckets):
-    latents, embeddings = rows
+def shuffle_module(buckets):
     spec = importlib.util.spec_from_file_location("shuffle", ROOT / "scripts" / "shuffle.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.BUCKETS = buckets  # 20 rows would leave most of 64 buckets empty, which 50k-row shards never do
     module.ROW_GROUP = 3  # several row groups per bucket, so the stream sees several per block
+    return module
+
+
+def shuffle(tmp_path, rows, buckets):
+    latents, embeddings = rows
+    module = shuffle_module(buckets)
     write_shard(tmp_path / "a.parquet", latents[:12], embeddings[:12], [f"k{i}" for i in range(12)])
     write_shard(tmp_path / "b.parquet", latents[12:], embeddings[12:], [f"k{i}" for i in range(12, 20)])
     out = tmp_path / "shuffled.parquet"
@@ -60,6 +65,18 @@ def test_shuffle_keeps_every_row_once_in_a_new_order(shuffled, rows):
         i = int(key[1:])
         assert torch.equal(latent, latents[i]) and torch.equal(embedding, embeddings[i])
     assert not list(shuffled.parent.glob("shuffled.parquet.*"))  # the buckets and the .tmp are gone
+
+
+def test_shuffle_keeps_each_image_once_with_its_first_caption(tmp_path, rows):
+    latents, embeddings = rows
+    write_shard(tmp_path / "a.parquet", latents[[0, 1, 1, 2]], embeddings[[0, 1, 2, 3]], ["k0", "k1", "k2", "k3"])  # k2 repeats k1's image
+    write_shard(tmp_path / "b.parquet", latents[[0, 4]], embeddings[[10, 11]], ["k10", "k11"])  # k10 repeats k0's image
+    out = tmp_path / "shuffled.parquet"
+    shuffle_module(buckets=4).shuffle([str(tmp_path / "a.parquet"), str(tmp_path / "b.parquet")], out)
+    table = pq.read_table(out)
+    by_key = dict(zip(table["key"].to_pylist(), data._bf16(table["embedding"], 768)))
+    assert sorted(by_key) == ["k0", "k1", "k11", "k3"]
+    assert torch.equal(by_key["k0"], embeddings[0]) and torch.equal(by_key["k1"], embeddings[1])
 
 
 def test_rows_are_shuffled_inside_a_bucket(tmp_path, rows):
