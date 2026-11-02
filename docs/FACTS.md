@@ -310,12 +310,13 @@ The same checkpoints on the checkpoint score's eval set (SPEC §8: the 1000 Luna
 
 | checkpoint | caption | null |
 |---|---|---|
+| `lr2e-4` final (rerun with the fix, its own `score.jsonl`) | 1.5584 | 1.5598 |
 | `lr1e-3` final | 1.5207 | 1.5215 |
 | `lr2e-3` step 1000 / 4000 / 8000 | 1.6442 / 1.5564 / 1.5299 | 1.6438 / 1.5570 / 1.5307 |
 | `lr2e-3` final | 1.5122 | 1.5130 |
 | `lr4e-3` final | 1.5106 | 1.5109 |
 
-- Same lr order as on shards 12 and 40. The caption gap is under 0.001, and negative at step 1000: the captions here are one short line each (PLAN B3).
+- Same lr order as on shards 12 and 40; 2e-4 ends 0.046 above 2e-3, its training loss (mean of the last 10 records) 1.396 against 1.326, so 2e-4 is not too big but too small. The caption gap is under 0.001, and negative at step 1000: the captions here are one short line each (PLAN B3).
 
 Seed merge (scratch `seedmerge/`): the shuffled file split into three disjoint thirds, one 5000-step child on each at lr 2e-3 (warmup 250), their step-5000 weights merged by multislerp, then 5000 steps from the merged weights (fresh optimizer state) over the whole file in the sweep's order, warmup 752. Same scoring, shard 12 caption:
 
