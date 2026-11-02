@@ -1,7 +1,7 @@
 """Does Usui's frame on one matrix rotate into new directions or stay in its subspace? Reads a run's
 checkpoints; prints, writes nothing.
 
-usage: probe_frame.py RUN_DIR [PARAM]   (PARAM defaults to final.weight)
+usage: probe_frame.py RUN_DIR PARAM   (a matrix Usui tracks, e.g. blocks.0.qkv.weight)
 
 Per checkpoint: W's stable rank Σs²/s₁² and its singular values above 10% of s₁; the share of ‖W‖² outside
 the current frame (0: W lives in today's frame); ‖F_prevᵀ F‖²/r against the previous checkpoint's frame
@@ -18,7 +18,7 @@ from usuitrack.frame import resolve_side
 from tinydit.model import DiT
 from tinydit.optim import build_optimizers
 
-run, name = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "final.weight"
+run, name = sys.argv[1], sys.argv[2]
 with open(f"{run}/config.toml", "rb") as f:
     depth = tomllib.load(f)["depth"]
 model = DiT(torch.zeros(768), depth)

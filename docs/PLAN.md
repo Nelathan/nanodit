@@ -73,7 +73,7 @@ The lr is Usui's fixed step (SPEC §6): a moment that fills its rank writes
 and beta 0.99, Daniel's "for now" after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
 negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: a sweep around 2e-3 at 128 px once the run
 length is set by the data (each image seen once, archive 2026-11-01, final frame and smoke settings). Warmup is 100 steps; the common rule,
-Daniel's note, is 5% of the run. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The conv, the adaLN tables and the null embedding
+Daniel's note, is 5% of the run. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
 train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep axis; they move
 faster than the Usui matrices, and the null embedding turns away from its init in the
 first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
@@ -86,15 +86,6 @@ cannot be told from (0.9, 0.99).
 ### C3. Timestep shift values per stage
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
-
-### C4. The final linear: Usui's frame or the fallback?
-
-SPEC §6 gives the final linear Usui's largest frame, r = 64 (archive 2026-11-01, final
-frame and smoke settings: at 9000 steps r = 64 ended about 0.010 below r = 13, the low-t
-gap closing). In the 1000-step ablation (FACTS, 1000-step ablations) the final linear on
-the fallback is 0.076 lower over steps 501–1000 (one seed), mostly in t bins 1–3, tapering
-to none by bin 8 (bin 1: 1.19 against 1.54). Unknown whether the lead holds or closes over a full run. Settle: the two arms
-over one pass or more of the data. Daniel decides.
 
 ---
 

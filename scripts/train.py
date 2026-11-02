@@ -41,7 +41,7 @@ class Config:
     seed: int
     usui_lr: float  # Usui's fixed step (SPEC §6)
     beta: float
-    rank_fraction: float  # Usui's frame size; the final linear takes the largest (SPEC §6)
+    rank_fraction: float  # Usui's frame size (SPEC §6)
     fallback_lr: float
     warmup: int  # steps of linear lr warmup from lr / warmup, both optimizers
     shift: float  # timestep shift, PLAN C3

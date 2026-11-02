@@ -15,8 +15,8 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_embedding", "final_table", "blocks.0.table", "blocks.0.conv.weight", "final.bias"} <= adam
-    assert {"final.weight", "ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
+    assert {"null_embedding", "final_table", "blocks.0.table", "blocks.0.conv.weight", "final.bias", "final.weight"} <= adam
+    assert {"ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
     assert {g["step_rule"] for g in matrix.param_groups} == {"fixed"}
 
 
@@ -31,22 +31,21 @@ def test_residual_stream_output_matrices_track_their_left_side():
         assert side[name] == "auto"
 
 
-def test_the_first_step_moves_only_the_zero_init_final_linear_and_fits_only_its_frame():
+def test_the_first_step_moves_only_the_zero_init_final_linear_on_the_fallback():
     torch.manual_seed(0)
     model = DiT(torch.randn(768), depth=2).bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
+    fallback_lr = 1e-3
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
     matrices = {n: p.detach().clone() for n, p in model.named_parameters() if id(p) in tracked}
     train_step(model, optimizers, *batch(0))
     moved = {n for n, before in matrices.items() if not torch.equal(model.get_parameter(n), before)}
-    # every other tracked matrix sits behind the zero final linear or a zero gate: its gradient is exactly
+    # every tracked matrix sits behind the zero final linear or a zero gate: its gradient is exactly
     # zero, so it fits no frame yet and waits for a real gradient
     framed = {n for n, p in model.named_parameters() if "frame" in optimizers[0].state.get(p, {})}
-    assert len(matrices) > 10 and moved == framed == {"final.weight"}
-    rank = optimizers[0].state[model.final.weight]["frame"].shape[-1]
-    assert rank == 64  # the largest frame of [128, 512], half its shorter side
-    # the fixed step of [128, 512] (aspect factor 1), up to bf16 rounding
-    assert abs(model.final.weight.float().norm() / (3e-3 * rank**0.5) - 1) < 0.05
+    assert len(matrices) > 10 and moved == framed == set()
+    # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
+    assert abs(model.final.weight.float().abs().mean() / fallback_lr - 1) < 0.05
 
 
 def trained_model(steps=2):
