@@ -1,4 +1,5 @@
 import importlib.util
+import time
 from pathlib import Path
 
 import pyarrow as pa
@@ -123,3 +124,35 @@ def test_the_buffers_are_reused_and_the_order_follows_the_seed(shuffled):
         return rows
 
     assert first_rows(0) == first_rows(0) != first_rows(1)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_micro_batch_does_not_wait_for_queued_gpu_work_and_arrives_whole(shuffled, rows):
+    latents, _ = rows
+    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cuda"), dtype=torch.float32, seed=0)
+    stream.next()  # the first call reads the first block
+    waited = []
+    for _ in range(3):  # later calls wait on the previous copy's event, already passed here
+        torch.cuda.synchronize()
+        torch.cuda._sleep(100_000_000)  # about 50 ms of queued GPU work
+        start = time.perf_counter()
+        x, _ = stream.next()
+        waited.append(time.perf_counter() - start)
+    assert max(waited) < 0.02
+    for row in x.cpu():  # read after the queue: the copy landed whole and cast
+        assert (latents.float() == row).flatten(1).all(1).sum() == 1
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_back_to_back_micro_batches_behind_queued_work_each_arrive_whole(shuffled, rows):
+    latents, embeddings = rows
+    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cuda"), dtype=torch.float32, seed=0)
+    stream.next()
+    torch.cuda.synchronize()
+    torch.cuda._sleep(100_000_000)  # the first copy waits behind this, so the second refill must wait for it
+    batches = [tuple(t.clone() for t in stream.next()) for _ in range(2)]  # clones queue on the stream, no sync
+    for x, text in batches:
+        for row, emb in zip(x.cpu(), text.cpu()):
+            match = (latents.float() == row).flatten(1).all(1).nonzero()
+            assert len(match) == 1 and torch.equal(embeddings[match.item()].float(), emb)
+    assert not torch.equal(batches[0][0], batches[1][0])

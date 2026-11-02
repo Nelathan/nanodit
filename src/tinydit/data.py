@@ -42,6 +42,12 @@ class Stream:
         self.position = 0
         self.x = torch.empty(batch, LATENT_CHANNELS, self.side, self.side, dtype=dtype, device=device)
         self.text = torch.empty(batch, TEXT_DIM, dtype=dtype, device=device)
+        # A copy from pageable memory makes the host wait for all queued GPU work; from these pinned buffers
+        # it does not. `copied` keeps them from being refilled before the GPU has read them.
+        pin = device.type == "cuda"
+        self.staged_x = torch.empty(batch, LATENT_CHANNELS, self.side, self.side, dtype=torch.bfloat16, pin_memory=pin)
+        self.staged_text = torch.empty(batch, TEXT_DIM, dtype=torch.bfloat16, pin_memory=pin)
+        self.copied = torch.cuda.Event() if pin else None
 
     def _read_next(self):
         if not self.order:
@@ -61,7 +67,13 @@ class Stream:
             self.embeddings = torch.cat([self.embeddings[self.position :], embeddings])
             self.position = 0
             self.pending = self._read_next()  # after the cat, so the reader's copies and the cat's never coexist
-        self.x.copy_(self.latents[self.position : self.position + n])
-        self.text.copy_(self.embeddings[self.position : self.position + n])
+        if self.copied is not None:
+            self.copied.synchronize()
+        self.staged_x.copy_(self.latents[self.position : self.position + n])
+        self.staged_text.copy_(self.embeddings[self.position : self.position + n])
+        self.x.copy_(self.staged_x.to(self.x.device, non_blocking=True))  # cast to dtype on the device
+        self.text.copy_(self.staged_text.to(self.text.device, non_blocking=True))
+        if self.copied is not None:
+            self.copied.record()
         self.position += n
         return self.x, self.text
