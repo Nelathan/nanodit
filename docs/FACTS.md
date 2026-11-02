@@ -260,7 +260,17 @@ tiny-dit `8eb82be` (the final layer's rows in the shared projection, text throug
 - `Stream.next` copies pageable CPU bf16 into the GPU fp32 buffers with a blocking `copy_`: the host waits until all queued GPU work has run. Probe, 2026-11-02, a 64-row micro-batch behind a ~71 ms spin kernel: the latent and the text copy each blocked the host for the whole queue (71.0 of 71.0 ms, 76.8 of 76.8 ms); a pinned source copied `non_blocking` and cast on the GPU blocked it for 0.0 of 73.0 ms. So each micro-batch drains the queue twice.
 - Per-step cost against batch (median `imgs_per_s` of every run, same model, micro-batch 64): batch 64 about 354 img/s (`128_abl_batch64`), 128 about 580 (sweep arms, seed-merge runs, `lr2e-4` rerun), 256 about 850 (`128_2e-3_0-10_10ep`, ablations). A fit of step time = a + b·batch gives a ≈ 140 ms fixed per step and b ≈ 0.63 ms per image, so at batch 128 about 64 % of the step does not scale with the batch: the optimizer step and per-step launches, not forward/backward. The drop from ~850 to ~580 is the move to batch 128 (archive 2026-11-02, batch 128), not a slowdown.
 - Not syncs per step: the `.any()` reads in usuitrack `molegrad.py` and `optimizer.py` run only while a matrix has no frame (step 1); `get_total_norm` stays on the device; `Interval` reads once per record.
-- Not measured: how the 222 ms split between those waits, forward/backward and the Usui step, nor whether `torch.linalg.eigh` in `frame.tangent_spectra` (once per rank group per step) reads back to the host.
+- Profile, 2026-11-02 (scratch `profile/profile_step2.py`, `torch.profiler` over 10 steps at batch 128 as 2 × 64, fresh init, after 3 warm-up steps; the GPU shared with `128_4e-3_ep2`, so wall times are indicative only). Launches and host syncs per step:
+
+| phase | launches, eager | launches, blocks compiled | host syncs |
+|---|---|---|---|
+| forward/backward (2 micro-batches) | ~5,400 | ~3,400 | 4, the `Stream` copies |
+| Usui step | ~14,700 | ~14,700 | 9, one `eigh` per rank group |
+| fallback AdamW | ~1,400 | ~1,400 | 0 |
+
+  Wall per step 275 ms eager, 249 ms with the blocks compiled. The GPU is busy about 141 ms of a ~220 ms step, so the step is launch-bound, and the Usui step's per-matrix loop over 77 matrices (about 190 launches each, of which its diagnostics about 2,500 per step) is most of the launches. `torch.linalg.eigh` reads back to the host on CUDA (its info check), which also blocks capturing the step as one CUDA graph.
+- Block compile against fp32 (scratch `profile/equiv.py`, one batch): compiled bf16 gradients are closer to fp32 than eager bf16 (median relative error 4.0 % against 6.4 %, max 21 % against 33 %; Molegrad `z` 4.7 % against 8.3 %).
+- Compiled while a Molegrad frame waits for its fit (until step 3 of a fresh run: the zero-gated blocks' matrices see a zero gradient before), each block breaks its graph at Molegrad's zero-gradient branch and hits dynamo's recompile limit (8), and forward/backward stays at ~3,600 launches. `scripts/train.py` compiles once no frame waits; a 20-step fresh run then had no graph break and one recompile (grad mode, for eval and score).
 
 ## Token signal through the blocks (2026-11-02)
 

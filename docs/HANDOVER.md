@@ -21,7 +21,7 @@ Daniel (2026-11-02), on what comes after the sweep: the prompt-following read (r
 
 1. The 2e-4 sweep arm, rerun with the usuitrack `eigh` fix (`bf7fef7`): `runs/128_sweep_lr2e-4`. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 2. A long 128 px run, scored at every checkpoint: `128_4e-3_ep2` continues the 4e-3 arm at half lr, epoch-wise decay. `128_4e-3_ep3` (same lr, batch 256) is queued behind it by `runs/queue_ep3_2026-11-02.sh`. Daniel: "Yes i do want to see how good a model could be."
-3. Faster training (PLAN H1) before scaling model or data: block-wise `torch.compile` (Daniel: "easy lunch"), and look into CUDA graphs.
+3. Faster training (PLAN H1) before scaling model or data. Block-wise `torch.compile` is in (Daniel: "easy lunch"); its img/s on a free GPU is not measured yet. The Usui step is most of the remaining launches; the CUDA-graph and batching options are in PLAN H1.
 
 ## Traps
 

@@ -183,14 +183,16 @@ and our per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run
 
 ## Group H. Harness throughput
 
-### H1. Where do the 222 ms per step go?
+### H1. How much of the fixed per-step cost can go?
 
-The GPU runs at about 22 % of peak (FACTS, Sweep throughput). About 140 ms of each step is fixed, independent of the batch (FACTS, same section), so the Usui step and per-parameter launches are the first suspects. Known: `Stream.next` drains the GPU queue twice per
-micro-batch. Unknown: the split between those waits, launch overhead (no `torch.compile`; Usui and StochasticAdamW
-loop per parameter) and the Usui step, and whether `eigh` in `frame.tangent_spectra` syncs. Settle: a
-`torch.profiler` trace of about 20 steps, after the pinned, non-blocking copy is in. Daniel: "Simple blockwise compile
-worked well in the past. Cuda graph is also open."
-
+About 140 ms of each step is fixed, independent of the batch, and the step is launch-bound: the Usui step is about
+14,700 of 19,500 launches and syncs 9 times, once per `eigh` (FACTS, Sweep throughput and host syncs). The blocks
+are compiled once every Molegrad frame has fit; that cut forward/backward from ~5,400 to ~3,400 launches, a modest
+share of the step. Daniel: "Simple blockwise compile worked well in the past. Cuda graph is also open." Open, each a
+usuitrack change and Daniel's to choose: batch the per-matrix loop over same-shape matrices (12 blocks per role); one
+`eigh` call for all rank groups instead of 9; diagnostics only on record steps; a CUDA graph around the step, which
+needs `eigh` either outside the graph or replaced by a sync-free solver. Also open: the pinned, non-blocking copy in
+`Stream` (4 syncs per step). Settle: a clean img/s benchmark when the GPU is free, then per option.
 
 ---
 
