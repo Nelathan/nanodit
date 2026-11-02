@@ -20,6 +20,13 @@ def _bf16(column, *shape: int) -> Tensor:
     return torch.from_numpy(raw.copy()).view(torch.bfloat16).view(len(array), *shape)
 
 
+def read_rows(path: str, resolution: int) -> tuple[Tensor, Tensor]:
+    """Every row of a precomputed Parquet, in file order: bf16 latents [N, 2, res/2, res/2] and embeddings [N, 768]."""
+    table = pq.read_table(path, columns=["latent", "embedding"])
+    side = resolution // 2
+    return _bf16(table["latent"], LATENT_CHANNELS, side, side), _bf16(table["embedding"], TEXT_DIM)
+
+
 class Stream:
     """Micro-batches of latents and embeddings, read from the file in blocks of row groups and copied into
     buffers allocated once, cast to `dtype` on the way. Each pass over the file visits the blocks in a fresh

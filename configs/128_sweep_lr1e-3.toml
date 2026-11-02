@@ -22,4 +22,5 @@ eval_prompts = "eval_prompts.txt"
 eval_seed = 1
 guidance = 4.0
 sampler_steps = 30
+eval_set = "/mnt/mars/ai/tiny-dit/precomputed/128/lunara_art_eval.parquet"
 wandb_project = "tiny-dit"

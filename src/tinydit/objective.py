@@ -13,6 +13,12 @@ def sample_t(batch: int, shift: float, device: torch.device | None = None) -> Te
     return torch.sigmoid(torch.randn(batch, device=device) + math.log(shift))
 
 
+def t_quantiles(n: int, shift: float) -> Tensor:
+    """The midpoints of `n` equal-probability bins of `sample_t`'s distribution: a fixed t grid that weighs t as training does."""
+    p = (torch.arange(n, dtype=torch.float64) + 0.5) / n
+    return torch.sigmoid(torch.special.ndtri(p) + math.log(shift)).float()
+
+
 def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
     t = t.view(-1, 1, 1, 1)
     return (1 - t) * x + t * eps
@@ -21,6 +27,10 @@ def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
 def target(x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
     """T = x_t - v with v = ε - x."""
     return x_t - (eps - x)
+
+
+def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
+    return (out - target(x, eps, x_t)).square().flatten(1).mean(1)
 
 
 def drop_prompts(text: Tensor, null_embedding: Tensor) -> Tensor:
@@ -34,7 +44,7 @@ def flow_loss(model, x: Tensor, text: Tensor, shift: float) -> tuple[Tensor, Ten
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, t)
     out = model(x_t, t, drop_prompts(text, model.null_embedding))
-    per_sample = (out - target(x, eps, x_t)).square().flatten(1).mean(1)
+    per_sample = per_sample_loss(out, x, eps, x_t)
     return per_sample.mean(), per_sample, t
 
 

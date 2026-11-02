@@ -17,14 +17,15 @@ import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
-from tinydit.data import Stream
+from tinydit.data import Stream, read_rows
 from tinydit.model import DiT
-from tinydit.objective import flow_loss, loss_by_t_bucket
+from tinydit.objective import flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
 from tinydit.optim import build_optimizers
 from tinydit.sampler import euler_sample
 
 PROMPT_PREFIX = "title: none | text: "  # SPEC §1
 T_BUCKETS = 10
+SCORE_TS = 10  # the score's t grid: equal-probability bins of the training t (SPEC §8)
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class Config:
     eval_seed: int  # prompt i's noise takes seed eval_seed + i
     guidance: float
     sampler_steps: int
+    eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
     wandb_project: str
 
 
@@ -88,6 +90,26 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
     Image.fromarray(grid.reshape(rows * cfg.resolution, cols * cfg.resolution, 3)).save(path)
     append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seeds=list(range(cfg.eval_seed, cfg.eval_seed + n_prompts))))
     wandb.log({"eval": wandb.Image(str(path), caption="prompts row-major in eval_prompts.txt order")}, step=step)
+
+
+@torch.no_grad()
+def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
+    """The loss on fixed rows with fixed noise at every t of a fixed grid, with each row's caption and with the
+    null embedding: one number per condition, comparable across steps and runs, and its value at each t."""
+    result = {}
+    for condition, condition_text in (("caption", text), ("null", model.null_embedding.expand(len(x), -1))):
+        per_t = []
+        for t_value in ts.tolist():
+            total = 0.0
+            for i in range(0, len(x), batch):
+                xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
+                tb = condition_text[i : i + batch].to(device, torch.float32)
+                t = torch.full((len(xb),), t_value, device=device)
+                x_t = noisy(xb, eb, t)
+                total += per_sample_loss(model(x_t, t, tb).float(), xb, eb, x_t).sum()
+            per_t.append(float(total) / len(x))
+        result[f"loss_{condition}"], result[f"loss_{condition}_by_t"] = sum(per_t) / len(per_t), per_t
+    return result
 
 
 def append_jsonl(path: Path, record: dict) -> None:
@@ -174,6 +196,9 @@ def main(config_path: str) -> None:
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
+    score_x, score_text = read_rows(cfg.eval_set, cfg.resolution)
+    score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
+    score_ts = t_quantiles(SCORE_TS, cfg.shift)
 
     run_dir.mkdir(parents=True)
     shutil.copy(config_path, run_dir / "config.toml")
@@ -203,6 +228,9 @@ def main(config_path: str) -> None:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
         if step % cfg.checkpoint_every == 0 or step == cfg.steps:
             save_checkpoint(model, optimizers, step, run_dir)
+            scores = score(model, score_x, score_text, score_noise, score_ts, cfg.micro_batch, device)
+            append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)
+            wandb.log({f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null")}, step=step)
         interval.start += time.perf_counter() - paused  # img/s counts training time only
     wandb.finish()
 

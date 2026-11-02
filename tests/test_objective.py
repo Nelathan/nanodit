@@ -1,6 +1,6 @@
 import torch
 
-from tinydit.objective import PROMPT_DROPOUT, drop_prompts, flow_loss, loss_by_t_bucket, noisy, sample_t, target
+from tinydit.objective import PROMPT_DROPOUT, drop_prompts, flow_loss, loss_by_t_bucket, noisy, sample_t, t_quantiles, target
 
 
 def test_loss_equals_velocity_error():
@@ -30,6 +30,13 @@ def test_shift_moves_t_toward_noise():
     assert abs(sample_t(50000, 1.0).median() - 0.5) < 0.01
     # a shift s sends the median 0.5 to s / (1 + s)
     assert abs(sample_t(50000, 3.0).median() - 0.75) < 0.01
+
+
+def test_t_quantiles_are_the_training_t_at_equal_probability_steps():
+    torch.manual_seed(0)
+    for shift in (1.0, 3.0):
+        p = (torch.arange(10) + 0.5) / 10
+        assert (t_quantiles(10, shift) - torch.quantile(sample_t(200000, shift), p)).abs().max() < 0.005
 
 
 def test_bucketed_loss():

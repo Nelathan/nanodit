@@ -26,6 +26,7 @@ def train():
 def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4, log_every=1):
     torch.manual_seed(0)
     write_shard(tmp_path / "s.parquet", torch.randn(16, 2, 16, 16).bfloat16(), torch.randn(16, 768).bfloat16())
+    write_shard(tmp_path / "eval.parquet", torch.randn(5, 2, 16, 16).bfloat16(), torch.randn(5, 768).bfloat16())
     save_file({"null": torch.randn(768)}, tmp_path / "null.safetensors")
     (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
@@ -53,6 +54,7 @@ eval_prompts = "prompts.txt"
 eval_seed = 42
 guidance = 2.0
 sampler_steps = 2
+eval_set = "{tmp_path / 'eval.parquet'}"
 wandb_project = "test"
 """)
     return config
@@ -105,13 +107,19 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\na cat\n"
     assert [r["lr_usui"] for r in log] == [3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [1e-3, 1e-3]  # the last step's, past warmup 2
 
-    curves = [(step, data) for step, data in sent if "eval" not in data]
+    curves = [(step, data) for step, data in sent if "loss" in data]
     assert [step for step, _ in curves] == [2, 3] and [data["loss"] for _, data in curves] == [r["loss"] for r in log]
     for (_, data), r in zip(curves, log):  # the same values as train.jsonl, empty t buckets left out
         expected = {key: r[key] for key in ("loss", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
         expected |= {f"loss_by_t/{b / 10:.1f}": v for b, v in enumerate(r["loss_by_t"]) if v is not None}
         assert data == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
     assert [step for step, data in sent if "eval" in data] == [2, 3]
+
+    scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
+    assert [s["step"] for s in scores] == [2, 3]  # every checkpoint
+    assert [(step, sorted(data)) for step, data in sent if "eval/loss_caption" in data] == [(s, ["eval/loss_caption", "eval/loss_null"]) for s in (2, 3)]
+    for s in scores:
+        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == 10
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
@@ -136,6 +144,27 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     matrix.load_state_dict(usui_state)
     fallback.load_state_dict(adam_state)
+
+
+def test_score_is_each_conditions_loss_at_each_t_with_each_rows_own_noise(train):
+    class Echo(torch.nn.Module):  # its output depends on t and on the embedding it is given
+        null_embedding = torch.randn(768)
+
+        def forward(self, x_t, t, text):
+            return x_t * t.view(-1, 1, 1, 1) + text[:, :1, None, None]
+
+    torch.manual_seed(0)
+    x, text, noise, ts = torch.randn(5, 2, 4, 4).bfloat16(), torch.randn(5, 768).bfloat16(), torch.randn(5, 2, 4, 4), torch.tensor([0.2, 0.7])
+    result = train.score(Echo(), x, text, noise, ts, 2, torch.device("cpu"))
+    for condition, embedding in (("caption", text.float()), ("null", Echo.null_embedding.expand(5, -1))):
+        by_t = []
+        for t_value in ts.tolist():
+            t = torch.full((5,), t_value)
+            x_t = noisy(x.float(), noise, t)
+            by_t.append(float((Echo()(x_t, t, embedding) - target(x.float(), noise, x_t)).square().mean()))
+        torch.testing.assert_close(result[f"loss_{condition}_by_t"], by_t)
+        torch.testing.assert_close(result[f"loss_{condition}"], sum(by_t) / 2)
+    torch.testing.assert_close(train.score(Echo(), x, text, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
 
 
 def test_existing_run_is_not_overwritten(train, tmp_path, monkeypatch):
