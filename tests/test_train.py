@@ -87,6 +87,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
 
     real_accumulate = train.accumulate_gradients
     monkeypatch.setattr(train, "accumulate_gradients", accumulate_gradients)
+    noises = []
+    real_sample = train.euler_sample
+    monkeypatch.setattr(train, "euler_sample", lambda model, noise, *rest: noises.append(noise.clone()) or real_sample(model, noise, *rest))
     train.main(str(write_config(tmp_path, steps=3, eval_every=2, checkpoint_every=2, log_every=2)))
     run = tmp_path / "runs" / "smoke"
 
@@ -112,6 +115,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
+    assert evals[0]["seeds"] == [42, 43, 44]
+    # each prompt its own noise, the same at every eval
+    assert torch.equal(noises[0], noises[1]) and not torch.equal(noises[0][0], noises[0][1])
     from PIL import Image
     grid = Image.open(evals[0]["image"])
     assert grid.size == (2 * 32, 2 * 32)  # three prompts, two columns, row-major

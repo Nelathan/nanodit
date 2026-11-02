@@ -49,7 +49,7 @@ class Config:
     checkpoint_every: int
     eval_every: int
     eval_prompts: str
-    eval_seed: int
+    eval_seed: int  # prompt i's noise takes seed eval_seed + i
     guidance: float
     sampler_steps: int
     wandb_project: str
@@ -71,10 +71,10 @@ def load_decoder(device: torch.device):
 
 @torch.no_grad()
 def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
-    """Fixed prompts, one fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
+    """Fixed prompts, each with its own fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
     side = cfg.resolution // 2
     n_prompts = len(text)
-    noise = torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed)).repeat(n_prompts, 1, 1, 1)
+    noise = torch.cat([torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed + i)) for i in range(n_prompts)])
     latents = euler_sample(model, noise.to(device), text.to(device), cfg.sampler_steps, cfg.guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)
     images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P, 3, res, res]
@@ -86,7 +86,7 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
     path = run_dir / "eval" / f"step_{step:07d}.png"
     path.parent.mkdir(exist_ok=True)
     Image.fromarray(grid.reshape(rows * cfg.resolution, cols * cfg.resolution, 3)).save(path)
-    append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seed=cfg.eval_seed))
+    append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seeds=list(range(cfg.eval_seed, cfg.eval_seed + n_prompts))))
     wandb.log({"eval": wandb.Image(str(path), caption="prompts row-major in eval_prompts.txt order")}, step=step)
 
 
