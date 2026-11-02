@@ -16,6 +16,7 @@ import torch
 import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
+from usuitrack.molegrad import MoleLinear
 
 from tinydit.data import Stream, read_rows
 from tinydit.model import DiT
@@ -225,7 +226,14 @@ def main(config_path: str) -> None:
     accumulate = cfg.batch // cfg.micro_batch
     interval = Interval()
     last = start + cfg.steps
+    compiled = False
     for step in range(start + 1, last + 1):
+        if not compiled and not any(m.basis.requires_grad for m in model.modules() if isinstance(m, MoleLinear)):
+            # A frame waiting for its fit branches on its gradient in the backward, which breaks the compiled
+            # graph and spends dynamo's recompile limit. A resumed run has every frame from its checkpoint.
+            for block in model.blocks:
+                block.compile()
+            compiled = True
         loss, per_sample, t = accumulate_gradients(model, stream, accumulate, cfg.shift)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
