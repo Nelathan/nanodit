@@ -38,7 +38,7 @@ class Config:
     depth: int
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
-    steps: int
+    steps: int  # steps this run takes, after init_from's
     seed: int
     usui_lr: float  # Usui's fixed step (SPEC §6)
     beta: float
@@ -55,6 +55,21 @@ class Config:
     sampler_steps: int
     eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
     wandb_project: str
+    init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
+
+
+def load_checkpoint(model, optimizers, path: Path) -> int:
+    """Loads a `save_checkpoint` directory into a built model and its optimizers. Every optimizer setting but the lr
+    comes from the checkpoint (beta, rank fraction, betas); the lr is the configured one, as the saved one belongs to
+    the earlier run's schedule. Returns the step it was saved at."""
+    model.load_state_dict(load_file(path / "model.safetensors"))
+    for optimizer, state in zip(optimizers, torch.load(path / "optimizer.pt", map_location="cpu"), strict=True):
+        lrs = [group["lr"] for group in optimizer.param_groups]
+        optimizer.load_state_dict(state)
+        for group, lr in zip(optimizer.param_groups, lrs, strict=True):
+            group["lr"] = lr
+            group.pop("initial_lr", None)  # else the schedule built next would take the saved lr as its base
+    return int(path.name.removeprefix("step_"))
 
 
 def embed_prompts(prompts: list[str]) -> torch.Tensor:
@@ -193,6 +208,7 @@ def main(config_path: str) -> None:
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
+    start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
@@ -208,7 +224,8 @@ def main(config_path: str) -> None:
 
     accumulate = cfg.batch // cfg.micro_batch
     interval = Interval()
-    for step in range(1, cfg.steps + 1):
+    last = start + cfg.steps
+    for step in range(start + 1, last + 1):
         loss, per_sample, t = accumulate_gradients(model, stream, accumulate, cfg.shift)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
@@ -218,15 +235,15 @@ def main(config_path: str) -> None:
             optimizer.step()
             optimizer.zero_grad()
             schedule.step()
-        if step % cfg.log_every == 0 or step == cfg.steps:
+        if step % cfg.log_every == 0 or step == last:
             record = interval.report(step, cfg.batch) | dict(lr_usui=lr_usui, lr_fallback=lr_fallback, usui=optimizers[0].pop_diagnostics())
             append_jsonl(run_dir / "train.jsonl", record)
             wandb.log(wandb_scalars(record), step=step)
             interval = Interval()
         paused = time.perf_counter()
-        if step % cfg.eval_every == 0 or step == cfg.steps:
+        if step % cfg.eval_every == 0 or step == last:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
-        if step % cfg.checkpoint_every == 0 or step == cfg.steps:
+        if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
             scores = score(model, score_x, score_text, score_noise, score_ts, cfg.micro_batch, device)
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)

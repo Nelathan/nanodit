@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -210,6 +211,39 @@ def test_accumulated_batch_trains_logs_and_checkpoints(train, tmp_path, monkeypa
     assert [r["lr_usui"] for r in log] == [1.5e-3, 3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [5e-4, 1e-3, 1e-3]  # warmup 2
     assert 0 < sum(v is not None for r in log for v in r["loss_by_t"]) <= 24  # 8 samples per step, 4 micro-batches
     assert (run / "checkpoints" / "step_0000003" / "optimizer.pt").exists()
+
+
+def test_a_run_from_a_checkpoint_starts_from_its_weights_and_optimizer_state_at_its_own_lr(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=2, eval_every=2, checkpoint_every=2)
+    train.main(str(config))
+    saved = tmp_path / "runs" / "smoke" / "checkpoints" / "step_0000002"
+    text = config.read_text().replace('name = "smoke"', 'name = "resumed"').replace("usui_lr = 3e-3", "usui_lr = 1e-3")
+    config.write_text(text.replace("steps = 2", "steps = 1").replace("warmup = 2", "warmup = 0") + f'init_from = "{saved}"\n')
+    seen = []
+    real_accumulate = train.accumulate_gradients
+
+    def accumulate_gradients(model, stream, micro_batches, shift):
+        if not seen:  # before the first step
+            seen.append(({k: v.clone() for k, v in model.state_dict().items()}, [copy.deepcopy(o.state_dict()) for o in optimizers]))  # state_dict holds the live tensors
+        return real_accumulate(model, stream, micro_batches, shift)
+
+    optimizers = []
+    real_build = train.build_optimizers
+    monkeypatch.setattr(train, "build_optimizers", lambda *args: optimizers.extend(real_build(*args)) or tuple(optimizers))
+    monkeypatch.setattr(train, "accumulate_gradients", accumulate_gradients)
+    train.main(str(config))
+
+    weights, states = seen[0]
+    assert all(torch.equal(weights[k].cpu(), v) for k, v in load_file(saved / "model.safetensors").items())
+    for state, saved_state in zip(states, torch.load(saved / "optimizer.pt"), strict=True):
+        assert state["state"].keys() == saved_state["state"].keys()
+        assert all(state["state"][i]["step"] == s["step"] for i, s in saved_state["state"].items() if "step" in s)  # AdamW's bias correction continues
+        assert all(torch.equal(state["state"][i][key].cpu(), value.cpu()) for i, s in saved_state["state"].items() for key, value in s.items() if torch.is_tensor(value))
+    run = tmp_path / "runs" / "resumed"
+    log = [json.loads(line) for line in (run / "train.jsonl").read_text().splitlines()]
+    assert [r["step"] for r in log] == [3] and log[0]["lr_usui"] == 1e-3 and log[0]["lr_fallback"] == 1e-3
+    assert (run / "checkpoints" / "step_0000003").exists() and [json.loads(line)["step"] for line in (run / "score.jsonl").read_text().splitlines()] == [3]
 
 
 def test_eval_and_checkpoint_fall_on_a_record(train, tmp_path, monkeypatch):
