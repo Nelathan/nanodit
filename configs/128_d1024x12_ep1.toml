@@ -1,15 +1,15 @@
-# Epoch 1 of 4 of the d512x24 arm (PLAN G1): width 512, depth 24, MLP at 2 x width; usui lr halves each epoch, fallback a quarter of it. From scratch; warmup is 5 % of the epoch. Fields: scripts/train.py Config.
-name = "128_d512x24_ep1"
+# Epoch 1 of 4 of the d1024x12 arm (PLAN G1): width 1024, depth 12, MLP at 2 x width; usui lr halves each epoch, fallback a quarter of it. From scratch; warmup is 5 % of the epoch. Fields: scripts/train.py Config.
+name = "128_d1024x12_ep1"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/mnt/mars/ai/tiny-dit/precomputed/128_shuffled_0-46.parquet"
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
-depth = 24
-width = 512
+depth = 12
+width = 1024
 batch = 256
 micro_batch = 64
 steps = 7521
-seed = 21
+seed = 31
 usui_lr = 0.008
 beta = 0.99
 rank_fraction = 0.1

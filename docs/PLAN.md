@@ -159,10 +159,11 @@ Daniel, 2026-11-02, on the guidance grid: "it learns fine, its just tiny and 128
 not see anything at rhat setting. We might not see anything from this model anyway, might lack bigger mlp, more width
 or depth." And: "We should make it faster training before we scale up model or data" (H1).
 
-Daniel, 2026-11-02, for the night: d768 × depth 12 first ("768 first"), then a depth arm (d512 × depth 24, about the
-same parameters); MLP stays at 2d ("just when we plan the big run and add the second image dataset and prepare 256px
-too, then we also scale mlp accordingly"). Each 4 epochs at batch 256 from the start, usui lr 8e-3, 4e-3, 2e-3, 1e-3
-by epoch, fallback a quarter of it, 5 % warmup in the first.
+Daniel, 2026-11-02, for the night: d768 × depth 12 first ("768 first"); MLP stays at 2d ("just when we plan the big
+run and add the second image dataset and prepare 256px too, then we also scale mlp accordingly"). Each 4 epochs at
+batch 256 from the start, usui lr 8e-3, 4e-3, 2e-3, 1e-3 by epoch, fallback a quarter of it, 5 % warmup in the first.
+Daniel, 2026-11-03: the depth arm (d512 × 24) is replaced by d1024 × 12, same schedule: "i think its more interesting
+to first explore one axis". The depth arm waits (G4).
 
 ### G2. Patch size
 
