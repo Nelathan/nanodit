@@ -9,6 +9,9 @@ Probe sample = first 256 images/captions of `data_512_2M/data_000000.tar` (not r
 - Shard 0: 7,475,189,760 bytes, 50,000 samples (50,000 `.jpg` + 50,000 `.json`), images 512×512, caption in `{"prompt": "..."}`, keys `flux_512_100k_<8 digits>`. Other shards are 7.5 to 11.1 GB (repo listing).
 - Shards 0–3, precomputed 2026-11-01 (`precompute.py` log, parquet keys): 0 and 1 are `flux_512_100k_*`, 50,000 pairs each; 2 and 3 are `dalle3_1m_*`, 49,985 and 49,982 pairs, keys numbered 0–49999 with gaps. Shard 2's tar (11.1 GB) was re-downloaded and listed: 49,985 complete jpg+json pairs, all in the parquet, so the gaps are in the source. Shard 3's tar was not re-checked.
 - Shards 0–3 at 128 px, every 97th row (2026-11-01, read back from the parquets): latent std 1.06, embedding norm 1.000.
+- Shards 0–46 at 128 px, all precomputed by 2026-11-02 04:18 (parquet metadata and keys): 2,290,793 rows. Sources by shard: 0–1 `flux_512_100k`, 2–19 `dalle3_1m`, 20–34 `llava_next_captioned_700K`, 35–46 `llava_generated_by_flux_500K`. Keys restart at 0 in every shard, so they repeat across shards of one source. Below 50,000 rows: shard 19 44,251, 34 38,524, 46 (the last) 8,128, and 2–18 by up to 18; 19 and 34 not checked against their tars.
+- Repeats in shards 0–46 at 128 px (2026-11-02, scratch scripts hashing each row's latent bytes, with its caption, not kept): 1,925,416 distinct latents and 2,021,723 distinct (latent, caption) rows in 2,290,793. Shards 20–34 (`llava_next_captioned_700K`, 738,524 rows) hold 378,362 distinct latents and 472,515 distinct (latent, caption) rows; the other shards (1,552,269 rows) 1,547,055 distinct latents. Within that source an image comes in runs of consecutive keys, 1 to 7 long and most often 4 (shard 20), with the same or a slightly different caption (shard 20, keys 11137–11140: three identical captions, one with "a pitcher of water"), and recurs at later keys and in other shards of the source, up to 11 times in one shard. Distinct latents per 50,000 rows rise, with dips, from 19,653 in shard 20 to 49,331 in shard 33. `128_shuffled_0-10.parquet` has none of these shards.
+- The same caption does not always give the same embedding bytes: in shard 20, 1033 captions that occur more than once have embeddings differing by at most 4.9e-4 per entry, cosine ≥ 0.9999999, bf16 rounding (2026-11-02).
 
 ## Primal 2x2 (B1)
 
@@ -208,6 +211,7 @@ The same config at beta 0.99. wandb run `facr413t`, 850 img/s with nothing else 
 
 - `scripts/precompute.py 128` on the RTX 4070 Super, both encoders fp32, TF32 convolutions on (the cuDNN default), shard 4: about 137 rows/s, the GPU at 99%, about 6 min per 50k-row shard plus its download (4 min 45 s for shard 4's 11.1 GB, about 39 MB/s). With the next download overlapping: 141 rows/s over shard 4's first 5k rows (2026-11-01).
 - 32 latents of shard 0 decoded by Primal and encoded again: GPU with TF32 against CPU fp32 differ by 0.25% relative per latent (max 0.73%), against 0.17% for rounding the CPU latent to bf16; GPU with TF32 off matches CPU to 2e-6, at about 75 rows/s over shard 4's first 15k rows (2026-11-01).
+- Shards 11–46 on the GPU, 2026-11-02 00:29–04:18: 1,740,848 rows in 3 h 48 min with the downloads, about 127 rows/s; the progress lines read 90–170 rows/s, median 132 (log `precomputed/precompute_128_11-46_gpu.log`).
 
 ### Shuffle and stream (2026-11-01)
 
