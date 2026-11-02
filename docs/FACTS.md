@@ -216,7 +216,8 @@ The same config at beta 0.99. wandb run `facr413t`, 850 img/s with nothing else 
 ### Shuffle and stream (2026-11-01)
 
 - `scripts/shuffle.py` over shards 0–10 at 128 px: 549,945 rows, 9.98 GB out, 164 s, peak RSS 4.4 GB (log `precomputed/shuffle_128_0-10.log`).
-- `tinydit.data.Stream` on the CPU over that file, micro-batch 64 cast to fp32, with a training run alongside: 48k rows/s over 2000 micro-batches after one, peak RSS 2.4 GB for the whole process (a scratch probe under `/usr/bin/time`, not kept).
+- `scripts/shuffle.py` over shards 0–46 at 128 px, keeping each image once (`8bcffbb`), 2026-11-02 08:17 to 08:33: 1,925,416 rows of 2,290,793 read, 34.8 GB out (log `precomputed/shuffle_128_0-46.log`); peak memory not measured.
+- `tinydit.data.Stream` on the CPU over the 0–10 file, micro-batch 64 cast to fp32, with a training run alongside: 48k rows/s over 2000 micro-batches after one, peak RSS 2.4 GB for the whole process (a scratch probe under `/usr/bin/time`, not kept).
 - `128_2e-3_0-10_10ep`, the first run on the stream, trained at 746–846 img/s per 100-step record up to step 3700 and 847–862 from step 3800 to the end, against about 850 for `128_fixed_2e-3_b099_1k`. The slow records run past the first pass (step 2148), so a cold page cache does not explain them. The agent session's CPU test runs overlapped part of them (the suite at 22:25, about step 3400); what else ran is not recorded.
 - Every run above it drew its batches with replacement from shards 0–3 (about 200k rows); a run on the stream sees each of 550k rows once per pass. Losses do not compare across that line without saying so.
 

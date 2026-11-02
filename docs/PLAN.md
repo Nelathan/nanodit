@@ -71,14 +71,13 @@ throughput is unmeasured. Settle: when the 256 px stage is planned.
 The lr is Usui's fixed step (SPEC §6): a moment that fills its rank writes
 `‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
 and beta 0.99, Daniel's "for now" after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
-negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: a sweep around 2e-3 at 128 px once the run
-length is set by the data (each image seen once, archive 2026-11-01, final frame and smoke settings). Warmup is 100 steps; the common rule,
-Daniel's note, is 5% of the run. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
+negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: the sweep at 128 px, usui lr 2e-4, 1e-3, 2e-3 and 4e-3, one pass each over the deduped shards 0–46
+at batch 128, warmup 5% of the run, no decay for now (archive 2026-11-02, LR sweep). Usui's README recommends a
+decay; whether to add one stays open after the sweep. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
 train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep axis; they move
 faster than the Usui matrices, and the null embedding turns away from its init in the
 first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
-think. unless you say it evolves fine. probably also its beta." No AdamW reference run. The
-harness has no decay; Usui's README recommends one. The 1000-step ablation (FACTS,
+think. unless you say it evolves fine. probably also its beta." No AdamW reference run. The 1000-step ablation (FACTS,
 1000-step ablations; one seed): fallback lr 3e-4 is worse than 1e-3 by 0.014 overall and
 in every t bin (0.005 to 0.044), near the 0.011 yardstick there; betas (0.9, 0.999)
 cannot be told from (0.9, 0.99).
