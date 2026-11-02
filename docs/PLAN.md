@@ -64,7 +64,8 @@ At 128 px the batch is 128 (archive 2026-11-02, batch 128), 64 × 128 ≈ 8k tok
 follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
 unit for diffusion (t sampling adds its own gradient noise). A smaller batch may want a lower lr, and a lower rank
 fraction if `tangent_live_fraction` falls; it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
-throughput is unmeasured. Settle: when the 256 px stage is planned.
+throughput is unmeasured. Settle: when the 256 px stage is planned. Daniel, at 128 px, after the sweep: "honestly we might go back
+to bs256 again"; about 140 ms of each step is fixed, so batch 256 runs at about 850 img/s against 580 (FACTS, Sweep throughput).
 
 ### C2. Which LR from scratch, and how long a warmup?
 

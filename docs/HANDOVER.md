@@ -17,7 +17,10 @@ Data: the 128 px precompute of all 47 shards is done (FACTS, Sample and shard; G
 
 ## Next
 
-1. The LR sweep (C2): `configs/128_sweep_lr{2e-4,1e-3,2e-3,4e-3}.toml`, run one after another. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
+Daniel (2026-11-02), on what comes after the sweep: the prompt-following read (render one checkpoint's eval grid at several guidance scales) and a long 128 px run are next; the 256 px precompute "is too early i think, if we cant even get basic concepts recognizable. Theres still no hint of a cat". On batch: "honestly we might go back to bs256 again" (PLAN C1).
+
+1. The 2e-4 sweep arm, rerun with the usuitrack `eigh` fix (`bf7fef7`): `runs/128_sweep_lr2e-4`. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
+2. A long 128 px run at the chosen lr, scored at every checkpoint.
 
 ## Traps
 
