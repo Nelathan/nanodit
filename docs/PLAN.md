@@ -86,7 +86,9 @@ cannot be told from (0.9, 0.99). Sweep (FACTS, LR sweep and seed merge): loss fa
 larger common mode in the residual stream (G3). 2e-4, rerun with the fix, ends 0.046 above 2e-3 on the Lunara score: too small, not too big. Daniel, 2026-11-02:
 "Even if 2e-3 was looking better aesthetically lets focus on progress, so 4 is best and could even be higher"; "Why no
 decay? I think 4e-3 had a headstart but later the model needs softer touches. I would decay epoch wise". Running:
-`128_4e-3_ep2`, the 4e-3 run's weights and optimizer state, one more pass at half lr (usui 2e-3, fallback 5e-4).
+`128_4e-3_ep2`, the 4e-3 run's weights and optimizer state, one more pass at half lr (usui 2e-3, fallback 5e-4). Then
+`128_4e-3_ep3`: Daniel, "Next epoch is same lr but double bs", one pass at batch 256, its records, evals and checkpoints
+every 128k images as before.
 
 ### C3. Timestep shift values per stage
 

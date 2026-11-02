@@ -20,8 +20,8 @@ Data: the 128 px precompute of all 47 shards is done (FACTS, Sample and shard; G
 Daniel (2026-11-02), on what comes after the sweep: the prompt-following read (render one checkpoint's eval grid at several guidance scales) and a long 128 px run are next; the 256 px precompute "is too early i think, if we cant even get basic concepts recognizable. Theres still no hint of a cat". On batch: "honestly we might go back to bs256 again" (PLAN C1).
 
 1. The 2e-4 sweep arm, rerun with the usuitrack `eigh` fix (`bf7fef7`): `runs/128_sweep_lr2e-4`. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
-2. A long 128 px run, scored at every checkpoint: `128_4e-3_ep2` continues the 4e-3 arm at half lr, epoch-wise decay. Daniel: "Yes i do want to see how good a model could be."
-3. Faster training (PLAN H1) before scaling model or data: block-wise `torch.compile`, CUDA graphs.
+2. A long 128 px run, scored at every checkpoint: `128_4e-3_ep2` continues the 4e-3 arm at half lr, epoch-wise decay. `128_4e-3_ep3` (same lr, batch 256) is queued behind it by `runs/queue_ep3_2026-11-02.sh`. Daniel: "Yes i do want to see how good a model could be."
+3. Faster training (PLAN H1) before scaling model or data: block-wise `torch.compile` (Daniel: "easy lunch"), and look into CUDA graphs.
 
 ## Traps
 
