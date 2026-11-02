@@ -9,10 +9,7 @@ from torch import Tensor, nn
 PATCH = 8
 LATENT_CHANNELS = 2
 TOKEN_DIM = LATENT_CHANNELS * PATCH * PATCH  # 128
-DIM = 512
-HEADS = 8
-HEAD_DIM = DIM // HEADS
-HIDDEN = 1024
+HEAD_DIM = 64
 TEXT_DIM = 768
 TIME_DIM = 256
 ROPE_DIM = HEAD_DIM // 2  # rotated dims per head; the rest is position-free
@@ -58,47 +55,49 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 
 class Block(nn.Module):
-    def __init__(self):
+    def __init__(self, width: int):
         super().__init__()
-        self.table = nn.Parameter(torch.zeros(N_MOD, DIM))
-        self.conv = nn.Conv2d(DIM, DIM, 3, padding=1, groups=DIM, bias=False)
-        self.qkv = nn.Linear(DIM, 3 * DIM, bias=False)
-        self.gate = nn.Linear(DIM, DIM, bias=False)
+        self.width, self.heads, hidden = width, width // HEAD_DIM, 2 * width
+        self.table = nn.Parameter(torch.zeros(N_MOD, width))
+        self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
+        self.qkv = nn.Linear(width, 3 * width, bias=False)
+        self.gate = nn.Linear(width, width, bias=False)
         self.q_norm = nn.RMSNorm(HEAD_DIM)
         self.k_norm = nn.RMSNorm(HEAD_DIM)
-        self.out = nn.Linear(DIM, DIM, bias=False)
-        self.w_gate = nn.Linear(DIM, HIDDEN, bias=False)
-        self.w_up = nn.Linear(DIM, HIDDEN, bias=False)
-        self.w_down = nn.Linear(HIDDEN, DIM, bias=False)
+        self.out = nn.Linear(width, width, bias=False)
+        self.w_gate = nn.Linear(width, hidden, bias=False)
+        self.w_up = nn.Linear(width, hidden, bias=False)
+        self.w_down = nn.Linear(hidden, width, bias=False)
 
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], h: int, w: int) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
-        y = F.rms_norm(x, (DIM,)) * (1 + scale_a[:, None]) + shift_a[:, None]
-        grid = y.transpose(1, 2).reshape(B, DIM, h, w)
+        y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
+        grid = y.transpose(1, 2).reshape(B, self.width, h, w)
         y = y + self.conv(grid).flatten(2).transpose(1, 2)
-        q, k, v = self.qkv(y).view(B, N, 3, HEADS, HEAD_DIM).permute(2, 0, 3, 1, 4)
+        q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
         q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
-        attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, DIM)
+        attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
         x = x + gate_a[:, None] * self.out(attn * torch.sigmoid(self.gate(y)))
 
-        y = F.rms_norm(x, (DIM,)) * (1 + scale_m[:, None]) + shift_m[:, None]
+        y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
         return x + gate_m[:, None] * self.w_down(F.silu(self.w_gate(y)) * self.w_up(y))
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, depth: int = 12):
+    def __init__(self, null_embedding: Tensor, depth: int = 12, width: int = 512):
         super().__init__()
+        self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
-        self.patch_embed = nn.Linear(TOKEN_DIM, DIM)
-        self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, DIM), nn.SiLU(), nn.Linear(DIM, DIM))
-        self.text_proj = nn.Linear(TEXT_DIM, DIM)
-        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(DIM, (N_MOD + N_FINAL) * DIM))
-        self.blocks = nn.ModuleList(Block() for _ in range(depth))
-        self.final_table = nn.Parameter(torch.zeros(N_FINAL, DIM))
-        self.final_norm = nn.RMSNorm(DIM)
-        self.final = nn.Linear(DIM, TOKEN_DIM)
+        self.patch_embed = nn.Linear(TOKEN_DIM, width)
+        self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
+        self.text_proj = nn.Linear(TEXT_DIM, width)
+        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, (N_MOD + N_FINAL) * width))
+        self.blocks = nn.ModuleList(Block(width) for _ in range(depth))
+        self.final_table = nn.Parameter(torch.zeros(N_FINAL, width))
+        self.final_norm = nn.RMSNorm(width)
+        self.final = nn.Linear(width, TOKEN_DIM)
         self.init_weights()
 
     @torch.no_grad()
@@ -111,8 +110,8 @@ class DiT(nn.Module):
             elif isinstance(m, nn.Conv2d):
                 m.weight.zero_()
         mod = self.ada[1]
-        mod.weight.view(N_MOD + N_FINAL, DIM, DIM)[:] = ADALN_STD * torch.randn(N_MOD + N_FINAL, DIM, DIM)
-        mod.weight.view(N_MOD + N_FINAL, DIM, DIM)[list(GATE_ROWS)] = 0
+        mod.weight.view(N_MOD + N_FINAL, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD + N_FINAL, self.width, self.width)
+        mod.weight.view(N_MOD + N_FINAL, self.width, self.width)[list(GATE_ROWS)] = 0
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
@@ -127,7 +126,7 @@ class DiT(nn.Module):
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj(F.rms_norm(text, (TEXT_DIM,)).to(dtype))
-        mod = self.ada(c).view(-1, N_MOD + N_FINAL, DIM)
+        mod = self.ada(c).view(-1, N_MOD + N_FINAL, self.width)
         rope = rope_angles(h, w, x.device)
 
         tokens = self.patch_embed(tokens)

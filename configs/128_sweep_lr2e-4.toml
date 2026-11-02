@@ -5,6 +5,7 @@ resolution = 128
 dataset = "/mnt/mars/ai/tiny-dit/precomputed/128_shuffled_0-46.parquet"
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
 depth = 12
+width = 512
 batch = 128
 micro_batch = 64
 steps = 15042

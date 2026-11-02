@@ -38,6 +38,7 @@ resolution = 32
 dataset = "{tmp_path / 's.parquet'}"
 null_embedding = "{tmp_path / 'null.safetensors'}"
 depth = 2
+width = 512
 batch = {batch}
 micro_batch = {micro_batch}
 steps = {steps}

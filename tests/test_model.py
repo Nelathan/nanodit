@@ -3,7 +3,7 @@ import copy
 import pytest
 import torch
 
-from tinydit.model import DIM, DiT, HEAD_DIM, ROPE_DIM, apply_rope, patchify, rope_angles, unpatchify
+from tinydit.model import DiT, HEAD_DIM, ROPE_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
@@ -52,9 +52,9 @@ def test_conv_acts_on_the_token_grid_of_a_non_square_image(model, row, col):
     seen = []
     block.qkv.register_forward_pre_hook(lambda module, args: seen.append(args[0]))
 
-    x = torch.zeros(1, h * w, DIM)
+    x = torch.zeros(1, h * w, model.width)
     x[0, row * w + col] = 1  # the unit-RMS vector of ones survives the norm unchanged
-    block(x, torch.zeros(1, 6, DIM), rope_angles(h, w), h, w)
+    block(x, torch.zeros(1, 6, model.width), rope_angles(h, w), h, w)
 
     expected = torch.zeros(h, w)
     expected[row, col] = 1  # the residual
@@ -62,7 +62,7 @@ def test_conv_acts_on_the_token_grid_of_a_non_square_image(model, row, col):
         for dc in (-1, 0, 1):
             if 0 <= row + dr < h and 0 <= col + dc < w:
                 expected[row + dr, col + dc] += kernel[1 - dr, 1 - dc]  # cross-correlation
-    assert torch.allclose(seen[0][0], expected.reshape(h * w, 1).expand(h * w, DIM))
+    assert torch.allclose(seen[0][0], expected.reshape(h * w, 1).expand(h * w, model.width))
 
 
 def test_gate_rows_start_at_zero_and_shift_scale_rows_do_not(model):

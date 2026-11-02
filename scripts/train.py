@@ -37,6 +37,7 @@ class Config:
     dataset: str  # one Parquet from scripts/shuffle.py
     null_embedding: str
     depth: int
+    width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden twice it
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's
@@ -207,9 +208,11 @@ def main(config_path: str) -> None:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
-    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth).to(device, torch.bfloat16)
+    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth, cfg.width).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
+    for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
+        block.compile()
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
