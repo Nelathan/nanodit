@@ -195,12 +195,12 @@ had that before but on anima we get oom from the intermediates" (usuitrack is bu
 VRAM); diagnostics "or we disable it now. we already tuned it. but yes just every 500 would be a cheap meter but so
 noisy it might not be worth looking at"; a sync-free solver for the aim "in the past only eigh was able to get a
 stable aim. but with diagonal aim, mabye simpler solutions work too. thats a longer investigation, still worth a
-shot". On the waiting frame: "gradient is only zero for zero init pretraining, so we rather add an option to make it
-save rather than a fixed if(zero)": a random frame at init instead of the fit, the turn at `eta` 0.1 until the end of
-warmup and 0.01–0.02 after, and maybe a refit after about 100 steps ("is that easy or worth it?"). Each is a
-usuitrack SPEC change. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Settle: a clean img/s
-benchmark when the GPU is free; for the random frame, `grad_capture` over the first few hundred steps of a fresh run
-against the fitted frame.
+shot". Decided, 2026-11-02 (Daniel): "fitting is default and pretraining random. end": an option gives a pretraining
+run a random frame at init with the standard `eta`, no schedule, no refit ("calling fit is dead"; a geometric `eta`
+decay helped very short runs before "but wasnt worth it keeping in the code. bc you can also just use more rank");
+"right, do stack the eigh calls". No random-frame comparison run: "by step 1k it is caught up fully with zero
+difference". Both are usuitrack changes, in the `zero-init` worktree. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Block compile measured
+on a free GPU: FACTS, Sweep throughput.
 
 ---
 

@@ -271,6 +271,7 @@ tiny-dit `8eb82be` (the final layer's rows in the shared projection, text throug
   Wall per step 275 ms eager, 249 ms with the blocks compiled. The GPU is busy about 141 ms of a ~220 ms step, so the step is launch-bound, and the Usui step's per-matrix loop over 77 matrices (about 190 launches each, of which its diagnostics about 2,500 per step) is most of the launches. `torch.linalg.eigh` reads back to the host on CUDA (its info check), which also blocks capturing the step as one CUDA graph.
 - Block compile against fp32 (scratch `profile/equiv.py`, one batch): compiled bf16 gradients are closer to fp32 than eager bf16 (median relative error 4.0 % against 6.4 %, max 21 % against 33 %; Molegrad `z` 4.7 % against 8.3 %).
 - Compiled while a Molegrad frame waits for its fit (until step 3 of a fresh run: the zero-gated blocks' matrices see a zero gradient before), each block breaks its graph at Molegrad's zero-gradient branch and hits dynamo's recompile limit (8), and forward/backward stays at ~3,600 launches. `scripts/train.py` compiles once no frame waits; a 20-step fresh run then had no graph break and one recompile (grad mode, for eval and score).
+- Block compile on a free GPU: `128_4e-3_ep3` (batch 256, compiled from its first step, tiny-dit `80c3cb3`) ran at a median 1057 img/s, against about 850 for the eager batch-256 runs: +24 %.
 
 ## Token signal through the blocks (2026-11-02)
 
@@ -325,6 +326,8 @@ The same checkpoints on the checkpoint score's eval set (SPEC §8: the 1000 Luna
 | `lr2e-3` step 1000 / 4000 / 8000 | 1.6442 / 1.5564 / 1.5299 | 1.6438 / 1.5570 / 1.5307 |
 | `lr2e-3` final | 1.5122 | 1.5130 |
 | `lr4e-3` final | 1.5106 | 1.5109 |
+| `128_4e-3_ep2` final (epoch 2, usui lr 2e-3, batch 128; its own `score.jsonl`) | 1.4929 | 1.4951 |
+| `128_4e-3_ep3` final (epoch 3, usui lr 2e-3, batch 256) | 1.4873 | 1.4895 |
 
 - Same lr order as on shards 12 and 40; 2e-4 ends 0.046 above 2e-3, its training loss (mean of the last 10 records) 1.396 against 1.326, so 2e-4 is not too big but too small. The caption gap is under 0.001, and negative at step 1000: the captions here are one short line each (PLAN B3).
 
