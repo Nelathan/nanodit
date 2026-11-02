@@ -59,6 +59,13 @@ def fetch(name):
     return tar_path
 
 
+def load_encoders():
+    """Primal 2x2 and EmbeddingGemma 2, fp32, on the GPU."""
+    vae = AutoModel.from_pretrained("ostris/primal_vae", variant="2x2", trust_remote_code=True, torch_dtype=torch.float32).to(DEVICE)
+    st = SentenceTransformer("google/embeddinggemma-2", device=DEVICE, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})
+    return vae, st
+
+
 def write_null_embedding(st, path):
     """The null embedding's init (SPEC §5): the encoder's embedding of the empty caption, under the same prefix."""
     save_file({"null": st.encode([""], prompt=PREFIX, convert_to_tensor=True)[0].contiguous()}, path)
@@ -70,7 +77,14 @@ def bf16_column(t, width):
     return pa.FixedSizeBinaryArray.from_buffers(pa.binary(width), len(t), [None, pa.py_buffer(raw)])
 
 
-def write_shard(tar_path, out_path, res, vae, st, cached_path):
+def resize(image_bytes, res):
+    """A square image as [1, 3, res, res] in [-1, 1], bicubic with antialiasing."""
+    x = torch.from_numpy(np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))).permute(2, 0, 1)[None].float() / 127.5 - 1
+    return F.interpolate(x, size=(res, res), mode="bicubic", antialias=True).clamp(-1, 1)
+
+
+def write_shard(source, out_path, res, vae, st, cached_path):
+    """Encodes (key, image bytes, caption) rows, square images, into one Parquet at `out_path`."""
     schema = pa.schema([
         ("key", pa.string()), ("caption", pa.string()),
         ("embedding", pa.binary(768 * 2)), ("latent", pa.binary(2 * (res // 2) ** 2 * 2)),
@@ -83,9 +97,7 @@ def write_shard(tar_path, out_path, res, vae, st, cached_path):
     def flush():
         nonlocal rows
         keys, jpgs, captions = zip(*chunk)
-        x = torch.from_numpy(np.stack([np.array(Image.open(io.BytesIO(j)).convert("RGB")) for j in jpgs]))
-        x = x.permute(0, 3, 1, 2).float() / 127.5 - 1
-        x = F.interpolate(x, size=(res, res), mode="bicubic", antialias=True).clamp(-1, 1)
+        x = torch.cat([resize(j, res) for j in jpgs])  # one image at a time: a chunk of full-size floats does not fit in RAM at 1024 px
         z = torch.cat([vae.encode(x[i : i + 32].to(DEVICE)) for i in range(0, len(x), 32)])
         if cached is None:
             e = st.encode(list(captions), prompt=PREFIX, batch_size=32, convert_to_tensor=True)
@@ -100,7 +112,7 @@ def write_shard(tar_path, out_path, res, vae, st, cached_path):
         print(f"{out_path.name} {rows} rows, {rows / (time.time() - t0):.2f} rows/s", flush=True)
 
     with torch.inference_mode(), pq.ParquetWriter(tmp, schema, compression="none") as writer:
-        for s in samples(tar_path):
+        for s in source:
             chunk.append(s)
             if len(chunk) == ROW_GROUP:
                 flush()
@@ -112,8 +124,7 @@ def write_shard(tar_path, out_path, res, vae, st, cached_path):
 if __name__ == "__main__":
     res, shards = int(sys.argv[1]), [int(s) for s in sys.argv[2:]]
     assert res % 16 == 0
-    vae = AutoModel.from_pretrained("ostris/primal_vae", variant="2x2", trust_remote_code=True, torch_dtype=torch.float32).to(DEVICE)
-    st = SentenceTransformer("google/embeddinggemma-2", device=DEVICE, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})
+    vae, st = load_encoders()
     null_path = ROOT / "precomputed" / "null_embedding.safetensors"
     if not null_path.exists():
         null_path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,5 +145,5 @@ if __name__ == "__main__":
             if i + 1 < len(todo):
                 pending = downloads.submit(fetch, todo[i + 1])
             others = sorted((ROOT / "precomputed").glob(f"*/{name}.parquet"))
-            write_shard(tar_path, out_dir / f"{name}.parquet", res, vae, st, others[0] if others else None)
+            write_shard(samples(tar_path), out_dir / f"{name}.parquet", res, vae, st, others[0] if others else None)
             tar_path.unlink()
