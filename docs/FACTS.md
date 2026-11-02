@@ -252,3 +252,77 @@ tiny-dit `8eb82be` (the final layer's rows in the shared projection, text throug
 - The same window of the 10-pass run (same batches, the model before `8eb82be`, its init drawn differently because `ada` changed shape) is 1.654, 0.011 above the base arm; bin 1 1.597 against 1.536.
 - Eval grids (seed 42, by eye): at step 1000 the base arm is blotches of colour; in the final-fallback arm the cat (cell 0) is a dark figure on white and the studio shot (cell 13) white, most other cells as noisy as the base. Batch 64 at step 4000: the warrior (cell 2) is high-contrast black and white, the ice cliff (cell 1) nearly flat green.
 
+
+## Sweep throughput and host syncs (2026-11-02)
+
+`128_sweep_lr2e-3` and `lr4e-3` (tiny-dit `78fded7`, usuitrack `zero-init` worktree): 560–585 img/s at batch 128 as 2 × 64, so about 222 ms per step. d512/depth 12 trains at about 13.7 GFLOP per image (analytic, 3 × forward), so about 7.9 TFLOP/s; the RTX 4070 Super's bf16 tensor peak with fp32 accumulate is about 35.5 TFLOP/s (spec figure, not measured). `nvidia-smi` during `lr4e-3`: 99 W, utilization sampled at 40–84 %.
+
+- `Stream.next` copies pageable CPU bf16 into the GPU fp32 buffers with a blocking `copy_`: the host waits until all queued GPU work has run. Probe, 2026-11-02, a 64-row micro-batch behind a ~71 ms spin kernel: the latent and the text copy each blocked the host for the whole queue (71.0 of 71.0 ms, 76.8 of 76.8 ms); a pinned source copied `non_blocking` and cast on the GPU blocked it for 0.0 of 73.0 ms. So each micro-batch drains the queue twice.
+- Not syncs per step: the `.any()` reads in usuitrack `molegrad.py` and `optimizer.py` run only while a matrix has no frame (step 1); `get_total_norm` stays on the device; `Interval` reads once per record.
+- Not measured: how the 222 ms split between those waits, forward/backward and the Usui step, nor whether `torch.linalg.eigh` in `frame.tangent_spectra` (once per rank group per step) reads back to the host.
+
+## Token signal through the blocks (2026-11-02)
+
+Source: scratch `heldout/token_signal.py` (re-implements `Block.forward`, checked equal to it), 256 rows of shard 12 with their captions (held out of the 0–10 runs, but trained on once in a sweep run; the sweep arms share them), fixed noise (seed 1234), at t = 0.05, 0.25, …, 0.95; on `128_sweep_lr2e-3` steps 1k, 2k, 4k, 8k, 15042 and `128_sweep_lr4e-3` step 15042. Per image over its 64 tokens: mean off-diagonal cosine, effective rank (exp entropy of the Gram's eigenvalues; 63 at most after centering), the share of the stream's energy in the token mean (`common`), then means over images.
+
+| at the output of blocks 4–10 | lr 2e-3, 1k | lr 2e-3, 15042 | lr 4e-3, 15042 |
+|---|---|---|---|
+| `common`, t 0.05 / 0.45 / 0.95 | 0.44–0.57 / 0.39–0.50 / 0.55–0.85 | 0.90–0.94 / 0.81–0.84 / 0.92–0.95 | 0.94–0.95 / 0.88–0.89 / 0.96–0.97 |
+| effective rank, raw | 9–15 / 9–18 / 1.4–10 | 1.5–1.8 / 2.7–3.2 / 1.4–1.7 | 1.3–1.4 / 2.0–2.2 / 1.2–1.3 |
+| effective rank, centered | 39–40 / 24–39 / 3–40 | 26–30 / 35–37 / 24–33 | 21–23 / 31–34 / 18–21 |
+
+- The embedding's `common` is 0.02–0.12. Each image's stream gains a vector shared by all its tokens, which grows with training and is larger at lr 4e-3; the token-specific part keeps a centered effective rank of 18–40, so it is a common mode, not a rank collapse.
+- Attention writes it: blocks 0–1 raise the raw token cosine by +0.24 / +0.24 (lr 2e-3, t 0.05) up to +0.78 / +0.12 (lr 4e-3, t 0.95), later blocks by under +0.1. The MLP branch changes it by −0.04 to +0.12, mostly within ±0.02.
+- SwiGLU decorrelates: the token cosine of the hidden `silu(W_g y) * W_u y` is below that of its input `y` in every block but the last (e.g. 0.67 → 0.61 down to 0.27 → 0.13), and its effective rank higher. The last block at t 0.95 is near rank one on both sides (input and hidden cosine 0.97–1.00) and its output RMS is 39–134 against 2–16 before it.
+- Gate RMS (adaLN output) 0.14–0.35 at t ≤ 0.45, attention 0.44–0.75 and MLP 0.25–0.57 at t 0.95.
+
+## What each branch does (2026-11-02)
+
+Source: scratch `heldout/branch_role.py` (re-implements the forward, checked against `DiT.forward`), the same 256 rows of shard 12 and noise as Token signal, `128_sweep_lr2e-3` steps 1k, 4k, 15042. Per block: the loss rise when its attention or MLP branch is dropped, the branch's write RMS over the stream RMS, and |grad| / |W| per matrix under plain autograd (no Molegrad). t 0.05 / 0.45.
+
+| | step 1k | step 15042 |
+|---|---|---|
+| drop attention, block 0 | +0.067 / +0.127 | +0.167 / +0.536 |
+| drop attention, blocks 2–10 | +0.011–0.025 / +0.006–0.017 | +0.010–0.101 / +0.021–0.079 |
+| drop MLP, block 0 | +0.003 / +0.021 | +0.029 / +0.121 |
+| drop MLP, blocks 2–10 | +0.003–0.014 / +0.005–0.010 | +0.003–0.026 / +0.017–0.040 |
+| drop MLP, block 11 | +0.004 / +0.025 | +0.250 / +0.323 (+0.664 at t 0.95) |
+| MLP write / stream, blocks 2–10 | 0.04–0.10 / 0.12–0.41 | 0.02–0.10 / 0.06–0.16 |
+
+- The middle MLPs cost about as much to drop as the middle attention branches, and their cost grew from step 1k to 15042. At t 0.95 they cost nothing (within ±0.003); there block 0's attention and block 11's MLP carry the prediction, the latter writing 3.4–5.3× the stream RMS.
+- |grad| / |W| of `w_up` and `w_down` is the same order as `qkv`'s (1e-4 to 1e-3) in every block, with no decay toward the input. Usui's fixed step does not scale with the gradient's size anyway.
+- Whole blocks skipped together (scratch `heldout/drop_many.py`, same rows), loss at t 0.05 / 0.45 / 0.95, step 1k → 15042. None skipped: 1.165 / 1.739 / 1.185 → 1.122 / 1.462 / 1.172. Blocks 2–10: 2.109 / 3.039 / 1.387 → 5.125 / 7.511 / 1.281. Blocks 4–8: 1.613 / 1.968 / 1.215 → 2.503 / 1.850 / 1.184. Blocks 0 and 11: 1.216 / 1.958 / 1.223 → 1.373 / 2.853 / 5.127. One middle block alone costs little; the nine together carry most of the prediction, more so at 15042 than at 1k.
+
+## LR sweep and seed merge (2026-11-02)
+
+The LR sweep (PLAN C2): `128_sweep_lr{1e-3,2e-3,4e-3}`, one pass over `128_shuffled_0-46.parquet` (15042 steps, batch 128, warmup 752, no decay; tiny-dit `78fded7`). `lr2e-4` stopped in its first steps: cuSOLVER's fp32 `eigh` in usuitrack `frame.tangent_spectra` returned non-orthonormal vectors for a tangent Gram of ~1e-22 entries (a matrix behind a gate still near zero), the turn left the manifold (QᵀQ − I 1.7, then ~1e25), and `eigh` raised; with each Gram divided by its mean diagonal for the `eigh` (usuitrack `zero-init`, uncommitted; 1.61 ms for 48 Grams against 1.52 unscaled), the same arm ran 300 steps clean (scratch `eighrepro/`). Scored with scratch `heldout/score.py`: the first 1024 rows of shards 12 and 40, trained on once in every arm, fixed noise (seed 1234), t at the 10 bin midpoints 0.05 … 0.95, mean over t.
+
+| usui lr | shard 12 (dalle3), caption / null | shard 40 (llava flux), caption / null |
+|---|---|---|
+| 1e-3 | 1.3816 / 1.3840 | 1.1805 / 1.1852 |
+| 2e-3 | 1.3726 / 1.3752 | 1.1718 / 1.1745 |
+| 4e-3 | 1.3691 / 1.3709 | 1.1679 / 1.1712 |
+
+- Loss falls with lr, by 0.009 from 1e-3 to 2e-3 and 0.004 from 2e-3 to 4e-3; the caption gap is 0.002–0.003 in every arm. Daniel, on the samples: "2e-3 looks best even though [4e-3] has better loss".
+
+The same checkpoints on the checkpoint score's eval set (SPEC §8: the 1000 Lunara renders of `moonworks/lunara-art-eval`, never trained on), scored by `train.score` from scratch `heldout/score_lunara.py`: noise seed 1, t at `t_quantiles(10, 1.0)`, about 4 s per checkpoint on the 4070 Super.
+
+| checkpoint | caption | null |
+|---|---|---|
+| `lr1e-3` final | 1.5207 | 1.5215 |
+| `lr2e-3` step 1000 / 4000 / 8000 | 1.6442 / 1.5564 / 1.5299 | 1.6438 / 1.5570 / 1.5307 |
+| `lr2e-3` final | 1.5122 | 1.5130 |
+| `lr4e-3` final | 1.5106 | 1.5109 |
+
+- Same lr order as on shards 12 and 40. The caption gap is under 0.001, and negative at step 1000: the captions here are one short line each (PLAN B3).
+
+Seed merge (scratch `seedmerge/`): the shuffled file split into three disjoint thirds, one 5000-step child on each at lr 2e-3 (warmup 250), their step-5000 weights merged by multislerp, then 5000 steps from the merged weights (fresh optimizer state) over the whole file in the sweep's order, warmup 752. Same scoring, shard 12 caption:
+
+| | loss |
+|---|---|
+| `128_sweep_lr2e-3`, step 5000 | 1.4060 |
+| children 0 / 1 / 2, step 5000 | 1.4059 / 1.4058 / 1.4036 |
+| the merge | 2.5958 (null 2.5513) |
+| 5000 steps from the merge | 1.3970 (step 1000: 1.4837) |
+
+- The merge alone is broken, worse than any child, and better with the null embedding than with the caption; 5000 steps from it end 0.009 below the single run at step 5000, after 4× its compute. Daniel: "no merges just fresh init each time".

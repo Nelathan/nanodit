@@ -80,7 +80,9 @@ first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fa
 think. unless you say it evolves fine. probably also its beta." No AdamW reference run. The 1000-step ablation (FACTS,
 1000-step ablations; one seed): fallback lr 3e-4 is worse than 1e-3 by 0.014 overall and
 in every t bin (0.005 to 0.044), near the 0.011 yardstick there; betas (0.9, 0.999)
-cannot be told from (0.9, 0.99).
+cannot be told from (0.9, 0.99). Sweep (FACTS, LR sweep and seed merge): loss falls with lr, 0.009 from 1e-3 to
+2e-3 and 0.004 from 2e-3 to 4e-3; Daniel: "2e-3 looks best even though [4e-3] has better loss". 4e-3 also carries the
+larger common mode in the residual stream (G3). 2e-4 stopped on a usuitrack `eigh` failure and is to rerun with the fix.
 
 ### C3. Timestep shift values per stage
 
@@ -105,6 +107,14 @@ The sampler steps a uniform t grid; training samples a shifted logit-normal t. S
 shifts the step schedule the same way, which matters once the 256 px stage raises
 the shift. Settle: compare uniform and shifted grids on the eval grid.
 
+### D5. FID, and what the lunara sets are for
+
+Daniel (2026-11-02): "keep lunara for fid or finetune later". `moonworks/lunara-art-eval` (1,000 art prompts, each
+rendered by 8 models, with aesthetic, emotion and integrity scores) gives the checkpoint score's eval set: its 1,000
+Moonworks Lunara renders (SPEC §8; `eval_set` in the configs, `scripts/precompute_lunara.py`). `moonworks/lunara-aesthetic` (2,000 Lunara images, refined prompts) is held back
+for an aesthetic fine-tune or as FID references. Open: when FID starts, on which features (Inception at 128 px is
+weak; FD-DINOv2 is the alternative), and against which reference set.
+
 ---
 
 ## Group F. Model choices SPEC leaves open
@@ -125,6 +135,50 @@ SPEC says "small random". Std 0.02 on the shared 512→4096 projection makes the
 blocks' and the final layer's shift/scale far from zero at init (FACTS, init), so
 `1 + scale` starts far from 1. A fan-in-scaled or 10× smaller init would start near
 identity.
+
+---
+
+## Group G. Scale and signal propagation
+
+### G1. Growing the model
+
+Daniel: width first ("d is more important than depth"); the SwiGLU hidden stays at 2d until the step budget can
+fill it ("once we put enough steps in, we can increase mlp to 8"). Grid on the table: d 512, 768, 1024 × depth 12,
+24, 32; params, FLOPs and an activation-memory guess per cell were estimated, not measured. Settle: a 30-step
+microbench per size for img/s and peak memory, then a run at the sweep's lr. Open with it: whether Usui's lr
+carries over in width (its write has spectral norm lr·√max(1, out/in), the µP condition for out ≥ in), and
+whether the fallback's final linear wants lr ∝ 1/width, as µP gives AdamW's readout.
+
+### G2. Patch size
+
+Patch 8 gives 64 tokens at 128 px. Patch 4 gives 256: about 4× the FLOPs at the same parameters, the axis DiT
+found as strong as model size (XL/2 against XL/8). Not measured here.
+
+### G3. The common mode in the residual stream
+
+By mid-depth most of each image's stream energy is one vector shared by its tokens, written by attention in blocks
+0–1; the token-specific part keeps its rank (FACTS, Token signal). Unsure whether it costs anything: each branch's
+RMSNorm then sees the token-specific part at about a quarter of unit scale. Candidates that fit the architecture:
+register tokens, which give global state its own slots; nothing else proposed yet. Settle: a register arm against the
+base, read on loss, the eval grid and the same diagnostic. Background (Li's notes ch. 5–6, the shaped Transformer,
+CompleteP): at init the zero gates make every block the identity, so their rank-collapse results do not apply there;
+SwiGLU measured decorrelating, so shaped activations have no target here.
+
+### G4. Depth scaling, if depth arms run
+
+CompleteP scales each block's branch by 1/L for lr transfer across depth, derived for AdamW. Usui's fixed-norm write
+and our per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run, by lr transfer from depth 12.
+
+---
+
+## Group H. Harness throughput
+
+### H1. Where do the 222 ms per step go?
+
+The GPU runs at about 22 % of peak (FACTS, Sweep throughput). Known: `Stream.next` drains the GPU queue twice per
+micro-batch. Unknown: the split between those waits, launch overhead (no `torch.compile`; Usui and StochasticAdamW
+loop per parameter) and the Usui step, and whether `eigh` in `frame.tangent_spectra` syncs. Settle: a
+`torch.profiler` trace of about 20 steps, after the pinned, non-blocking copy is in.
 
 ---
 
