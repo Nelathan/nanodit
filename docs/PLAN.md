@@ -58,18 +58,13 @@ images, or test whether training on flipped latents hurts. Evidence: FACTS only.
 
 ## Group C. LR sweep and step budget
 
-### C1. Batch size and step budget per stage
+### C1. Batch size and step budget at 256 px
 
-Rides on Usui and the LR sweep. Is batch 256 needed? A smaller batch may want a lower lr,
-and a lower rank fraction if `tangent_live_fraction` falls (0.993–0.996 at batch 256,
-rank fraction 0.1). Open whether tokens are the right noise unit for
-diffusion (t sampling adds its own gradient noise). Evidence: at 128 px, batch 256
-gives 64 × 256 ≈ 16k tokens per step, matching the LFM setup on tokens. Throughput
-at 128 px is measured (FACTS, GPU smoke runs); 256 px is unmeasured. The 1000-step
-ablation at a constant number of images (FACTS, 1000-step ablations; one seed): batch 64,
-at the same lr, is 0.127 lower per image and about a tie per training time against a
-batch-256 run of the earlier model, at 353 img/s against about 850; `tangent_live_fraction`
-does not fall. Settle: the sweep in C2.
+At 128 px the batch is 128 (archive 2026-11-02, batch 128), 64 × 128 ≈ 8k tokens per step, and the step budget
+follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
+unit for diffusion (t sampling adds its own gradient noise). A smaller batch may want a lower lr, and a lower rank
+fraction if `tangent_live_fraction` falls; it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
+throughput is unmeasured. Settle: when the 256 px stage is planned.
 
 ### C2. Which LR from scratch, and how long a warmup?
 

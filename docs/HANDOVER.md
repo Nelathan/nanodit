@@ -12,12 +12,12 @@ Data: the 128 px precompute of all 47 shards is done (FACTS, Sample and shard; G
 
 - **F1, F2.** Model choices SPEC leaves open (PLAN group F).
 - **B1, B2, A2.** Evidence is in; each needs a close or a follow-up.
-- **C1, C4, fallback lr and betas.** The 1000-step ablation reads are in (FACTS, 1000-step ablations; one seed each).
+- **C4, fallback lr and betas.** The 1000-step ablation reads are in (FACTS, 1000-step ablations; one seed each).
 - **Not chosen yet:** C3 shift base, D4 sampler grid, LR decay and the warmup length (C2), `fallback_lr` as a sweep axis.
 
 ## Next
 
-1. The LR sweep (C2), once C1, C4 and the fallback settings are chosen and the data is shuffled. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
+1. The LR sweep (C2) at batch 128 (archive 2026-11-02, batch 128), once C4 and the fallback settings are chosen and the data is shuffled. A run is launched in the background: `cd /home/djg/Projects/tiny-dit && nohup uv run python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &`; a run directory that exists is refused.
 
 ## Traps
 
