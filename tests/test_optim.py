@@ -41,9 +41,9 @@ def test_the_first_step_moves_only_the_zero_init_final_linear_on_the_fallback():
     train_step(model, optimizers, *batch(0))
     moved = {n for n, before in matrices.items() if not torch.equal(model.get_parameter(n), before)}
     # every tracked matrix sits behind the zero final linear or a zero gate: its gradient is exactly
-    # zero, so it fits no frame yet and waits for a real gradient
+    # zero, so its random frame catches nothing and it holds
     framed = {n for n, p in model.named_parameters() if "frame" in optimizers[0].state.get(p, {})}
-    assert len(matrices) > 10 and moved == framed == set()
+    assert len(matrices) > 10 and framed == set(matrices) and moved == set()
     # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
     assert abs(model.final.weight.float().abs().mean() / fallback_lr - 1) < 0.05
 

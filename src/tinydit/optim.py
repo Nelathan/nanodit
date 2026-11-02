@@ -18,7 +18,7 @@ def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fractio
     weight decay, as in usuitrack SPEC "Fallback path".
     Molegrad is attached to the model (which must already be on its device), so the tracked matrices
     never get a `.grad`; it hooks the optimizer, which stays the only handle.
-    Every tracked matrix takes Usui's fixed step, one lr unit for all (SPEC §6)."""
+    Every tracked matrix takes Usui's fixed step, one lr unit for all, from a frame drawn at random (SPEC §6)."""
     sided, fallback = {"left": [], "auto": []}, []
     for name, param in model.named_parameters():
         if param.ndim == 2 and name != FINAL_LINEAR and not any(key in name for key in USUI_EXCLUDED):
@@ -26,6 +26,6 @@ def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fractio
         else:
             fallback.append(param)
     groups = [{"params": params, "side": side, "step_rule": "fixed"} for side, params in sided.items()]
-    matrix = UsuiTrack(groups, lr=usui_lr, beta=beta, rank_fraction=rank_fraction, diagnostics=True)
+    matrix = UsuiTrack(groups, lr=usui_lr, beta=beta, rank_fraction=rank_fraction, frame_init="random", diagnostics=True)
     Molegrad(model, matrix)
     return matrix, StochasticAdamW(fallback, lr=fallback_lr, betas=(0.9, 0.99), weight_decay=0.0)

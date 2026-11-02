@@ -88,6 +88,7 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 
 - Usui's fixed step on every tracked matrix: sized by `lr` and the matrix's shape, not relative to its norm, since a model trained from scratch has zero-initialized matrices with no norm to be relative to.
 - Frame size: one rank fraction for every tracked matrix.
+- Frames drawn at random when the optimizer is built (Usui's `frame_init="random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers.
 - Everything that is not a 2-D Linear weight, the final linear and the adaLN tables train on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
