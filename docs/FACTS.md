@@ -327,4 +327,31 @@ Seed merge (scratch `seedmerge/`): the shuffled file split into three disjoint t
 | the merge | 2.5958 (null 2.5513) |
 | 5000 steps from the merge | 1.3970 (step 1000: 1.4837) |
 
+Sweep merge (scratch `sweepmerge/`, same scoring as the Lunara table above): the arms' final checkpoints share their init and data order (seed 0). Lunara caption / null:
+
+| | caption | null |
+|---|---|---|
+| `lr4e-3` final | 1.5106 | 1.5109 |
+| multislerp of 2e-3 + 4e-3 | 2.1471 | 2.1865 |
+| multislerp of 1e-3 + 2e-3 + 4e-3 | 2.2553 | 2.2354 |
+| multislerp of all four | 2.2702 | 2.2631 |
+| mean of 1e-3 + 2e-3 + 4e-3 | 2.4683 | 2.4436 |
+| mean of all four | 3.0589 | 3.0599 |
+
+- Daniel, before: "Merging our 4 lr sweep checkpoints may be crazy again but maybe its good too, i do have hope". Every merge is broken, like the seed merge's, though these arms share init and data order.
+
+Weight norms of `128_sweep_lr4e-3` (scratch `norms.py`; Frobenius norm over all blocks for `blocks.*`, init rebuilt at seed 0):
+
+| | init | 1k | 2k | 4k | 8k | 12k | 15042 |
+|---|---|---|---|---|---|---|---|
+| `qkv` | 135.8 | 151.8 | 178.6 | 224.0 | 293.6 | 348.5 | 384.8 |
+| `w_up` | 110.8 | 120.0 | 134.9 | 156.6 | 195.5 | 228.2 | 249.7 |
+| `w_down` | 78.4 | 85.2 | 96.5 | 117.5 | 146.1 | 166.7 | 179.7 |
+| `out` | 78.4 | 83.4 | 92.2 | 107.4 | 131.6 | 150.8 | 163.4 |
+| `final` (fallback) | 0 | 6.3 | 9.2 | 13.8 | 19.7 | 23.8 | 26.2 |
+| `ada.1` (fallback) | 25.1 | 32.7 | 44.0 | 57.1 | 70.5 | 80.2 | 86.4 |
+| null embedding | 1.00 | 1.19 | 1.39 | 1.70 | 2.38 | 2.95 | 3.36 |
+
+- No norm has levelled off; the Usui matrices grow by about 2.5–3× their init, slowing (qkv +17 per 1k steps from 4k to 8k, +12 from 12k to 15042). Nothing sets a target norm: no weight decay on either optimizer, and Usui's fixed step does not depend on `‖W‖`. The same absolute step on a weight 2.8× larger is a 2.8× smaller relative step: an implicit decay with no schedule.
+
 - The merge alone is broken, worse than any child, and better with the null embedding than with the caption; 5000 steps from it end 0.009 below the single run at step 5000, after 4× its compute. Daniel: "no merges just fresh init each time".

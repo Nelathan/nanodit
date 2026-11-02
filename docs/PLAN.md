@@ -83,7 +83,10 @@ think. unless you say it evolves fine. probably also its beta." No AdamW referen
 in every t bin (0.005 to 0.044), near the 0.011 yardstick there; betas (0.9, 0.999)
 cannot be told from (0.9, 0.99). Sweep (FACTS, LR sweep and seed merge): loss falls with lr, 0.009 from 1e-3 to
 2e-3 and 0.004 from 2e-3 to 4e-3; Daniel: "2e-3 looks best even though [4e-3] has better loss". 4e-3 also carries the
-larger common mode in the residual stream (G3). 2e-4 stopped on a usuitrack `eigh` failure and is to rerun with the fix.
+larger common mode in the residual stream (G3). 2e-4, rerun with the fix, ends 0.046 above 2e-3 on the Lunara score: too small, not too big. Daniel, 2026-11-02:
+"Even if 2e-3 was looking better aesthetically lets focus on progress, so 4 is best and could even be higher"; "Why no
+decay? I think 4e-3 had a headstart but later the model needs softer touches. I would decay epoch wise". Running:
+`128_4e-3_ep2`, the 4e-3 run's weights and optimizer state, one more pass at half lr (usui 2e-3, fallback 5e-4).
 
 ### C3. Timestep shift values per stage
 
@@ -150,6 +153,10 @@ microbench per size for img/s and peak memory, then a run at the sweep's lr. Ope
 carries over in width (its write has spectral norm lr·√max(1, out/in), the µP condition for out ≥ in), and
 whether the fallback's final linear wants lr ∝ 1/width, as µP gives AdamW's readout.
 
+Daniel, 2026-11-02, on the guidance grid: "it learns fine, its just tiny and 128 at 64token is just verY low. We might
+not see anything at rhat setting. We might not see anything from this model anyway, might lack bigger mlp, more width
+or depth." And: "We should make it faster training before we scale up model or data" (H1).
+
 ### G2. Patch size
 
 Patch 8 gives 64 tokens at 128 px. Patch 4 gives 256: about 4× the FLOPs at the same parameters, the axis DiT
@@ -179,7 +186,9 @@ and our per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run
 The GPU runs at about 22 % of peak (FACTS, Sweep throughput). About 140 ms of each step is fixed, independent of the batch (FACTS, same section), so the Usui step and per-parameter launches are the first suspects. Known: `Stream.next` drains the GPU queue twice per
 micro-batch. Unknown: the split between those waits, launch overhead (no `torch.compile`; Usui and StochasticAdamW
 loop per parameter) and the Usui step, and whether `eigh` in `frame.tangent_spectra` syncs. Settle: a
-`torch.profiler` trace of about 20 steps, after the pinned, non-blocking copy is in.
+`torch.profiler` trace of about 20 steps, after the pinned, non-blocking copy is in. Daniel: "Simple blockwise compile
+worked well in the past. Cuda graph is also open."
+
 
 ---
 
