@@ -7,6 +7,7 @@ import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
+from conftest import open_gates
 from test_data import write_shard
 from tinydit.model import DiT
 from tinydit.objective import flow_loss as real_flow_loss
@@ -142,7 +143,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
     restored = DiT(torch.zeros(768), depth=2).bfloat16()
     restored.load_state_dict(last)
-    assert restored.final.weight.abs().max() > 0  # trained, not the zero init
+    assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
     matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     matrix.load_state_dict(usui_state)
@@ -294,12 +295,12 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
         torch.manual_seed(1)
         model = DiT(torch.randn(768), depth=2)
-        torch.nn.init.normal_(model.final.weight, std=0.05)
+        open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
         loss, per_sample, t = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0)
-        results.append((loss, per_sample, t, [model.final.bias.grad, model.final_table.grad]))
+        results.append((loss, per_sample, t, [model.patch_embed.bias.grad, model.blocks[0].table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
     # bf16 batches the same samples differently, so equal only up to rounding; a lost or doubled
@@ -313,7 +314,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
     torch.manual_seed(0)
     model = DiT(torch.randn(768), depth=2)
-    torch.nn.init.normal_(model.final.weight, std=0.05)
+    open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
     start = {n: p.detach().clone() for n, p in model.named_parameters()}
@@ -329,6 +330,6 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     assert {p.dtype for p in model.parameters()} == {torch.bfloat16}
     # The QK-norm gain (1.0, ulp 2^-7) takes AdamW steps of 1e-3, a fraction of an ulp: round-to-nearest
     # leaves it bit-identical (checked: 0 of its elements move), stochastic rounding moves about a quarter.
-    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "final.weight")}
+    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
     assert changed["blocks.0.q_norm.weight"] > 0.1
     assert all(fraction > 0.02 for fraction in changed.values()), changed

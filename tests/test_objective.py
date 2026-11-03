@@ -76,4 +76,4 @@ def test_flow_loss_passes_gradient_to_the_network(model, text):
     loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), text, shift=1.0)
     assert per_sample.shape == t.shape == (3,)
     loss.backward()
-    assert model.final.weight.grad.abs().max() > 0
+    assert model.patch_embed.weight.grad.abs().max() > 0

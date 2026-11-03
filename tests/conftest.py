@@ -1,7 +1,13 @@
 import pytest
 import torch
 
-from tinydit.model import DiT, TEXT_DIM
+from tinydit.model import DiT, GATE_ROWS, TEXT_DIM
+
+
+def open_gates(model):
+    """Opens the zero-initialised gates, so every block's output reaches F and every matrix gets a gradient."""
+    for block in model.blocks:
+        block.table.data[list(GATE_ROWS)] = 0.5
 
 
 @pytest.fixture

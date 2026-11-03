@@ -44,13 +44,12 @@ Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectio
 | Attention | MHA, 8 heads × head dim 64. No GQA (no KV cache, nothing to save) |
 | QK norm | RMSNorm on Q and K |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
-| Position | 2D axial RoPE on **half** of each head's dims (32 of 64: 16 for rows, 16 for columns). The other half is position-free, for content matching |
-| Local mixing | 3×3 depthwise conv over the token grid, applied to the normed block input before QKV, as a zero-initialized residual (starts as identity). Carries local relative position; RoPE carries global layout |
-| MLP | SwiGLU, hidden 1024 |
-| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's shift/scale/gate and the final layer's shift/scale, plus a small learned table per block and one for the final layer |
+| Position | 2D axial RoPE on all of each head's dims (32 for rows, 32 for columns) |
+| MLP | SwiGLU, hidden 4 × width |
+| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's shift/scale/gate, plus a small learned table per block |
 | Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |
-| Final layer | adaLN-modulated norm → Linear 512 → 128, unpatchify |
-| Size | ≈37M parameters at 12 layers (FACTS) |
+| Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed starts as the identity on those channels, so the stream carries the working latent and each block adds a correction |
+| Size | Parameter counts by width and depth in FACTS |
 
 Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), DeepSeek sparse attention (no long context).
 
@@ -68,7 +67,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 
 | Role | Init | Optimizer (§6) |
 |---|---|---|
-| Patch embed 128→512 | fan-in normal (inputs are already unit-normal) | Usui |
+| Patch embed 128→512 | identity on the first 128 output channels, fan-in normal on the rest, zero bias | Usui |
 | Timestep MLP | fan-in normal | Usui |
 | Text projection 768→512 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
@@ -76,13 +75,11 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |
-| adaLN shift / scale rows, blocks and final layer | small random | Usui, with the shared projection; tables on the fallback |
+| adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
-| Depthwise conv | zero | fallback |
-| Final linear 512→128 | zero | fallback (§6) |
-| QK-RMSNorm gains, final norm gain, biases | ones / zero | fallback |
+| QK-RMSNorm gains, biases | ones / zero | fallback |
 
-Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0 (plain velocity would give `v̂ = 0`).
+Consequence of the identity patch embed with x0 velocity: the zero gates make every block the identity, so `F = x_t` and `v̂ = 0` at step 0, and the loss reaches the patch embed and the gate rows at once; the blocks behind the gates follow as the gates open.
 
 ## 6. Optimizer: UsuiTrack
 
@@ -90,7 +87,7 @@ Consequence of zero output with x0 velocity: `F = 0` gives `v̂ = x_t` at step 0
 - Frame size: one rank fraction for every tracked matrix.
 - Frames drawn at random when the optimizer is built (Usui's `frame_init="random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers.
-- Everything that is not a 2-D Linear weight, the final linear and the adaLN tables train on Usui's fallback, `StochasticAdamW`.
+- Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
 

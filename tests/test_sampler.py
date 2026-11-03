@@ -1,5 +1,6 @@
 import pytest
 import torch
+from conftest import open_gates
 
 from tinydit.sampler import euler_sample
 
@@ -23,7 +24,7 @@ def test_oracle_velocity_recovers_x():
 
 
 def test_guidance_combines_conditional_and_null_predictions(model, text):
-    torch.nn.init.normal_(model.final.weight, std=0.05)
+    open_gates(model)
     noise = torch.randn(3, 2, 64, 64)
     plain = euler_sample(model, noise, text, steps=2, guidance=1.0)
     guided = euler_sample(model, noise, text, steps=2, guidance=3.0)
@@ -31,7 +32,7 @@ def test_guidance_combines_conditional_and_null_predictions(model, text):
 
 
 def test_sampler_runs_on_the_bf16_network_in_fp32(model, text):
-    torch.nn.init.normal_(model.final.weight, std=0.05)
+    open_gates(model)
     noise = torch.randn(3, 2, 64, 64)
     out = euler_sample(model.bfloat16(), noise, text, steps=2, guidance=3.0)
     assert out.dtype == torch.float32 and out.shape == noise.shape

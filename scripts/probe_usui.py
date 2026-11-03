@@ -4,7 +4,7 @@ from usuitrack import UsuiTrack
 
 torch.manual_seed(0)
 
-# A zero-init matrix (the final linear) next to a fan-in one: does it move?
+# A zero-init matrix next to a fan-in one: does it move?
 final = torch.nn.Parameter(torch.zeros(128, 512))
 hidden = torch.nn.Parameter(torch.randn(512, 512) / 512**0.5)
 opt = UsuiTrack([final, hidden], lr=1e-2)
@@ -26,7 +26,7 @@ for step in range(5):
     rows = w.detach().view(6, 64, 64)
     print(f"partial-zero: step {step} gate rows {rows[[2, 5]].norm():.4f}, others {rows[[0, 1, 3, 4]].norm():.4f}, matrix {w.norm():.4f}")
 
-# The depthwise conv and a 1-D param.
+# A 4-D and a 1-D param.
 for p in (torch.nn.Parameter(torch.zeros(512, 1, 3, 3)), torch.nn.Parameter(torch.ones(64))):
     try:
         UsuiTrack([p])

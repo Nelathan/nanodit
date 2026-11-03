@@ -36,7 +36,7 @@ class Config:
     dataset: str  # one Parquet from scripts/shuffle.py
     null_embedding: str
     depth: int
-    width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden twice it
+    width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden MLP_RATIO times it
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's

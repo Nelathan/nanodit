@@ -12,12 +12,11 @@ TOKEN_DIM = LATENT_CHANNELS * PATCH * PATCH  # 128
 HEAD_DIM = 64
 TEXT_DIM = 768
 TIME_DIM = 256
-ROPE_DIM = HEAD_DIM // 2  # rotated dims per head; the rest is position-free
 ROPE_BASE = 10000.0
 ADALN_STD = 0.02  # "small random" shift/scale rows
 N_MOD = 6  # shift, scale, gate for attention, then for the MLP
 GATE_ROWS = (2, 5)
-N_FINAL = 2  # shift, scale for the final norm, after the blocks' rows in the shared projection
+MLP_RATIO = 4  # SwiGLU hidden over the stream width
 
 
 def patchify(x: Tensor) -> tuple[Tensor, int, int]:
@@ -37,8 +36,8 @@ def timestep_sinusoid(t: Tensor) -> Tensor:
 
 
 def rope_angles(h: int, w: int, device: torch.device | None = None) -> tuple[Tensor, Tensor]:
-    """cos, sin of shape [h*w, ROPE_DIM/2]: the first half of the angles encodes the row, the second the column."""
-    pairs = ROPE_DIM // 4
+    """cos, sin of shape [h*w, HEAD_DIM/2]: the first half of the angles encodes the row, the second the column."""
+    pairs = HEAD_DIM // 4
     freqs = ROPE_BASE ** (-torch.arange(pairs, device=device) / pairs)
     rows = torch.arange(h, device=device)[:, None].expand(h, w).reshape(-1, 1)
     cols = torch.arange(w, device=device)[None, :].expand(h, w).reshape(-1, 1)
@@ -47,19 +46,17 @@ def rope_angles(h: int, w: int, device: torch.device | None = None) -> tuple[Ten
 
 
 def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-    """Rotate the first ROPE_DIM dims of each head (split-half pairs); the other dims pass through."""
-    rotated, free = x[..., :ROPE_DIM], x[..., ROPE_DIM:]
-    x1, x2 = rotated.chunk(2, dim=-1)
+    """Rotate every dim of each head (split-half pairs)."""
+    x1, x2 = x.chunk(2, dim=-1)
     cos, sin = cos.to(x.dtype), sin.to(x.dtype)
-    return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin, free], dim=-1)
+    return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
 
 
 class Block(nn.Module):
     def __init__(self, width: int):
         super().__init__()
-        self.width, self.heads, hidden = width, width // HEAD_DIM, 2 * width
+        self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
-        self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
         self.qkv = nn.Linear(width, 3 * width, bias=False)
         self.gate = nn.Linear(width, width, bias=False)
         self.q_norm = nn.RMSNorm(HEAD_DIM)
@@ -69,13 +66,11 @@ class Block(nn.Module):
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
 
-    def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], h: int, w: int) -> Tensor:
+    def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor]) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
-        grid = y.transpose(1, 2).reshape(B, self.width, h, w)
-        y = y + self.conv(grid).flatten(2).transpose(1, 2)
         q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
         q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
         attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
@@ -93,11 +88,8 @@ class DiT(nn.Module):
         self.patch_embed = nn.Linear(TOKEN_DIM, width)
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width)
-        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, (N_MOD + N_FINAL) * width))
+        self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width) for _ in range(depth))
-        self.final_table = nn.Parameter(torch.zeros(N_FINAL, width))
-        self.final_norm = nn.RMSNorm(width)
-        self.final = nn.Linear(width, TOKEN_DIM)
         self.init_weights()
 
     @torch.no_grad()
@@ -107,16 +99,13 @@ class DiT(nn.Module):
                 m.weight.normal_(0, m.in_features**-0.5)
                 if m.bias is not None:
                     m.bias.zero_()
-            elif isinstance(m, nn.Conv2d):
-                m.weight.zero_()
         mod = self.ada[1]
-        mod.weight.view(N_MOD + N_FINAL, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD + N_FINAL, self.width, self.width)
-        mod.weight.view(N_MOD + N_FINAL, self.width, self.width)[list(GATE_ROWS)] = 0
+        mod.weight.view(N_MOD, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD, self.width, self.width)
+        mod.weight.view(N_MOD, self.width, self.width)[list(GATE_ROWS)] = 0
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
-        self.final_table.normal_(0, ADALN_STD)
-        self.final.weight.zero_()
+        self.patch_embed.weight[:TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the first 128 channels of the stream start as the input patch
 
     def forward(self, x: Tensor, t: Tensor, text: Tensor) -> Tensor:
         """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W].
@@ -126,13 +115,10 @@ class DiT(nn.Module):
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj(F.rms_norm(text, (TEXT_DIM,)).to(dtype))
-        mod = self.ada(c).view(-1, N_MOD + N_FINAL, self.width)
+        mod = self.ada(c).view(-1, N_MOD, self.width)
         rope = rope_angles(h, w, x.device)
 
         tokens = self.patch_embed(tokens)
         for block in self.blocks:
-            tokens = block(tokens, mod[:, :N_MOD], rope, h, w)
-
-        shift, scale = (mod[:, N_MOD:] + self.final_table).unbind(1)
-        tokens = self.final_norm(tokens) * (1 + scale[:, None]) + shift[:, None]
-        return unpatchify(self.final(tokens), h, w).float()
+            tokens = block(tokens, mod, rope)
+        return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()
