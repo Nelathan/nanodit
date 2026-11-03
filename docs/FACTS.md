@@ -331,6 +331,21 @@ The same checkpoints on the checkpoint score's eval set (SPEC §8: the 1000 Luna
 | `128_4e-3_ep3` final (epoch 3, usui lr 2e-3, batch 256) | 1.4873 | 1.4895 |
 | `128_4e-3_ep4` final (epoch 4, usui lr 1e-3, fallback 2.5e-4, batch 256) | 1.4821 | 1.4844 |
 | `128_d768x12_ep1` final (d768, epoch 1, usui lr 8e-3, batch 256) | 1.4807 | 1.4811 |
+| `128_d768x12_ep2` final (d768, epoch 2, usui lr 4e-3, batch 256) | 1.4631 | 1.4643 |
+| `128_d768x12_ep3` final (d768, epoch 3, usui lr 2e-3, batch 256) | 1.4557 | 1.4573 |
+| `128_d768x12_ep4` final (d768, epoch 4, usui lr 1e-3, batch 256) | 1.4518 | 1.4536 |
+| `128_d1024x12_ep1` final (d1024, epoch 1, usui lr 8e-3, batch 256) | 1.4621 | 1.4613 |
+| `128_d1024x12_ep2` final (d1024, epoch 2, usui lr 4e-3, batch 256) | 1.4428 | 1.4439 |
+| `128_d1024x12_ep3` final (d1024, epoch 3, usui lr 2e-3, batch 256) | 1.4343 | 1.4359 |
+| `128_d1024x12_ep4` final (d1024, epoch 4, usui lr 1e-3, batch 256) | 1.4302 | 1.4323 |
+| `128_d768x12_noconv_ep1` final (d768, epoch 1, usui lr 8e-3, conv deleted; 854 img/s against 834) | 1.4805 | 1.4807 |
+| `128_d768x12_lr1e-2_ep1` final (d768, epoch 1, usui lr 1e-2, one change from `_ep1`) | 1.4799 | 1.4797 |
+| `128_d768x12_finalr64_ep1` final (d768, epoch 1, usui lr 8e-3, final linear in Usui at rank 64, one change from `_ep1`) | 1.4911 | 1.4914 |
+| `128_d768x12_slice_ep1` final (d768, epoch 1, usui lr 8e-3, no final layer: first 128 stream channels are the output, identity patch embed; 838 img/s) | 1.4745 | 1.4749 |
+| `128_d768x12_solver1_ep1` final (slice arm plus a tied zero-init 768 x 768 linear residual, 4 iterations, on Usui; `tangent_live_fraction` 0.96 against 0.99, `projected_grad_norm` 0.020 against 0.0043 from step 1000 on) | 1.4816 | 1.4817 |
+| `128_d768x12_solvermlp_ep1` final (slice arm plus a tied zero-init SwiGLU residual, 768 -> 1536 -> 768, 4 iterations, on Usui; 771 img/s, `tangent_live_fraction` 0.95, `projected_grad_norm` 0.0058) | 1.4781 | 1.4785 |
+
+Parameters of the slice-readout model (2026-11-03, MLP hidden 4 x width, counted from `DiT`): 125.4M at width 768 and depth 12, 222.5M at 1024 and 12, 293.8M at 1024 and 16. The `128_d768x12_*` rows above count the earlier architecture (final layer, conv, MLP at 2 x width) except where the arm says otherwise.
 
 - Same lr order as on shards 12 and 40; 2e-4 ends 0.046 above 2e-3, its training loss (mean of the last 10 records) 1.396 against 1.326, so 2e-4 is not too big but too small. The caption gap is under 0.001, and negative at step 1000: the captions here are one short line each (PLAN B3).
 
