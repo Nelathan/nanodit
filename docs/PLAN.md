@@ -237,12 +237,11 @@ The `128_d1024x16_5ep` run spiked from step 5k and diverged after 30k (measureme
 - Whether a pin needs an explicit anneal (the absolute Usui lr decays relative to the weights as they grow; a pin removes that).
 - Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models", magnitude-preserving layers; I take it to be EDM2, not verified beyond the abstract).
 
-### G7. Where the timestep distribution should put its samples
+### G7. Does the narrower timestep distribution hold at hero length and in the samples?
 
-The loss humps mid-t, R² gains over training concentrate at mid t, and the low and high ends are saturated or flat early (numbers: FACTS, to be written). Daniel (2026-11-04): test two changes to the sampling against a paired baseline, all at d768x12 (the smallest model that shows a sampling effect; the sampling effect is read on the fixed shift-1 score grid, not on the training t). Arms: `128_d768x12_t1_3k` (baseline), `_tsig07_3k` (logit-normal sigma 0.7), `_tshift15_3k` (shift 1.5, median t 0.6). Open:
-- Whether either beats the baseline in R² at mid t without losing the tails on the same grid.
-- Whether a narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); the arms score the fixed grid, so the eval grids (the images) are where that shows.
-- Whether the benefit survives longer training: 3000 steps cannot say.
+The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3000-step arms at d768x12 gave it a small, consistent edge at t 0.26 to 0.66 and a loss at t 0.16 and 0.84 (FACTS, Timestep distribution arms). Open:
+- Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
+- Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
 
 ---
 

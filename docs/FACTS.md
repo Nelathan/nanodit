@@ -403,3 +403,20 @@ Weight norms of `128_sweep_lr4e-3` (scratch `norms.py`; Frobenius norm over all 
 - No norm has levelled off; the Usui matrices grow by about 2.5–3× their init, slowing (qkv +17 per 1k steps from 4k to 8k, +12 from 12k to 15042). Nothing sets a target norm: no weight decay on either optimizer, and Usui's fixed step does not depend on `‖W‖`. The same absolute step on a weight 2.8× larger is a 2.8× smaller relative step: an implicit decay with no schedule.
 
 - The merge alone is broken, worse than any child, and better with the null embedding than with the caption; 5000 steps from it end 0.009 below the single run at step 5000, after 4× its compute. Daniel: "no merges just fresh init each time".
+
+## Timestep distribution arms at d768x12 (2026-11-04)
+
+Source: `/mnt/mars/ai/tiny-dit/runs/128_d768x12_{t1,tsig07,tshift15}_3k/score.jsonl` and `train.jsonl`. Three runs, same seed (same init, data order and eval noise), 3000 steps, batch 256, usui lr 2e-3 fixed rule, the sandwich-norm model. Only the training t differs: `t1` logit-normal σ 1, shift 1; `tsig07` σ 0.7; `tshift15` shift 1.5 (median t 0.6). All scored on the same shift-1 σ-1 grid of 10 t (0.16, 0.26, 0.34, 0.40, 0.47, 0.53, 0.60, 0.66, 0.74, 0.84), every 500 steps.
+
+| arm | caption loss at 500 / 1500 / 3000 | R² at 500 / 1500 / 3000 |
+|---|---|---|
+| `t1` | 1.6167 / 1.5179 / 1.4886 | 0.5939 / 0.6154 / 0.6213 |
+| `tsig07` | 1.6105 / 1.5130 / 1.4847 | 0.5950 / 0.6166 / 0.6220 |
+| `tshift15` | 1.6304 / 1.5283 / 1.4956 | 0.5921 / 0.6139 / 0.6206 |
+
+- `tsig07` has a lower loss and higher R² than `t1` at all six scored steps (mean over the grid). Per t, over the six steps, it wins at all six at t 0.26 to 0.66, at three of six at t 0.74, and at none at t 0.16 and 0.84. At step 3000 its R² against `t1` per t: 0.0 / 0.0 / +0.001 / +0.001 / +0.002 / +0.002 / +0.002 / +0.001 / 0.0 / -0.002.
+- `tshift15` is worse than `t1` at the grid mean at all six steps. Per t it wins at none of the six steps for t up to 0.60, and at 2 / 3 / 4 of six at t 0.66 / 0.74 / 0.84.
+- Train-side R² by 0.1 bucket, mean of the last 1000 steps, against `t1` (buckets 0.0 to 0.9): `tsig07` -0.0016 / -0.0036 / -0.0025 / -0.0007 / +0.0016 / +0.0046 / +0.0080 / +0.0097 / +0.0059 / +0.0005; `tshift15` -0.0004 / -0.0014 / -0.0022 / -0.0034 / -0.0045 / -0.0048 / -0.0022 / -0.0012 / -0.0006 / +0.0027.
+- Score R² per t of `t1` at step 3000: 0.971 / 0.916 / 0.855 / 0.785 / 0.706 / 0.616 / 0.514 / 0.400 / 0.281 / 0.170 (the null condition's mean R² differs by under 0.001 from the caption's).
+- One run per arm: the six steps share a trajectory and are not six confirmations. No seed-to-seed spread was measured at this pairing. Sample grids at step 3000 were not compared beyond a look at `t1` and `tsig07`: both are blurred compositions.
+
