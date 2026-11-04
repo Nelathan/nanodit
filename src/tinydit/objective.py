@@ -8,13 +8,13 @@ from torch import Tensor
 PROMPT_DROPOUT = 0.1
 
 
-def sample_t(batch: int, shift: float, device: torch.device | None = None) -> Tensor:
-    """Logit-normal t. The resolution shift s·t / (1 + (s - 1)·t) is a translation of the logit by ln s."""
-    return torch.sigmoid(torch.randn(batch, device=device) + math.log(shift))
+def sample_t(batch: int, shift: float, device: torch.device | None = None, sigma: float = 1.0) -> Tensor:
+    """Logit-normal t with logit std `sigma`. The resolution shift s·t / (1 + (s - 1)·t) is a translation of the logit by ln s."""
+    return torch.sigmoid(sigma * torch.randn(batch, device=device) + math.log(shift))
 
 
 def t_quantiles(n: int, shift: float) -> Tensor:
-    """The midpoints of `n` equal-probability bins of `sample_t`'s distribution: a fixed t grid that weighs t as training does."""
+    """The midpoints of `n` equal-probability bins of the unit-sigma `sample_t`: a fixed t grid."""
     p = (torch.arange(n, dtype=torch.float64) + 0.5) / n
     return torch.sigmoid(torch.special.ndtri(p) + math.log(shift)).float()
 
@@ -38,9 +38,9 @@ def drop_prompts(text: Tensor, null_embedding: Tensor) -> Tensor:
     return torch.where(dropped, null_embedding, text)
 
 
-def flow_loss(model, x: Tensor, text: Tensor, shift: float) -> tuple[Tensor, Tensor, Tensor]:
+def flow_loss(model, x: Tensor, text: Tensor, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
     """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`."""
-    t = sample_t(x.shape[0], shift, x.device)
+    t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, t)
     out = model(x_t, t, drop_prompts(text, model.null_embedding))
@@ -54,3 +54,17 @@ def loss_by_t_bucket(per_sample: Tensor, t: Tensor, buckets: int) -> Tensor:
     total = torch.zeros(buckets, dtype=per_sample.dtype, device=per_sample.device).index_add_(0, index, per_sample)
     count = torch.zeros_like(total).index_add_(0, index, torch.ones_like(per_sample))
     return total / count
+
+
+def explained_variance(per_sample: Tensor, t: Tensor, energy: Tensor) -> Tensor:
+    """R²: the share of the clean latents' energy `energy` (mean square per sample) that the prediction recovers.
+    The F loss is the clean-latent error over t, `per_sample = MSE_x / t²`, so `MSE_x = per_sample · t²`. 0 is
+    no better than predicting zero, the prior mean; 1 is exact."""
+    return 1 - (per_sample * t.square()).sum() / energy.sum()
+
+
+def explained_variance_by_t_bucket(per_sample: Tensor, t: Tensor, energy: Tensor, buckets: int) -> Tensor:
+    """`explained_variance` in each of `buckets` equal-width t bins; NaN where a bin is empty."""
+    index = (t * buckets).long().clamp(max=buckets - 1)
+    error = torch.zeros(buckets, dtype=per_sample.dtype, device=per_sample.device).index_add_(0, index, per_sample * t.square())
+    return 1 - error / torch.zeros_like(error).index_add_(0, index, energy)

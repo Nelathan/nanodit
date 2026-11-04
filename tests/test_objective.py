@@ -1,6 +1,7 @@
+import pytest
 import torch
 
-from tinydit.objective import PROMPT_DROPOUT, drop_prompts, flow_loss, loss_by_t_bucket, noisy, sample_t, t_quantiles, target
+from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
 
 
 def test_loss_equals_velocity_error():
@@ -77,3 +78,48 @@ def test_flow_loss_passes_gradient_to_the_network(model, text):
     assert per_sample.shape == t.shape == (3,)
     loss.backward()
     assert model.patch_embed.weight.grad.abs().max() > 0
+
+
+def test_sigma_narrows_the_logit_normal_around_its_shifted_median():
+    wide, narrow = sample_t(50000, 1.5), sample_t(50000, 1.5, sigma=0.5)
+    assert abs(narrow.median() - wide.median()) < 0.01 and abs(wide.median() - 0.6) < 0.01
+    assert narrow.std() < 0.6 * wide.std()
+
+
+def test_per_sample_loss_is_the_clean_latent_error_over_t_squared():
+    torch.manual_seed(0)
+    x, eps, x_hat, t = torch.randn(6, 2, 8, 8), torch.randn(6, 2, 8, 8), torch.randn(6, 2, 8, 8), torch.rand(6) * 0.9 + 0.05
+    x_t = noisy(x, eps, t)
+    out = x_t - (x_t - x_hat) / t.view(-1, 1, 1, 1)  # the F output of a model whose clean-latent prediction is x_hat
+    torch.testing.assert_close(per_sample_loss(out, x, eps, x_t), (x - x_hat).square().flatten(1).mean(1) / t.square(), rtol=1e-4, atol=1e-5)
+
+
+def test_explained_variance_is_zero_for_predicting_zero_and_one_for_exact():
+    torch.manual_seed(0)
+    x, eps, t = torch.randn(4000, 2, 8, 8), torch.randn(4000, 2, 8, 8), torch.rand(4000) * 0.9 + 0.05
+    energy = x.square().flatten(1).mean(1)
+    x_t = noisy(x, eps, t)
+    zero_out = x_t - (x_t - torch.zeros_like(x)) / t.view(-1, 1, 1, 1)  # predicts x_hat = 0
+    exact_out = x_t - (eps - x)
+    assert abs(explained_variance(per_sample_loss(zero_out, x, eps, x_t), t, energy)) < 1e-4
+    assert explained_variance(per_sample_loss(exact_out, x, eps, x_t), t, energy) > 1 - 1e-5
+
+
+def test_explained_variance_by_bucket_reads_each_bin_and_puts_t_one_in_the_last():
+    t, energy = torch.tensor([0.1, 0.3, 0.3, 1.0]), torch.tensor([1.0, 1.0, 2.0, 4.0])
+    per_sample = torch.tensor([4.0, 1.0, 1.0, 0.25])  # clean-latent errors 0.04, 0.09, 0.09, 0.25
+    by_bucket = explained_variance_by_t_bucket(per_sample, t, energy, buckets=2)
+    assert by_bucket[0] == pytest.approx(1 - (0.04 + 0.09 + 0.09) / 4) and by_bucket[1] == pytest.approx(1 - 0.25 / 4)
+    assert torch.isnan(explained_variance_by_t_bucket(per_sample[:3], t[:3], energy[:3], buckets=2)[1])
+
+
+def test_flow_loss_samples_t_with_the_given_sigma():
+    class Zero(torch.nn.Module):
+        null_embedding = torch.zeros(4)
+
+        def forward(self, x_t, t, text):
+            return torch.zeros_like(x_t)
+
+    x, text = torch.randn(20000, 2, 2, 2), torch.zeros(20000, 4)
+    wide, narrow = flow_loss(Zero(), x, text, 1.0)[2], flow_loss(Zero(), x, text, 1.0, sigma=0.5)[2]
+    assert narrow.std() < 0.6 * wide.std()

@@ -19,13 +19,15 @@ from safetensors.torch import load_file, save_file
 
 from tinydit.data import Stream, read_rows
 from tinydit.model import DiT
-from tinydit.objective import flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
+from tinydit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
 from tinydit.optim import build_optimizers
 from tinydit.sampler import euler_sample
 
 PROMPT_PREFIX = "title: none | text: "  # SPEC §1
 T_BUCKETS = 10
-SCORE_TS = 10  # the score's t grid: equal-probability bins of the training t (SPEC §8)
+SCORE_TS = 10  # the score's t grid: equal-probability bins of the shift-1 logit-normal, whatever t the run trains on (SPEC §8)
+SCORE_SHIFT = 1.0
+WANDB_BUCKETS = 5  # wandb shows 5 buckets: the train.jsonl and score.jsonl series have 10
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class Config:
     eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
+    t_sigma: float = 1.0  # std of the logit-normal t, PLAN G7
     pin_weights: bool = False  # PLAN G6: Usui matrices keep their init norm; usui_lr is then a relative step, not Usui's fixed one
 
 
@@ -112,8 +115,9 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
 @torch.no_grad()
 def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
     """The loss on fixed rows with fixed noise at every t of a fixed grid, with each row's caption and with the
-    null embedding: one number per condition, comparable across steps and runs, and its value at each t."""
-    result = {}
+    null embedding: one number per condition, comparable across steps and runs, and its value at each t. The
+    same for R² (`explained_variance`), per t and over the grid."""
+    result, energy = {}, x.float().square().mean().item()
     for condition, condition_text in (("caption", text), ("null", model.null_embedding.expand(len(x), -1))):
         per_t = []
         for t_value in ts.tolist():
@@ -126,6 +130,8 @@ def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
                 total += per_sample_loss(model(x_t, t, tb).float(), xb, eb, x_t).sum()
             per_t.append(float(total) / len(x))
         result[f"loss_{condition}"], result[f"loss_{condition}_by_t"] = sum(per_t) / len(per_t), per_t
+        errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
+        result[f"r2_{condition}"], result[f"r2_{condition}_by_t"] = 1 - sum(errors) / len(errors) / energy, [1 - error / energy for error in errors]
     return result
 
 
@@ -135,12 +141,23 @@ def append_jsonl(path: Path, record: dict) -> None:
         f.flush()
 
 
-def wandb_scalars(record: dict) -> dict:
-    """A train.jsonl record, flat: one series per t bucket, named by its lower edge, and Usui's reads under
-    `usuitrack/`, as ai-toolkit names them."""
-    scalars = {key: value for key, value in record.items() if key not in ("step", "loss_by_t", "usui")}
-    scalars |= {f"loss_by_t/{i / T_BUCKETS:.1f}": v for i, v in enumerate(record["loss_by_t"]) if v is not None}
+def wandb_scalars(record: dict, by_t: dict) -> dict:
+    """A train.jsonl record, flat, with `by_t` (the interval's loss and R² in the wandb buckets) as one series per
+    bucket named by its lower edge, and Usui's reads under `usuitrack/`, as ai-toolkit names them."""
+    scalars = {key: value for key, value in record.items() if key not in ("step", "loss_by_t", "r2_by_t", "usui")}
+    for name, values in by_t.items():
+        scalars |= {f"{name}/{i / WANDB_BUCKETS:.1f}": v for i, v in enumerate(values) if v is not None}
     return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
+
+
+def wandb_scores(scores: dict) -> dict:
+    """A score record, flat: the means, and each by-t series as the means of neighbouring grid points, the t's of
+    one fifth of the grid's probability mass each, named by the lower quantile."""
+    flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null", "r2_caption", "r2_null")}
+    size = SCORE_TS // WANDB_BUCKETS
+    for key in ("loss_caption_by_t", "loss_null_by_t", "r2_caption_by_t", "r2_null_by_t"):
+        flat |= {f"eval/{key}/{i / WANDB_BUCKETS:.1f}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
+    return flat
 
 
 def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
@@ -155,11 +172,19 @@ class Interval:
     device-to-host transfer per record."""
 
     def __init__(self):
-        self.losses, self.per_samples, self.ts, self.grad_norms = [], [], [], []
+        self.losses, self.per_samples, self.ts, self.energies, self.grad_norms = [], [], [], [], []
         self.start = time.perf_counter()
 
-    def add(self, loss, per_sample, t, grad_norm) -> None:
-        self.losses.append(loss), self.per_samples.append(per_sample), self.ts.append(t), self.grad_norms.append(grad_norm)
+    def add(self, loss, per_sample, t, energy, grad_norm) -> None:
+        self.losses.append(loss), self.per_samples.append(per_sample), self.ts.append(t), self.energies.append(energy), self.grad_norms.append(grad_norm)
+
+    def by_t(self, buckets: int) -> dict:
+        """The interval's loss and R² in `buckets` equal-width t bins; None where a bin is empty."""
+        per_sample, t, energy = torch.cat(self.per_samples), torch.cat(self.ts), torch.cat(self.energies)
+        return dict(
+            loss_by_t=[None if v != v else v for v in loss_by_t_bucket(per_sample, t, buckets).tolist()],
+            r2_by_t=[None if v != v else v for v in explained_variance_by_t_bucket(per_sample, t, energy, buckets).tolist()],
+        )
 
     def report(self, step: int, batch: int) -> dict:
         """Means over the interval. A non-finite step stops the run here: UsuiTrack zeroes non-finite
@@ -169,27 +194,28 @@ class Interval:
         for i, (loss, grad_norm) in enumerate(zip(losses, grad_norms)):
             if not (math.isfinite(loss) and math.isfinite(grad_norm)):
                 raise RuntimeError(f"non-finite loss {loss} or fallback gradient norm {grad_norm} at step {first + i}")
-        buckets = loss_by_t_bucket(torch.cat(self.per_samples), torch.cat(self.ts), T_BUCKETS).tolist()
+        per_sample, t, energy = torch.cat(self.per_samples), torch.cat(self.ts), torch.cat(self.energies)
         return dict(
             step=step,
             loss=sum(losses) / len(losses),
-            loss_by_t=[None if v != v else v for v in buckets],
+            r2=explained_variance(per_sample, t, energy).item(),
+            **self.by_t(T_BUCKETS),
             fallback_grad_norm=sum(grad_norms) / len(grad_norms),
             imgs_per_s=batch * len(losses) / (time.perf_counter() - self.start),
         )
 
 
-def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean loss and the
-    per-sample losses and t of every sample."""
-    losses, per_samples, ts = [], [], []
+    per-sample losses, t and clean-latent energy (mean square) of every sample."""
+    losses, per_samples, ts, energies = [], [], [], []
     for _ in range(micro_batches):
         x, text = stream.next()
-        loss, per_sample, t = flow_loss(model, x, text, shift)
+        loss, per_sample, t = flow_loss(model, x, text, shift, sigma)
         (loss / micro_batches).backward()
-        losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t)
-    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts)
+        losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
+    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
 
 
 def main(config_path: str) -> None:
@@ -218,7 +244,7 @@ def main(config_path: str) -> None:
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
     score_x, score_text = read_rows(cfg.eval_set, cfg.resolution)
     score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
-    score_ts = t_quantiles(SCORE_TS, cfg.shift)
+    score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
 
     run_dir.mkdir(parents=True)
     shutil.copy(config_path, run_dir / "config.toml")
@@ -230,10 +256,10 @@ def main(config_path: str) -> None:
     interval = Interval()
     last = start + cfg.steps
     for step in range(start + 1, last + 1):
-        loss, per_sample, t = accumulate_gradients(model, stream, accumulate, cfg.shift)
+        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
-        interval.add(loss, per_sample, t, torch.nn.utils.get_total_norm(fallback_grads))
+        interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))
         lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
         for optimizer, schedule in zip(optimizers, schedules):
             optimizer.step()
@@ -242,14 +268,14 @@ def main(config_path: str) -> None:
         if step % cfg.log_every == 0 or step == last:
             record = interval.report(step, cfg.batch) | dict(lr_usui=lr_usui, lr_fallback=lr_fallback, usui=optimizers[0].pop_diagnostics())
             append_jsonl(run_dir / "train.jsonl", record)
-            wandb.log(wandb_scalars(record), step=step)
+            wandb.log(wandb_scalars(record, interval.by_t(WANDB_BUCKETS)), step=step)
             interval = Interval()
         paused = time.perf_counter()
         if step % cfg.eval_every == 0 or step == last:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
             scores = score(model, score_x, score_text, score_noise, score_ts, cfg.micro_batch, device)
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)
-            wandb.log({f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null")}, step=step)
+            wandb.log(wandb_scores(scores), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only

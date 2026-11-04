@@ -11,7 +11,7 @@ from conftest import open_gates
 from test_data import write_shard
 from tinydit.model import DiT
 from tinydit.objective import flow_loss as real_flow_loss
-from tinydit.objective import noisy, target
+from tinydit.objective import noisy, t_quantiles, target
 from tinydit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
@@ -49,7 +49,7 @@ beta = 0.95
 rank_fraction = 0.1
 fallback_lr = 1e-3
 warmup = 2
-shift = 1.0
+shift = 1.5
 log_every = {log_every}
 checkpoint_every = {checkpoint_every}
 eval_every = {eval_every}
@@ -86,9 +86,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     step_losses = []
 
     def accumulate_gradients(*args):
-        loss, per_sample, t = real_accumulate(*args)
+        loss, per_sample, t, energy = real_accumulate(*args)
         step_losses.append(loss.item())
-        return loss, per_sample, t
+        return loss, per_sample, t, energy
 
     real_accumulate = train.accumulate_gradients
     monkeypatch.setattr(train, "accumulate_gradients", accumulate_gradients)
@@ -114,16 +114,27 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     curves = [(step, data) for step, data in sent if "loss" in data]
     assert [step for step, _ in curves] == [2, 3] and [data["loss"] for _, data in curves] == [r["loss"] for r in log]
     for (_, data), r in zip(curves, log):  # the same values as train.jsonl, empty t buckets left out
-        expected = {key: r[key] for key in ("loss", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
-        expected |= {f"loss_by_t/{b / 10:.1f}": v for b, v in enumerate(r["loss_by_t"]) if v is not None}
-        assert data == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
+        expected = {key: r[key] for key in ("loss", "r2", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
+        by_t = {key: value for key, value in data.items() if "_by_t/" in key}
+        assert {key.split("/")[0] for key in by_t} <= {"loss_by_t", "r2_by_t"} and all(key.split("/")[1] in ("0.0", "0.2", "0.4", "0.6", "0.8") for key in by_t)
+        for key, value in by_t.items():  # a wandb bucket pools its pair of train.jsonl buckets: within their range
+            name, edge = key.split("/")
+            pair = [v for v in r[name][int(float(edge) * 5) * 2 : int(float(edge) * 5) * 2 + 2] if v is not None]
+            assert min(pair) - 1e-6 <= value <= max(pair) + 1e-6
+        assert {key: value for key, value in data.items() if "_by_t/" not in key} == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
     assert [step for step, data in sent if "eval" in data] == [2, 3]
 
     scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
     assert [s["step"] for s in scores] == [2, 3]  # every eval_every, and the last step: not only the checkpoints
-    assert [(step, sorted(data)) for step, data in sent if "eval/loss_caption" in data] == [(s, ["eval/loss_caption", "eval/loss_null"]) for s in (2, 3)]
+    assert all(s["t"] == pytest.approx(t_quantiles(10, 1.0).tolist()) for s in scores)  # the shift-1 grid, though the run trains at shift 1.5
+    logged = [(step, data) for step, data in sent if "eval/loss_caption" in data]
+    assert [step for step, _ in logged] == [2, 3]
+    for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
+        assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_null"] == s["loss_null"]
+        assert data["eval/r2_caption_by_t/0.2"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
+        assert len(data) == 4 + 4 * 5
     for s in scores:
-        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == 10
+        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == len(s["r2_caption_by_t"]) == 10
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
@@ -168,6 +179,10 @@ def test_score_is_each_conditions_loss_at_each_t_with_each_rows_own_noise(train)
             by_t.append(float((Echo()(x_t, t, embedding) - target(x.float(), noise, x_t)).square().mean()))
         torch.testing.assert_close(result[f"loss_{condition}_by_t"], by_t)
         torch.testing.assert_close(result[f"loss_{condition}"], sum(by_t) / 2)
+        energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
+        r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
+        torch.testing.assert_close(result[f"r2_{condition}_by_t"], r2_by_t)
+        torch.testing.assert_close(result[f"r2_{condition}"], sum(r2_by_t) / 2)
     torch.testing.assert_close(train.score(Echo(), x, text, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
 
 
@@ -226,10 +241,10 @@ def test_a_run_from_a_checkpoint_starts_from_its_weights_and_optimizer_state_at_
     seen = []
     real_accumulate = train.accumulate_gradients
 
-    def accumulate_gradients(model, stream, micro_batches, shift):
+    def accumulate_gradients(model, stream, micro_batches, shift, sigma):
         if not seen:  # before the first step
             seen.append(({k: v.clone() for k, v in model.state_dict().items()}, [copy.deepcopy(o.state_dict()) for o in optimizers]))  # state_dict holds the live tensors
-        return real_accumulate(model, stream, micro_batches, shift)
+        return real_accumulate(model, stream, micro_batches, shift, sigma)
 
     optimizers = []
     real_build = train.build_optimizers
@@ -277,7 +292,7 @@ class FixedBatches:
         return self.chunks[(self.i - 1) % len(self.chunks)]
 
 
-def fixed_flow_loss(model, x, text, shift):
+def fixed_flow_loss(model, x, text, shift, sigma):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
@@ -299,7 +314,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
-        loss, per_sample, t = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0)
+        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0)
         results.append((loss, per_sample, t, [model.patch_embed.bias.grad, model.blocks[0].table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
@@ -322,7 +337,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     x = torch.randn(8, 2, 16, 16, generator=g)
     text = torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
     for _ in range(3):
-        loss, per_sample, t = train.accumulate_gradients(model, FixedBatches([(x[:4], text[:4]), (x[4:], text[4:])]), 2, shift=1.0)
+        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], text[:4]), (x[4:], text[4:])]), 2, shift=1.0, sigma=1.0)
         assert loss.dtype == per_sample.dtype == torch.float32 and loss.isfinite() and per_sample.isfinite().all()
         for optimizer in optimizers:
             optimizer.step()
@@ -358,3 +373,14 @@ def test_scores_follow_eval_every_and_checkpoints_follow_checkpoint_every(train,
     run = tmp_path / "runs" / "smoke"
     assert [json.loads(line)["step"] for line in (run / "score.jsonl").read_text().splitlines()] == [1, 2, 3]
     assert [p.name for p in (run / "checkpoints").iterdir()] == ["step_0000003"]
+
+
+def test_wandb_buckets_pool_the_interval_rather_than_averaging_the_train_buckets(train):
+    interval = train.Interval()
+    t = torch.tensor([0.05, 0.15, 0.15, 0.15, 0.15, 0.15, 0.9, 1.0])  # 1 sample in [0, 0.1), 5 in [0.1, 0.2), 2 at the top
+    per_sample, energy = torch.tensor([10.0, 1, 1, 1, 1, 1, 2, 4]), torch.ones(8)
+    interval.add(per_sample.mean(), per_sample, t, energy, torch.tensor(0.0))
+    by_t = interval.by_t(5)
+    assert by_t["loss_by_t"][0] == pytest.approx(15 / 6) and by_t["loss_by_t"][1:4] == [None] * 3 and by_t["loss_by_t"][4] == pytest.approx(3.0)  # t = 1.0 lands in the last bucket
+    error = per_sample * t.square()
+    assert by_t["r2_by_t"][0] == pytest.approx(1 - error[:6].sum().item() / 6) and by_t["r2_by_t"][4] == pytest.approx(1 - error[6:].sum().item() / 2)
