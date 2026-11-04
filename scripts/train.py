@@ -159,10 +159,11 @@ def wandb_scalars(record: dict, by_t: dict) -> dict:
 def wandb_scores(scores: dict) -> dict:
     """A score record, flat: the means under `eval/`, and each by-t series as the means of neighbouring grid points,
     the t's of one fifth of the grid's probability mass each, in one group per topic,
-    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
+    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t). Only the caption condition is
+    bucketed on wandb; the null condition's by-t series stay in score.jsonl."""
     flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null", "r2_caption", "r2_null")}
     size = SCORE_TS // WANDB_BUCKETS
-    for key in ("loss_caption_by_t", "loss_null_by_t", "r2_caption_by_t", "r2_null_by_t"):
+    for key in ("loss_caption_by_t", "r2_caption_by_t"):
         flat |= {f"eval_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
 
