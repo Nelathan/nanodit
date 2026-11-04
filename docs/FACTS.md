@@ -46,6 +46,23 @@ Stability under small input changes (same samples; `stability` in the JSON). cos
 - Determinism: same batch twice and batch 16 against single images give max abs diff 0.0 (CPU, fp32).
 - Frequency split (latent avg-pooled by k then nearest-upsampled = low band; remainder = high band; mean per-image cosine; k = 2 / 4 / 8). hflip case, enc(flip img) against flip(enc img), 128 px: low 0.988 / 0.991 / 0.990, high 0.266 / 0.427 / 0.475; 256 px: low 0.987 / 0.992 / 0.991, high 0.177 / 0.336 / 0.389. 1/255-noise case, 128 px: low 0.979 / 0.989 / 0.990, high 0.960 / 0.963 / 0.965; 256 px: low 0.962 / 0.983 / 0.988, high 0.930 / 0.934 / 0.937. The low band holds 33% / 12% / 4% of the energy (k = 2 / 4 / 8, 128 px).
 
+## Downsampler (B5, 2026-11-04)
+
+Source: `scripts/probe_resize.py`, CPU, fp32. First 256 square 512 px jpgs of `data_512_2M/data_000000.tar`, resized to 128 px. Reference: the source cropped in the Fourier domain to the 128 px Nyquist. Band energy is the share of the reference's energy in the band, at 0 to .125 / .125 to .25 / .25 to .375 / .375 to .5 cycles per pixel of the 128 px grid. Primal round trip on the first 64 images; "detail" is the image minus its 5×5 box blur, and the error is the detail error over the detail energy.
+
+| resize | PSNR vs reference | band energy | Primal round trip PSNR | detail error / energy |
+|---|---|---|---|---|
+| torch bicubic, antialias (the precompute's) | 26.43 | 1.00 / 0.97 / 0.81 / 0.57 | 35.59 | 0.082 |
+| PIL Lanczos | 26.25 | 1.00 / 1.00 / 0.96 / 0.70 | 34.74 | 0.090 |
+| PIL box (area) | 26.16 | 1.00 / 0.92 / 0.79 / 0.72 | 34.67 | 0.099 |
+| PIL bicubic | 26.41 | 1.00 / 0.96 / 0.81 / 0.57 | 35.57 | 0.082 |
+| torch bilinear, antialias | 26.59 | 1.00 / 0.82 / 0.56 / 0.35 | 37.40 | 0.068 |
+| torch bicubic, no antialias | 24.04 | 1.00 / 1.08 / 1.29 / 1.75 | 30.28 | 0.175 |
+
+- The precompute's resize loses about 10% of the amplitude in the .25 to .375 band and about 25% in the top band against Lanczos, which keeps 98% and 84%. It is soft, not mushy; bilinear is mushy; without antialiasing the energy above the reference is aliasing.
+- Round trip PSNR rises with smoothness, so it does not rank the resizers. Latent std is 1.03 to 1.04 for all.
+- 512 px jpgs, 256 images: the sources are already compressed, and nothing here says what the model does with the extra detail.
+
 ## EmbeddingGemma 2 (B2, B3)
 
 Source: `scripts/probe_embeddinggemma.py`, `/mnt/mars/ai/tiny-dit/probes/embeddinggemma.json`, 2026-10-31. Text-only, 271.0M params, via sentence-transformers 6.2.0 (`config_kwargs=dict(vision_config=None, audio_config=None)`, `model_kwargs={"dtype": ...}`): Transformer, mean Pooling over all tokens (bos and eos included), Normalize. Raw norms come from the first two modules. Prefix `title: none | text: `. 256 captions + 16 short prompts.

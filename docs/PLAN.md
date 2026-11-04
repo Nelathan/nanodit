@@ -54,6 +54,12 @@ is not (FACTS, Primal 2x2), so a flipped latent decodes correctly but is not on 
 encoder's distribution. Settle, if more data diversity is needed: re-encode flipped
 images, or test whether training on flipped latents hurts. Evidence: FACTS only.
 
+### B5. Which downsampler for any re-encode and for 256 px?
+
+The 128 px latents were encoded from a torch bicubic antialiased resize of the 512 crops. Lanczos keeps more of the top two frequency bands (FACTS, Downsampler). Daniel (2026-11-04): keep the current latents; Lanczos is the better resizer if the data are ever re-encoded or the 256 px stage is made, and a Lanczos arm comes later. Open:
+- Whether Lanczos latents train or sample better than bicubic ones at equal steps, at 128 px (a re-encode of a shard subset and one paired arm would say).
+- Whether the 256 px stage should resize from the 512 crops with Lanczos in the same precompute that makes its latents.
+
 ---
 
 ## Group C. LR sweep and step budget
