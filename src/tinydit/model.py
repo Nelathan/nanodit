@@ -62,6 +62,8 @@ class Block(nn.Module):
         self.q_norm = nn.RMSNorm(HEAD_DIM)
         self.k_norm = nn.RMSNorm(HEAD_DIM)
         self.out = nn.Linear(width, width, bias=False)
+        self.attn_norm = nn.RMSNorm(width)
+        self.mlp_norm = nn.RMSNorm(width)
         self.w_gate = nn.Linear(width, hidden, bias=False)
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
@@ -74,10 +76,10 @@ class Block(nn.Module):
         q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
         q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
         attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
-        x = x + gate_a[:, None] * self.out(attn * torch.sigmoid(self.gate(y)))
+        x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
-        return x + gate_m[:, None] * self.w_down(F.silu(self.w_gate(y)) * self.w_up(y))
+        return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
 
 
 class DiT(nn.Module):

@@ -43,6 +43,7 @@ Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectio
 | Depth | 12 layers (24 later, once it produces images) |
 | Attention | MHA, 8 heads × head dim 64. No GQA (no KV cache, nothing to save) |
 | QK norm | RMSNorm on Q and K |
+| Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
 | Position | 2D axial RoPE on all of each head's dims (32 for rows, 32 for columns) |
 | MLP | SwiGLU, hidden 4 × width |
@@ -77,7 +78,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | SwiGLU up / gate / down | fan-in normal | Usui |
 | adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
-| QK-RMSNorm gains, biases | ones / zero | fallback |
+| Branch-norm gains, QK-RMSNorm gains, biases | ones / zero | fallback |
 
 Consequence of the identity patch embed with x0 velocity: the zero gates make every block the identity, so `F = x_t` and `v̂ = 0` at step 0, and the loss reaches the patch embed and the gate rows at once; the blocks behind the gates follow as the gates open.
 

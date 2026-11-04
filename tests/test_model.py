@@ -125,3 +125,13 @@ class TestRope:
         col_logit = pairwise[..., col_dims].sum(-1)
         assert torch.allclose(col_logit[0, 0, 0, 0], col_logit[0, 0, 3, 0], atol=1e-5)
         assert not torch.allclose(col_logit[0, 0, 0, 0], col_logit[0, 0, 0, 3], atol=1e-3)
+
+
+def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, text):
+    open_gates(model)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, text)
+    for block in model.blocks:
+        block.w_down.weight.data *= 1e3
+        block.out.weight.data *= 1e3
+    assert torch.allclose(model(x, t, text), base, atol=1e-3)  # the post-norm removes the weights' scale
