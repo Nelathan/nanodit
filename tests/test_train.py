@@ -131,7 +131,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert [step for step, _ in logged] == [2, 3]
     for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
         assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_null"] == s["loss_null"]
-        assert data["eval/r2_caption_by_t/0.2"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
+        assert data["eval_r2_caption_by_t/0.2"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
         assert len(data) == 4 + 4 * 5
     for s in scores:
         assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == len(s["r2_caption_by_t"]) == 10
