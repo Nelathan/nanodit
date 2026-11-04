@@ -384,3 +384,14 @@ def test_wandb_buckets_pool_the_interval_rather_than_averaging_the_train_buckets
     assert by_t["loss_by_t"][0] == pytest.approx(15 / 6) and by_t["loss_by_t"][1:4] == [None] * 3 and by_t["loss_by_t"][4] == pytest.approx(3.0)  # t = 1.0 lands in the last bucket
     error = per_sample * t.square()
     assert by_t["r2_by_t"][0] == pytest.approx(1 - error[:6].sum().item() / 6) and by_t["r2_by_t"][4] == pytest.approx(1 - error[6:].sum().item() / 2)
+
+
+def test_both_lrs_decay_linearly_to_the_final_fraction_over_the_run_after_warmup(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=4, eval_every=100)
+    config.write_text(config.read_text().replace("warmup = 2", "warmup = 2\nlr_final_fraction = 0.5"))
+    train.main(str(config))
+    log = [json.loads(line) for line in (tmp_path / "runs" / "smoke" / "train.jsonl").read_text().splitlines()]
+    factors = [0.5, 0.875, 0.75, 0.625]  # warmup 2, then 1 - 0.5 · done / 4
+    assert [r["lr_usui"] for r in log] == pytest.approx([3e-3 * f for f in factors])
+    assert [r["lr_fallback"] for r in log] == pytest.approx([1e-3 * f for f in factors])

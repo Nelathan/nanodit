@@ -61,6 +61,7 @@ class Config:
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     pin_weights: bool = False  # PLAN G6: Usui matrices keep their init norm; usui_lr is then a relative step, not Usui's fixed one
+    lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
@@ -239,7 +240,11 @@ def main(config_path: str) -> None:
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
         block.compile()
-    schedules = [torch.optim.lr_scheduler.LambdaLR(o, lambda done: min(1.0, (done + 1) / max(1, cfg.warmup))) for o in optimizers]
+
+    def lr_factor(done: int) -> float:
+        return min(1.0, (done + 1) / max(1, cfg.warmup)) * (1 + (cfg.lr_final_fraction - 1) * done / cfg.steps)
+
+    schedules = [torch.optim.lr_scheduler.LambdaLR(o, lr_factor) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
     score_x, score_text = read_rows(cfg.eval_set, cfg.resolution)

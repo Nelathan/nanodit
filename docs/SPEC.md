@@ -87,7 +87,7 @@ Consequence of the identity patch embed with x0 velocity: the zero gates make ev
 - Usui's fixed step on every tracked matrix: sized by `lr` and the matrix's shape, not relative to its norm, since a model trained from scratch has zero-initialized matrices with no norm to be relative to.
 - Frame size: one rank fraction for every tracked matrix.
 - Frames drawn at random when the optimizer is built (Usui's `frame_init="random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
-- Linear LR warmup on both optimizers.
+- Linear LR warmup on both optimizers, then a linear decay over the run to a configured fraction of the peak.
 - Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
