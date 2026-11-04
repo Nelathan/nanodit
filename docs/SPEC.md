@@ -59,7 +59,7 @@ Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), D
 - Network output `F`. Target `T = x_t - v = x + (1 - t)(x - ε)`.
 - Loss: `‖F - T‖²`, unweighted. This is identically `‖v̂ - v‖²` with `v̂ = x_t - F`.
 - The sampler receives `v̂ = x_t - F`; any flow-matching sampler runs unchanged.
-- Timestep sampling: logit-normal. Shift grows with resolution, scaled by √(token ratio) per stage.
+- Timestep sampling: logit-normal with logit std 0.7, which puts more samples at mid t, where the loss is highest. Shift grows with resolution, scaled by √(token ratio) per stage.
 - Prompt dropout: 10%, replaced by a learned null embedding → classifier-free guidance at sampling.
 
 ## 5. Initialization

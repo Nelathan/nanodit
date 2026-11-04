@@ -59,7 +59,7 @@ class Config:
     eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
-    t_sigma: float = 1.0  # std of the logit-normal t, PLAN G7
+    t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     pin_weights: bool = False  # PLAN G6: Usui matrices keep their init norm; usui_lr is then a relative step, not Usui's fixed one
 
 

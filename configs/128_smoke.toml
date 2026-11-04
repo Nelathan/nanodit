@@ -16,6 +16,7 @@ rank_fraction = 0.1
 fallback_lr = 1e-3
 warmup = 200
 shift = 1.0
+t_sigma = 1.0
 log_every = 200
 checkpoint_every = 200
 eval_every = 200
