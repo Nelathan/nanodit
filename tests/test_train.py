@@ -120,7 +120,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert [step for step, data in sent if "eval" in data] == [2, 3]
 
     scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
-    assert [s["step"] for s in scores] == [2, 3]  # every checkpoint
+    assert [s["step"] for s in scores] == [2, 3]  # every eval_every, and the last step: not only the checkpoints
     assert [(step, sorted(data)) for step, data in sent if "eval/loss_caption" in data] == [(s, ["eval/loss_caption", "eval/loss_null"]) for s in (2, 3)]
     for s in scores:
         assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == 10
@@ -347,3 +347,14 @@ def test_a_resumed_run_takes_its_step_rule_and_pin_from_the_config_not_the_check
     resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 1e-3, pin_weights=not saved_pinned)
     assert train.load_checkpoint(model, resumed, tmp_path / "checkpoints" / "step_0000007") == 7
     assert {(g["step_rule"], g["pin_norm"], g["lr"]) for g in resumed[0].param_groups} == {("fixed" if saved_pinned else "trust", not saved_pinned, 2e-3)}
+
+
+def test_scores_follow_eval_every_and_checkpoints_follow_checkpoint_every(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    monkeypatch.setattr(train.wandb, "init", lambda **kwargs: None)
+    monkeypatch.setattr(train.wandb, "log", lambda data, step: None)
+    monkeypatch.setattr(train.wandb, "finish", lambda: None)
+    train.main(str(write_config(tmp_path, steps=3, eval_every=1, checkpoint_every=100)))
+    run = tmp_path / "runs" / "smoke"
+    assert [json.loads(line)["step"] for line in (run / "score.jsonl").read_text().splitlines()] == [1, 2, 3]
+    assert [p.name for p in (run / "checkpoints").iterdir()] == ["step_0000003"]

@@ -103,5 +103,5 @@ Consequence of the identity patch embed with x0 velocity: the zero gates make ev
 - dpmpp_2m with the beta scheduler is allowed for best-looking samples, separately from the eval grid.
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little).
-- Score at every checkpoint: the loss on an eval set never trained on, with each row's caption and with the null embedding, every row at the same 10 t (the midpoints of equal-probability bins of the training t) with its own fixed noise. One number per condition, and its value at each t.
+- Score at every eval: the loss on an eval set never trained on, with each row's caption and with the null embedding, every row at the same 10 t (the midpoints of equal-probability bins of the training t) with its own fixed noise. One number per condition, and its value at each t.
 - Logs: plain JSONL files, the record: one line per `log_every` steps, the reads averaged over them on the GPU. The same values and the eval grid stream to wandb for live curves.
