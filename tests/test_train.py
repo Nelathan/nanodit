@@ -115,15 +115,15 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert [step for step, _ in curves] == [2, 3] and [data["train/loss"] for _, data in curves] == [r["loss"] for r in log]
     for (_, data), r in zip(curves, log):  # the same values as train.jsonl, empty t buckets left out
         expected = {f"train/{key}": r[key] for key in ("loss", "r2", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
-        by_t = {key: value for key, value in data.items() if key.startswith("train_t")}
+        by_t = {key: value for key, value in data.items() if "_by_t/" in key}
         edges = ("0.0-0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8-1.0")
-        assert all(key.split("/")[0][len("train_t") :] in edges and key.split("/")[1] in ("loss", "r2") for key in by_t)
+        assert all(key.split("/")[0] in ("train_loss_by_t", "train_r2_by_t") and key.split("/")[1] in [f"t{e}" for e in edges] for key in by_t)
         for key, value in by_t.items():  # a wandb bucket pools its pair of train.jsonl buckets: within their range
-            group, name = key.split("/")
-            first = edges.index(group[len("train_t") :]) * 2
-            pair = [v for v in r[f"{name}_by_t"][first : first + 2] if v is not None]
+            group, bucket = key.split("/")
+            first = edges.index(bucket[1:]) * 2
+            pair = [v for v in r[group.removeprefix("train_")][first : first + 2] if v is not None]
             assert min(pair) - 1e-6 <= value <= max(pair) + 1e-6
-        assert {key: value for key, value in data.items() if not key.startswith("train_t")} == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
+        assert {key: value for key, value in data.items() if "_by_t/" not in key} == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
     assert [step for step, data in sent if "eval" in data] == [2, 3]
 
     scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
@@ -133,7 +133,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert [step for step, _ in logged] == [2, 3]
     for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
         assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_null"] == s["loss_null"]
-        assert data["eval_q0.2-0.4/r2_caption"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
+        assert data["eval_r2_caption_by_t/q0.2-0.4"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
         assert len(data) == 4 + 4 * 5
     for s in scores:
         assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == len(s["r2_caption_by_t"]) == 10

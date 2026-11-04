@@ -148,22 +148,22 @@ def bucket_label(i: int) -> str:
 
 def wandb_scalars(record: dict, by_t: dict) -> dict:
     """A train.jsonl record, flat, under `train/`, with `by_t` (the interval's loss and R² in the wandb buckets)
-    in one group per t bucket, `train_t<lo>-<hi>/`, and Usui's reads under `usuitrack/`, as ai-toolkit names
-    them. wandb groups on the first slash only."""
+    as one group per topic, `train_<topic>_by_t/t<lo>-<hi>`, and Usui's reads under `usuitrack/`, as ai-toolkit
+    names them. wandb groups on the first slash only, so a group holds its series one level deep."""
     scalars = {f"train/{key}": value for key, value in record.items() if key not in ("step", "loss_by_t", "r2_by_t", "usui")}
     for name, values in by_t.items():
-        scalars |= {f"train_t{bucket_label(i)}/{name.removesuffix('_by_t')}": v for i, v in enumerate(values) if v is not None}
+        scalars |= {f"train_{name}/t{bucket_label(i)}": v for i, v in enumerate(values) if v is not None}
     return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
 
 
 def wandb_scores(scores: dict) -> dict:
     """A score record, flat: the means under `eval/`, and each by-t series as the means of neighbouring grid points,
-    the t's of one fifth of the grid's probability mass each, in one group per fifth, `eval_q<lo>-<hi>/`, named by
-    its probability-mass quantiles (not t)."""
+    the t's of one fifth of the grid's probability mass each, in one group per topic,
+    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
     flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null", "r2_caption", "r2_null")}
     size = SCORE_TS // WANDB_BUCKETS
     for key in ("loss_caption_by_t", "loss_null_by_t", "r2_caption_by_t", "r2_null_by_t"):
-        flat |= {f"eval_q{bucket_label(i)}/{key.removesuffix('_by_t')}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
+        flat |= {f"eval_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
 
 
