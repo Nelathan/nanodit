@@ -231,6 +231,13 @@ The `128_d1024x16_5ep` run spiked from step 5k and diverged after 30k (measureme
 - Whether a pin needs an explicit anneal (the absolute Usui lr decays relative to the weights as they grow; a pin removes that).
 - Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models", magnitude-preserving layers; I take it to be EDM2, not verified beyond the abstract).
 
+### G7. Where the timestep distribution should put its samples
+
+The loss humps mid-t, R² gains over training concentrate at mid t, and the low and high ends are saturated or flat early (numbers: FACTS, to be written). Daniel (2026-11-04): test two changes to the sampling against a paired baseline, all at d768x12 (the smallest model that shows a sampling effect; the sampling effect is read on the fixed shift-1 score grid, not on the training t). Arms: `128_d768x12_t1_3k` (baseline), `_tsig07_3k` (logit-normal sigma 0.7), `_tshift15_3k` (shift 1.5, median t 0.6). Open:
+- Whether either beats the baseline in R² at mid t without losing the tails on the same grid.
+- Whether a narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); the arms score the fixed grid, so the eval grids (the images) are where that shows.
+- Whether the benefit survives longer training: 3000 steps cannot say.
+
 ---
 
 ## Group H. Harness throughput
