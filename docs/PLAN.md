@@ -224,6 +224,13 @@ Daniel: the extras (deep supervision of the slice, an untied extra SwiGLU) are n
 
 Daniel (2026-11-03, going to bed, "tomorrow I wanna see the best model we can produce"): the slice readout becomes the base model (commit `56b4515`, branch `slice-base`), with the conv dropped ("useless"), RoPE on every head dim, and a deeper MLP (SwiGLU hidden 4 x width; his earlier "increase mlp to 8" at G1 was not read as a ratio, so 4 is Claude's pick and a single constant, `MLP_RATIO`). The run is `128_d1024x16_5ep` (`configs/128_d1024x16_5ep.toml`): d1024, 16 layers, 293.8M parameters, usui lr 1e-2 constant for 5 epochs with no anneal ("we will run 5 epochs with no anneal and decide how to do from there"), fallback 2.5e-3, rank fraction 0.1 ("we can do 0.05 again because we have no bottleneck, but I don't think it is worth it, so keep 0.1"), batch 256, 37,605 steps, 5 % warmup of the first epoch, checkpoint 2 x per epoch (every 3750 steps), eval every 1000. The first 250 steps ran at 330 img/s, so about 8 hours plus evals. Not decided and left open: the final anneal; F1 (RoPE base 10000 kept; with every dim rotated, the slowest frequencies move under 0.001 rad across a 16-position axis and act as position-free dims); a seed repeat of the slice arm.
 
+### G6. Bounding the stream and the weights
+
+The `128_d1024x16_5ep` run spiked from step 5k and diverged after 30k (measurements: FACTS, to be written). Decided by Daniel (2026-11-04): new inits get a sandwich norm (LFM3's form: an RMSNorm with a learnable weight on each branch's output, before the zero-init gate and the residual add). Open:
+- Whether a weight pin is needed on top, and which: Frobenius per matrix or per output row; target the init norm, unit norm with a constant output multiplier, or a learned scalar gain. It would sit in Usui's step 8, where the stochastic rounding already happens. Arms on a fresh init: sandwich only, plus a pin, plus a pin with learned gains.
+- Whether a pin needs an explicit anneal (the absolute Usui lr decays relative to the weights as they grow; a pin removes that).
+- Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models", magnitude-preserving layers; I take it to be EDM2, not verified beyond the abstract).
+
 ---
 
 ## Group H. Harness throughput
