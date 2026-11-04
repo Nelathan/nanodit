@@ -57,18 +57,19 @@ class Config:
     eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
+    pin_weights: bool = False  # PLAN G6: Usui matrices keep their init norm; usui_lr is then a relative step, not Usui's fixed one
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
     """Loads a `save_checkpoint` directory into a built model and its optimizers. Every optimizer setting but the lr
-    comes from the checkpoint (beta, rank fraction, betas); the lr is the configured one, as the saved one belongs to
-    the earlier run's schedule. Returns the step it was saved at."""
+    comes from the checkpoint (beta, rank fraction, betas); the lr, the step rule and the norm pin are the configured
+    ones, as the saved lr belongs to the earlier run's schedule and the other two define what `usui_lr` means. Returns the step it was saved at."""
     model.load_state_dict(load_file(path / "model.safetensors"))
     for optimizer, state in zip(optimizers, torch.load(path / "optimizer.pt", map_location="cpu"), strict=True):
-        lrs = [group["lr"] for group in optimizer.param_groups]
+        configured = [{key: group[key] for key in ("lr", "step_rule", "pin_norm") if key in group} for group in optimizer.param_groups]
         optimizer.load_state_dict(state)
-        for group, lr in zip(optimizer.param_groups, lrs, strict=True):
-            group["lr"] = lr
+        for group, keep in zip(optimizer.param_groups, configured, strict=True):
+            group.update(keep)
             group.pop("initial_lr", None)  # else the schedule built next would take the saved lr as its base
     return int(path.name.removeprefix("step_"))
 
@@ -208,7 +209,7 @@ def main(config_path: str) -> None:
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth, cfg.width).to(device, torch.bfloat16)
-    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
+    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
         block.compile()

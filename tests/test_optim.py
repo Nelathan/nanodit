@@ -16,7 +16,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.0.q_norm.weight"} <= adam
+    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.0.q_norm.weight", "blocks.0.attn_norm.weight", "blocks.1.mlp_norm.weight"} <= adam
     assert {"ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
     assert {g["step_rule"] for g in matrix.param_groups} == {"fixed"}
 
@@ -129,3 +129,18 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     train_step(restored, resumed, *batch(1))
     for (name, a), (_, b) in zip(model.named_parameters(), restored.named_parameters()):
         assert torch.equal(a, b), name  # the stochastic rounding draws repeat under the same seed
+
+
+def test_pinned_matrices_keep_their_init_norm_under_the_trust_step():
+    model = DiT(torch.randn(768), depth=2)
+    open_gates(model)
+    model.bfloat16()
+    optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3, pin_weights=True)
+    assert {(g["step_rule"], g["pin_norm"]) for g in optimizers[0].param_groups} == {("trust", True)}
+    tracked = [p for g in optimizers[0].param_groups for p in g["params"]]
+    start = [p.detach().float().norm().item() for p in tracked]
+    for seed in range(20):
+        train_step(model, optimizers, *batch(seed))
+    # a relative step of 5e-2 grows an unpinned norm by about 2.5 % in 20 steps; the pin leaves bf16 rounding noise
+    for p, norm in zip(tracked, start, strict=True):
+        assert abs(p.detach().float().norm().item() / norm - 1) < 2e-3

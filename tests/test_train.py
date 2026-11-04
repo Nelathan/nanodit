@@ -333,3 +333,17 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
     assert changed["blocks.0.q_norm.weight"] > 0.1
     assert all(fraction > 0.02 for fraction in changed.values()), changed
+
+
+@pytest.mark.parametrize("saved_pinned", [False, True])
+def test_a_resumed_run_takes_its_step_rule_and_pin_from_the_config_not_the_checkpoint(train, tmp_path, saved_pinned):
+    torch.manual_seed(0)
+    model = DiT(torch.randn(768), depth=2).bfloat16()
+    open_gates(model)
+    fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
+    saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=saved_pinned)
+    train.save_checkpoint(model, saved, 7, tmp_path)
+    model = fresh
+    resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 1e-3, pin_weights=not saved_pinned)
+    assert train.load_checkpoint(model, resumed, tmp_path / "checkpoints" / "step_0000007") == 7
+    assert {(g["step_rule"], g["pin_norm"], g["lr"]) for g in resumed[0].param_groups} == {("fixed" if saved_pinned else "trust", not saved_pinned, 2e-3)}
