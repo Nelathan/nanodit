@@ -46,5 +46,11 @@ What each source establishes for this project.
 - **text-to-image-2M** — https://huggingface.co/datasets/jackyhate/text-to-image-2M
   ~2M pairs as 512×512 WebDataset shards; mix of Flux-dev renders of LLaVA-pretrain prompts, DALL·E 3 images,
   ~700K real LLaVA-NeXT images recaptioned with Qwen2-VL; plus a 10K 1024 px set. ~423 GB.
+- **Fine-T2I** — https://huggingface.co/datasets/ma-xu/fine-t2i
+  Daniel (2026-11-05): "i found a great resource". About 6.15M synthetic pairs (Z-Image, FLUX2; 10 task combinations,
+  32 prompt categories, 11 styles) plus 168k curated real photos (Pexels, Pixabay, Unsplash); ~2.3 TB WebDataset
+  (jpg, txt with an original and an enhanced prompt, json), mostly above 1K, some subsets at random aspect ratios;
+  Apache-2.0. Claims semantic dedup, safety and aesthetic filters and a VLM quality audit removing over 95 % of
+  candidates (the authors' claim). A candidate for the second image dataset (PLAN G1).
 - **PD12M** (not chosen) — https://huggingface.co/datasets/Spawning/PD12M
   12.4M public-domain/CC0 pairs, recaptioned, S3-hosted. Alternative if real-image aesthetics or licensing matter.

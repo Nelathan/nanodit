@@ -77,7 +77,8 @@ When to add 256 px is open again (Daniel, 2026-11-05). On 2026-11-02 it was "too
 cat"; `128_d1024x16_swpin_5ep` now follows prompts at class level (FACTS). It needs the images downloaded again and a
 precompute (B5: Lanczos from the 512 crops), and it interacts with G2: a patch over 4× the latent area keeps 256 px at
 the current 64 tokens. Daniel (2026-11-05): "we might reach a limit where same data stops generalizing. 128px doesn't
-seem saturated yet."
+seem saturated yet." The second image dataset (G1), when it comes: Fine-T2I is the candidate Daniel found (REFERENCES,
+Data); it streams, so it would be encoded shard by shard as text-to-image-2M was.
 
 ### C2. Which LR from scratch, and how long a warmup?
 
