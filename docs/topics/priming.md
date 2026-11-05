@@ -50,8 +50,10 @@ The method as the writeup gives it:
   for the paper to say.
 - How their s maps onto our x_t = (1 − t) x₀ + t ε is unchecked.
 - Stage 2 feature space, cheapest first: the Primal latent itself with Euclidean distances (the action-chunk result
-  works on raw data); EmbeddingGemma 2 is a text encoder and does not apply to images; a frozen image encoder on decoded
-  samples costs a VAE decode per sample and a model we do not have yet.
+  works on raw data); EmbeddingGemma 2's own vision tower on decoded samples (the cached checkpoint carries
+  `vision_tower` and `embed_vision`; our text path loads it with `vision_config=None`), a frozen image space that may
+  share the embedding space our captions come from, at the cost of a VAE decode per sample. Whether its image and text
+  embeddings are aligned is unchecked.
 - One reference per prompt is our data's shape: each caption has one image.
 - Eval: the score grid measures a flow model at 10 t and does not apply to a one-step generator. Samples on the eval
   prompts, and FID once it exists (PLAN D5).
