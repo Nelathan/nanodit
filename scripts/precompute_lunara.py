@@ -1,18 +1,17 @@
 """Precompute the eval set (SPEC §8) from moonworks/lunara-art-eval: the 1000 images Moonworks Lunara rendered, one per prompt.
 
-usage: precompute_lunara.py RES
+usage: precompute_lunara.py
 
 Downloads the 19 Parquet shards to /mnt/mars/ai/tiny-dit/data/lunara-art-eval/ and writes
-/mnt/mars/ai/tiny-dit/precomputed/<RES>/lunara_art_eval.parquet in precompute.py's schema, keyed "<shard>/<row>".
+/mnt/luna/tiny-dit/precomputed/fused/lunara_art_eval.parquet in precompute.py's schema, keyed "<shard>/<row>".
 """
 import io
-import sys
 
 import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
-from precompute import ROOT, load_encoders, write_shard
+from precompute import ROOT, STAGE, load_encoders, write_shard
 
 REPO = "moonworks/lunara-art-eval"
 SHARDS = 19
@@ -32,7 +31,7 @@ def lunara_rows():
 
 
 if __name__ == "__main__":
-    res = int(sys.argv[1])
     vae, st = load_encoders()
-    out_dir = ROOT / "precomputed" / str(res)
-    write_shard(lunara_rows(), out_dir / "lunara_art_eval.parquet", res, vae, st, None)
+    out_dir = STAGE / "precomputed" / "fused"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_shard(lunara_rows(), REPO, out_dir / "lunara_art_eval.parquet", vae, st)
