@@ -275,8 +275,9 @@ Open:
 Daniel (2026-11-05): study the rank evolution over the `swpin_5ep` checkpoints (7500, 15000, 22500, 30000, 37500, 37605;
 the init rebuilds from seed 41). Usui writes each step through a frame of rank 0.1 × the shorter side, and the pin holds
 ‖W‖ fixed, so what changes is the direction. Candidate reads per matrix: the singular spectrum and effective rank of W
-and of W − W₀, and the overlap of the top singular subspaces with W₀'s, against the step. Settle: a scratch script over
-the checkpoints; numbers go to FACTS.
+and of W − W₀, and the overlap of the top singular subspaces with W₀'s, against the step. First read in FACTS (Spectra of the pinned weights): the weights concentrate rather than
+expand, and the late update sits in W's top subspace on the frame side. Open: how much of that is the frame's rank, the
+pin, or the task (the unpinned `5ep` checkpoints, a rank-fraction arm).
 
 ### G10. The depthwise conv, placed differently
 
