@@ -74,13 +74,19 @@ for a fine-tune (D5).
 Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
 sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
 free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
-32 GB, 256 px latents 128 GB; the token sequence at 512-d bf16 (the encoder's hidden width) and about 30 tokens per
-caption (mean; p95 64, max 132, on 3,000 captions, without the prompt prefix) about 70 GB unpadded. Open:
-- Which sequence: the encoder's last hidden states (512-d, before pooling and the dense projection to 768), or
-  projected; with or without the prompt prefix's tokens; padded to a fixed length or ragged.
-- The downsampler for this encode (B5): Lanczos for 256 px, and whether 128 px is re-encoded with it or the bicubic
-  latents stay.
-- What fits on mars: the 256 px set and the sequences do not fit beside the current 128 px files.
+32 GB, 256 px latents 128 GB; the token sequence at 768-d bf16 and about 30 tokens per caption (mean; p95 64, max 132,
+on 3,000 captions, without the prompt prefix) about 90 GB unpadded.
+
+Daniel (2026-11-05): "512 for cross attention, gets down projected to 64 anyway so keep it straightforward. drop the
+prefix tokens. unpadded"; "yes lets build a fused dataset of both sources, dedup later too. both in 128 and 256 with
+lanczos"; "you can delete anything stale or no longer needed"; "if you need space you can use vel-ssd too:
+/run/media/djg/vel-ssd"; "hdd read could be enough, just plan the async delay". The encoder's token states are 768-d,
+not 512 (EmbeddingGemma 2 via sentence-transformers: Transformer, mean pooling over all tokens, normalize; no dense
+projection), so "512" rested on a wrong width from Claude. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
+its trailing space merges into the caption's first token. Open:
+- The sequence width: the encoder's 768 as is, or reduced to 512.
+- Fine-T2I's images are above 1K and partly not square: center crop or aspect buckets.
+- Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
 ## Group C. LR sweep and step budget
 
