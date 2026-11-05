@@ -104,18 +104,6 @@ every 128k images as before.
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
 
-### C4. Which constant lr continues the hero checkpoint?
-
-Daniel (2026-11-05): continue training from `128_d1024x16_swpin_5ep` (step 37605) rather than start from scratch,
-unless the model changes; the continuation trains at t σ 0.7 (SPEC §4; the run itself trained at σ 1). Open: which
-constant relative step. The run ended at 2e-4 after a linear decay from 2e-3, and its gain per 3000 steps was still
-growing as the lr fell (FACTS). Daniel: the baseline is continuing flat at the lr the run ended at, and
-another decay to the end is not affordable, so the arms are flat with no tail: 2000 steps each at usui lr 2e-5, 1e-4,
-2e-4 (where the run ended) and 4e-4, fallback 1.25× each as in the run, t σ 0.7, no warmup (a warmup would ramp from
-the end lr), one shared new data order (`configs/128_d1024x16_swpin_cont_lr*.toml`, `runs/queue_cont_2026-11-05.sh`).
-Over 2000 steps a lower lr is favoured by the anneal effect; the read is the slope at the end of each arm as much as
-its level.
-
 ---
 
 ## Group D. Sampling and eval

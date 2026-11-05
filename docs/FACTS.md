@@ -488,3 +488,16 @@ Source: scratch `spectra.py` on the CPU, `/mnt/mars/ai/tiny-dit/probes/spectra_s
 - The late update (30000 → 37605) lies in W's own top-102 singular subspace on the stream side, the 1024-wide side the frame is on: right side for `qkv` 0.52, `gate` 0.89, `w_gate` 0.45, `w_up` 0.49, `text_proj` 0.77; left side for `out` 0.87, `w_down` 0.48 (chance 0.10). On the other side it is near chance (0.05–0.15 against 0.025–0.10). Block 8 except `out` (block 2) and `w_down` (block 14); `ada.1` 0.33 right.
 - Uniform in depth: the effective ranks of `qkv`, `w_gate`, `w_down` differ by under 0.03 across blocks 0–15; block 15's MLP is lowest (0.175 / 0.166).
 - Not separated: how much of the concentration is Usui's rank-0.1 frame, how much the pin's washing out of the init (each step rescales the init's share down), and how much the task. The unpinned `5ep` checkpoints and a different rank fraction would separate them; neither is measured.
+
+## Continuation lr arms from `swpin_5ep` (C4, 2026-11-05)
+
+Source: `runs/128_d1024x16_swpin_cont_lr{2e-5,1e-4,2e-4,4e-4}/score.jsonl`. 2000 steps each from `swpin_5ep/checkpoints/step_0037605` (score 1.3856), flat usui lr as named, fallback 1.25× it, t σ 0.7, no warmup, seed 42 shared.
+
+| usui lr | 38000 | 38500 | 39000 | 39500 | 39605 | R² at 39605 |
+|---|---|---|---|---|---|---|
+| 2e-5 | 1.3840 | 1.3834 | 1.3832 | 1.3829 | 1.3831 | 0.6416 |
+| 1e-4 | 1.3838 | 1.3838 | 1.3832 | 1.3832 | 1.3831 | 0.6416 |
+| 2e-4 (where the run ended) | 1.3851 | 1.3851 | 1.3844 | 1.3845 | 1.3843 | 0.6414 |
+| 4e-4 | 1.3884 | 1.3883 | 1.3882 | 1.3884 | 1.3884 | 0.6406 |
+
+- 2e-5 and 1e-4 end level; 2e-4 is 0.0012 behind and still falling; 4e-4 jumps 0.003 above the start at once and stays flat. Per t, 1e-4 and 2e-5 differ by at most 0.0005 in R². Train loss by quarter (σ 0.7, not comparable with the 5-epoch run's): 1e-4 1.1403 / 1.1386 / 1.1367 / 1.1381, 2e-5 within 0.0002 of it.
