@@ -132,11 +132,11 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     logged = [(step, data) for step, data in sent if "eval/loss_caption" in data]
     assert [step for step, _ in logged] == [2, 3]
     for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
-        assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_null"] == s["loss_null"]
+        assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_caption"] == s["loss_caption"]
         assert data["eval_r2_caption_by_t/q0.2-0.4"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
-        assert len(data) == 4 + 2 * 5  # the four means, and the caption's loss and R² in fifths
+        assert len(data) == 2 + 2 * 5  # the two means, and the loss and R² in fifths
     for s in scores:
-        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["loss_null_by_t"]) == len(s["r2_caption_by_t"]) == 10
+        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["r2_caption_by_t"]) == 10 and "loss_null" not in s
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
@@ -163,28 +163,25 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     fallback.load_state_dict(adam_state)
 
 
-def test_score_is_each_conditions_loss_at_each_t_with_each_rows_own_noise(train):
+def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
     class Echo(torch.nn.Module):  # its output depends on t and on the embedding it is given
-        null_embedding = torch.randn(768)
-
         def forward(self, x_t, t, text):
             return x_t * t.view(-1, 1, 1, 1) + text[:, :1, None, None]
 
     torch.manual_seed(0)
     x, text, noise, ts = torch.randn(5, 2, 4, 4).bfloat16(), torch.randn(5, 768).bfloat16(), torch.randn(5, 2, 4, 4), torch.tensor([0.2, 0.7])
     result = train.score(Echo(), x, text, noise, ts, 2, torch.device("cpu"))
-    for condition, embedding in (("caption", text.float()), ("null", Echo.null_embedding.expand(5, -1))):
-        by_t = []
-        for t_value in ts.tolist():
-            t = torch.full((5,), t_value)
-            x_t = noisy(x.float(), noise, t)
-            by_t.append(float((Echo()(x_t, t, embedding) - target(x.float(), noise, x_t)).square().mean()))
-        torch.testing.assert_close(result[f"loss_{condition}_by_t"], by_t)
-        torch.testing.assert_close(result[f"loss_{condition}"], sum(by_t) / 2)
-        energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
-        r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
-        torch.testing.assert_close(result[f"r2_{condition}_by_t"], r2_by_t)
-        torch.testing.assert_close(result[f"r2_{condition}"], sum(r2_by_t) / 2)
+    by_t = []
+    for t_value in ts.tolist():
+        t = torch.full((5,), t_value)
+        x_t = noisy(x.float(), noise, t)
+        by_t.append(float((Echo()(x_t, t, text.float()) - target(x.float(), noise, x_t)).square().mean()))
+    torch.testing.assert_close(result["loss_caption_by_t"], by_t)
+    torch.testing.assert_close(result["loss_caption"], sum(by_t) / 2)
+    energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
+    r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
+    torch.testing.assert_close(result["r2_caption_by_t"], r2_by_t)
+    torch.testing.assert_close(result["r2_caption"], sum(r2_by_t) / 2)
     torch.testing.assert_close(train.score(Echo(), x, text, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
 
 

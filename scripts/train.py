@@ -115,25 +115,26 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
 
 @torch.no_grad()
 def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
-    """The loss on fixed rows with fixed noise at every t of a fixed grid, with each row's caption and with the
-    null embedding: one number per condition, comparable across steps and runs, and its value at each t. The
-    same for R² (`explained_variance`), per t and over the grid."""
-    result, energy = {}, x.float().square().mean().item()
-    for condition, condition_text in (("caption", text), ("null", model.null_embedding.expand(len(x), -1))):
-        per_t = []
-        for t_value in ts.tolist():
-            total = 0.0
-            for i in range(0, len(x), batch):
-                xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
-                tb = condition_text[i : i + batch].to(device, torch.float32)
-                t = torch.full((len(xb),), t_value, device=device)
-                x_t = noisy(xb, eb, t)
-                total += per_sample_loss(model(x_t, t, tb).float(), xb, eb, x_t).sum()
-            per_t.append(float(total) / len(x))
-        result[f"loss_{condition}"], result[f"loss_{condition}_by_t"] = sum(per_t) / len(per_t), per_t
-        errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
-        result[f"r2_{condition}"], result[f"r2_{condition}_by_t"] = 1 - sum(errors) / len(errors) / energy, [1 - error / energy for error in errors]
-    return result
+    """The loss on fixed rows, each with its caption and fixed noise, at every t of a fixed grid: one number
+    comparable across steps and runs, and its value at each t. The same for R² (`explained_variance`), per t and
+    over the grid. Keys keep the `_caption` suffix of the records that also scored the null embedding."""
+    energy, per_t = x.float().square().mean().item(), []
+    for t_value in ts.tolist():
+        total = 0.0
+        for i in range(0, len(x), batch):
+            xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
+            tb = text[i : i + batch].to(device, torch.float32)
+            t = torch.full((len(xb),), t_value, device=device)
+            x_t = noisy(xb, eb, t)
+            total += per_sample_loss(model(x_t, t, tb).float(), xb, eb, x_t).sum()
+        per_t.append(float(total) / len(x))
+    errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
+    return dict(
+        loss_caption=sum(per_t) / len(per_t),
+        loss_caption_by_t=per_t,
+        r2_caption=1 - sum(errors) / len(errors) / energy,
+        r2_caption_by_t=[1 - error / energy for error in errors],
+    )
 
 
 def append_jsonl(path: Path, record: dict) -> None:
@@ -159,9 +160,8 @@ def wandb_scalars(record: dict, by_t: dict) -> dict:
 def wandb_scores(scores: dict) -> dict:
     """A score record, flat: the means under `eval/`, and each by-t series as the means of neighbouring grid points,
     the t's of one fifth of the grid's probability mass each, in one group per topic,
-    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t). Only the caption condition is
-    bucketed on wandb; the null condition's by-t series stay in score.jsonl."""
-    flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null", "r2_caption", "r2_null")}
+    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
+    flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "r2_caption")}
     size = SCORE_TS // WANDB_BUCKETS
     for key in ("loss_caption_by_t", "r2_caption_by_t"):
         flat |= {f"eval_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
