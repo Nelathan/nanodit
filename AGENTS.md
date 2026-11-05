@@ -21,6 +21,8 @@ has the stages and layout.
   appended to, when a new read supersedes it.
 - `docs/archive/` — closed questions and decisions, one note per session or
   closure, named `YYYY-MM-DD-kebab-title.md`. Read for the reasons; never rewrite.
+- `docs/topics/` — one doc per line of work Daniel opens as its own topic (its plan, design and reads), linked
+  from its PLAN question; numbers still go to FACTS, closures to `archive/`.
 - `docs/HANDOVER.md` — session-to-session orientation: where things stand, next
   steps, traps.
 - `docs/REFERENCES.md`, `docs/references/` — sources and what each establishes;

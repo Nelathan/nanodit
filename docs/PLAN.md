@@ -184,7 +184,7 @@ The other direction, from Daniel (2026-11-05): a patch embed over 4× the latent
 tokens), so the latent fills half of the 1024-wide stream and the slice readout is 512 channels; 16 tokens at 128 px, 64
 at 256 px (C1). With it, whether the patch embed writes only the meta channels (the stream beyond the latent slice, the
 slice carrying the latent unchanged) or all channels as now (SPEC §3: identity on the slice, learned everywhere); Daniel
-prefers meta only. A model change, so a fresh run, not a continuation (C4).
+prefers meta only. A model change, so a fresh run, not a continuation (archive 2026-11-05, continuation lr).
 
 ### G3. The common mode in the residual stream
 
@@ -245,7 +245,7 @@ Daniel (2026-11-03, going to bed, "tomorrow I wanna see the best model we can pr
 The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3000-step arms at d768x12 gave it a small, consistent edge at t 0.26 to 0.66 and a loss at t 0.16 and 0.84 (FACTS, Timestep distribution arms). Open:
 - Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
 - Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
-- `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation (C4) is the first long run at σ 0.7.
+- `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation at usui lr 1e-4 (archive 2026-11-05) is the first long run at σ 0.7.
 
 ### G8. What the pin leaves open
 
@@ -304,25 +304,7 @@ on a free GPU: FACTS, Sweep throughput.
 
 ### I1. Priming: reconstruction pretraining, then distributional post-training
 
-Daniel (2026-11-05) wants to explore Priming Models (Kim, Park et al., "Are We Overthinking One-Step Generation?",
-arXiv 2610.20331); his writeup of the two X threads is kept verbatim in `references/priming-threads.md`. He proposes it
-gets its own topic doc and branch when the work starts. The method: stage 1 trains one network to reconstruct clean
-images from inputs corrupted at a single fixed noise level, with no time embedding, and feeds it pure noise at
-generation; stage 2 post-trains that one-step generator by matching the distribution of its samples to real ones in a
-frozen feature space (Sinkhorn / optimal transport, or simpler pairwise or kernel losses). Claimed: one-step ImageNet 256
-FID 1.19, text-to-image GenEval 0.82 one-step; T2I and world models work with essentially one real reference per
-condition; on action chunks the distributional loss runs on the raw normalized data with no feature encoder. Stage 1 is
-sensitive to its noise level (the s ablation, REFERENCES).
-
-What maps onto this project, my reading, nothing tested:
-- Our flow model is a stage-1 network at every t at once. Whether a priming run starts from scratch at one fixed t, or
-  from the hero checkpoint frozen at one t (the paper names fine-tuning multi-step models into one-step generators as
-  related work), is the first choice. How their s maps onto our t (x_t = (1 − t) x₀ + t ε) is unchecked.
-- The feature space for stage 2: the Primal latent itself, Euclidean as in their action-chunk result, costs nothing; a
-  frozen image encoder on decoded samples costs a VAE decode per sample.
-- One reference per prompt is our data's shape: each caption has one image.
-Open: whether any of it fits, and which of the two starts. Settle: read the paper and the repo first, then the topic
-doc proposes the arms.
+Its own topic doc: `topics/priming.md` (the source, Daniel's direction, the mapping onto this project, what is open).
 
 ---
 
