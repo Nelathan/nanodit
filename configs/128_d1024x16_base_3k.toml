@@ -1,4 +1,4 @@
-# PLAN G6 baseline: the unmodified d1024x16 run (slice-base 038ede5, no sandwich norm, no pin) for 3000 steps, scored every 1000 (worktree ../tiny-dit-base, scoring cadence patched). Fields: scripts/train.py Config.
+# PLAN G6 (closed: archive 2026-11-05, sandwich norm, pin and decay) baseline: the unmodified d1024x16 run (slice-base 038ede5, no sandwich norm, no pin) for 3000 steps, scored every 1000 (worktree ../tiny-dit-base, scoring cadence patched). Fields: scripts/train.py Config.
 name = "128_d1024x16_base_3k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128

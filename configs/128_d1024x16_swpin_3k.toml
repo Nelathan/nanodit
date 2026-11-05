@@ -1,4 +1,4 @@
-# PLAN G6 arm: the sandwich-norm arm (128_d1024x16_sw_3k.toml) with every Usui matrix pinned to its init norm; usui_lr is then the constant relative step (the unpinned run took 3.4e-3 at step 500, 1.3e-3 at 3750). Fields: scripts/train.py Config.
+# PLAN G6 (closed: archive 2026-11-05, sandwich norm, pin and decay) arm: the sandwich-norm arm (128_d1024x16_sw_3k.toml) with every Usui matrix pinned to its init norm; usui_lr is then the constant relative step (the unpinned run took 3.4e-3 at step 500, 1.3e-3 at 3750). Fields: scripts/train.py Config.
 name = "128_d1024x16_swpin_3k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128

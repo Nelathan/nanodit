@@ -1,4 +1,4 @@
-# PLAN G6 control for the slice readout: the sw_3k arm with a learnable Linear(width, 128) on the fallback optimizer, initialised as the selection matrix [I | 0], in place of the slice (worktree ../tiny-dit-finalnorm). Fields: scripts/train.py Config.
+# PLAN G6 (closed: archive 2026-11-05, sandwich norm, pin and decay) control for the slice readout: the sw_3k arm with a learnable Linear(width, 128) on the fallback optimizer, initialised as the selection matrix [I | 0], in place of the slice (worktree ../tiny-dit-finalnorm). Fields: scripts/train.py Config.
 name = "128_d1024x16_idfinal_3k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128

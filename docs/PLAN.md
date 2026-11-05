@@ -84,8 +84,7 @@ The lr is now a constant relative step on pinned weights (SPEC §6, archive 2026
 under Usui's fixed step, where a moment that fills its rank writes `‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
 and beta 0.99, Daniel's "for now" after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
 negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: the sweep at 128 px, usui lr 2e-4, 1e-3, 2e-3 and 4e-3, one pass each over the deduped shards 0–46
-at batch 128, warmup 5% of the run, no decay for now (archive 2026-11-02, LR sweep). Usui's README recommends a
-decay; the runs now decay linearly (SPEC §6). The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
+at batch 128, warmup 5% of the run, then without decay (archive 2026-11-02, LR sweep); the runs now decay linearly (SPEC §6). The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
 train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep axis; they move
 faster than the Usui matrices, and the null embedding turns away from its init in the
 first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
@@ -267,8 +266,7 @@ Open:
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
 - A pin per output row instead of per matrix.
 - Which of the sandwich norm and the pin removed the spikes; Daniel reads it as the sandwich norm.
-- Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models",
-  magnitude-preserving layers; taken to be EDM2, not verified beyond the abstract).
+- Reading, from Daniel: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
 ### G9. How did the weights grow from their initial subspace to full rank?
 
@@ -280,7 +278,7 @@ the checkpoints; numbers go to FACTS.
 
 ### G10. The depthwise conv, placed differently
 
-The conv before attention made no difference at d768 (G5: conv off 1.4805 against 1.4807) and was dropped. Daniel
+The conv before attention made no difference at d768 (G5; FACTS) and was dropped. Daniel
 (2026-11-05): that may have been a design mistake rather than a verdict on the conv. Candidates: the conv in place of
 attention in some blocks, rather than before it; the conv writing only the meta channels (G2); its output stacked into
 the MLP input (SANA's Mix-FFN puts a depthwise conv inside the MLP). Settle: one arm per placement against the current
@@ -318,7 +316,7 @@ on a free GPU: FACTS, Sweep throughput.
 Daniel (2026-11-05) brought a writeup of Kim et al., "Are We Overthinking One-Step Generation?" (arXiv 2610.20331;
 REFERENCES): stage 1 trains reconstruction at one fixed noise level, stage 2 post-trains the generator distributionally
 (Sinkhorn / optimal transport) in a frozen feature space, for one-step generation. Their stage-1 ablation over the noise
-level is in the writeup (best near s 0.8, collapse at s 1.0); how s maps onto our t is unchecked. Open: whether any part
+level is in REFERENCES; how their s maps onto our t is unchecked. Open: whether any part
 fits here, as a pretraining of the DiT or as a one-step post-training of a checkpoint, and what feature space we would
 have. Settle: read the paper and the repo first.
 
