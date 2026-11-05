@@ -258,14 +258,27 @@ Open:
 - Which of the sandwich norm and the pin removed the spikes; Daniel reads it as the sandwich norm.
 - Reading, from Daniel: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
-### G9. How did the weights grow from their initial subspace to full rank?
+### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
 
-Daniel (2026-11-05): study the rank evolution over the `swpin_5ep` checkpoints (7500, 15000, 22500, 30000, 37500, 37605;
-the init rebuilds from seed 41). Usui writes each step through a frame of rank 0.1 × the shorter side, and the pin holds
-‖W‖ fixed, so what changes is the direction. Candidate reads per matrix: the singular spectrum and effective rank of W
-and of W − W₀, and the overlap of the top singular subspaces with W₀'s, against the step. First read in FACTS (Spectra of the pinned weights): the weights concentrate rather than
-expand, and the late update sits in W's top subspace on the frame side. Open: how much of that is the frame's rank, the
-pin, or the task (the unpinned `5ep` checkpoints, a rank-fraction arm).
+The spectra (FACTS, Spectra of the pinned weights): the weights start full rank and concentrate; at the end of
+`swpin_5ep` the MLP matrices put 90 % of their energy in about a sixth of their directions, against about 0.7 in the
+pretrained LFM3 and EmbeddingGemma 2 MLPs; Usui's frame holds about the whole per-step gradient.
+
+Daniel (2026-11-05): "gradient is low rank so even adamw has trouble using the full space. But i want to know if usui is
+harming full rank evolution and if we can help it." "Pin is just a form of weight decay and everyone uses it to prevent
+explosive weights." "Backwards can only put changes where activations sit and they tend to cluster." "Zero-order would
+help here, but is inefficient." "Higher rank usui always helps but diminishing. Gradient wise its already optimal
+subspace. But even tail contributes, its a power law."
+
+Open: whether the gap to the pretrained models is Usui's (the rank-0.1 frame drops the gradient's tail every step), the
+training length (theirs is far longer), or this task. Candidate reads, none agreed:
+- A 3000-step arm at Usui's largest frame (rank fraction 0.5, Usui's cap at half the shorter side), against `swpin_3k`:
+  loss and the same spectra at 3000 (FACTS has `swpin_3k`'s). A config change only.
+- A full-rank optimizer arm (AdamW on every matrix) of the same length: the reference for "even AdamW". Needs code.
+- The spectrum of one step's dense gradient on a checkpoint (a probe outside Molegrad): how heavy the tail is that the
+  frame drops.
+- Ways to help, if Usui is the cause: a higher rank fraction; a small random component in the frame each refresh to
+  reach the tail (Daniel's zero-order direction is the extreme of this).
 
 ### G10. The depthwise conv, placed differently
 

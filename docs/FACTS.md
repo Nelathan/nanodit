@@ -501,3 +501,21 @@ Source: `runs/128_d1024x16_swpin_cont_lr{2e-5,1e-4,2e-4,4e-4}/score.jsonl`. 2000
 | 4e-4 | 1.3884 | 1.3883 | 1.3882 | 1.3884 | 1.3884 | 0.6406 |
 
 - 2e-5 and 1e-4 end level; 2e-4 is 0.0012 behind and still falling; 4e-4 jumps 0.003 above the start at once and stays flat. Per t, 1e-4 and 2e-5 differ by at most 0.0005 in R². Train loss by quarter (σ 0.7, not comparable with the 5-epoch run's): 1e-4 1.1403 / 1.1386 / 1.1367 / 1.1381, 2e-5 within 0.0002 of it.
+
+Reference spectra, the same measures on cached pretrained models (scratch `ref_spectra.py` on the GPU, `/mnt/mars/ai/tiny-dit/probes/spectra_reference.json`; mean over layers; effective rank and r90 as fractions of the shorter side). Their optimizers and token counts are not known here; both trained far longer than this run's ~0.6B tokens.
+
+| model, matrix | eff rank | r90 |
+|---|---|---|
+| LFM3-1.7B-Base, FFN w1 / w3 / w2 (7680 × 2048) | 0.746 / 0.827 / 0.802 | 0.699 / 0.724 / 0.721 |
+| LFM3, attention q / k / v / o | 0.373 / 0.579 / 0.797 / 0.459 | 0.361 / 0.528 / 0.687 / 0.420 |
+| LFM3, conv in / out proj | 0.705 / 0.451 | 0.666 / 0.459 |
+| EmbeddingGemma 2 text, MLP gate / up / down (2048 × 512) | 0.766 / 0.830 / 0.783 | 0.711 / 0.728 / 0.726 |
+| EmbeddingGemma 2 text, attention q / k / v / o | 0.630 / 0.473 / 0.543 / 0.576 | 0.614 / 0.462 / 0.532 / 0.607 |
+| EmbeddingGemma 2 vision tower, MLP gate / up / down | 0.626 / 0.683 / 0.513 | 0.620 / 0.630 / 0.608 |
+| EmbeddingGemma 2 vision tower, attention q / k / v / o | 0.340 / 0.323 / 0.364 / 0.312 | 0.367 / 0.363 / 0.335 / 0.338 |
+| ours, `swpin_5ep` at 37605: `w_gate` / `w_up` / `w_down` | 0.195 / 0.199 / 0.186 | block 8: 0.17 / 0.17 / 0.16 |
+| ours: `qkv` / `gate` / `out` | 0.170 / 0.082 / 0.093 | block 8: 0.14 / 0.07 / 0.08 |
+| ours, `swpin_3k` at 3000 (constant relative step 2e-3): MLP / `qkv` / `gate`, `out` | 0.33 / 0.32 / 0.18–0.19 | 0.26–0.29 / 0.32 / 0.20 |
+
+- Our MLP matrices hold 90 % of their energy in about a sixth of the directions; the pretrained MLPs need about 0.7. Attention is lower in every model, ours lowest.
+- Usui's `grad_capture` (‖G Q‖/‖G‖, the gradient share its rank-0.1 frame holds) reads 0.98–1.03 over the whole `swpin_5ep` run (`train.jsonl`; above 1 under Molegrad, where the full gradient is not formed; how it is estimated there is not checked). Each step's gradient is already about rank 0.1 k by that read.
