@@ -450,14 +450,16 @@ Source: `runs/128_d1024x16_{base,sw,sw_b,swpin,idfinal}_3k/score.jsonl`. Same se
 
 ## Architecture arms at d1024x16, 3000 steps (2026-11-05)
 
-Source: `runs/128_d1024x16_p16meta_3k/{score,train}.jsonl`, against `swpin_3k` above (same config, seed 41, data order and eval rows); throughput is the median `imgs_per_s` after the first 250 steps.
+Source: `runs/128_d1024x16_{p16meta,conv}_3k/{score,train}.jsonl`, against `swpin_3k` above (same config, seed 41, data order and eval rows); throughput is the median `imgs_per_s` after the first 250 steps.
 
 | arm | change from `swpin_3k` | 1000 | 2000 | 3000 | img/s |
 |---|---|---|---|---|---|
 | `swpin_3k` | | 1.5329 | 1.4796 | 1.4624 | 376 |
 | `p16meta_3k` | patch 16 (512-d tokens, 16 tokens at 128 px) carried in the first 512 channels; patch embed `Linear(512, 512)` into the meta channels only; slice readout of 512 | 1.6407 | 1.5732 | 1.5428 | 767 |
+| `conv_3k` | blocks 0, 2, ..., 14: depthwise 3×3 conv over all channels in place of attention, `out` (1024 → 896) into the meta channels only | 1.5261 | 1.4804 | 1.4623 | 451 |
 
 - `p16meta_3k` is 0.080 behind per step at 3000 and 2.04× as fast. Per wall-clock its 3000 steps buy what `swpin_3k` has at about step 1470, linearly interpolated 1.508: 0.035 behind at equal time.
+- `conv_3k` is ahead of `swpin_3k` at 1000 (−0.0068) and level at 2000 (+0.0008) and 3000 (−0.0001) and is 1.20× as fast. Per wall-clock its 3000 steps match `swpin_3k`'s step 2501, interpolated 1.471: 0.009 ahead at equal time. One seed.
 
 ## `128_d1024x16_swpin_5ep` (2026-11-05)
 

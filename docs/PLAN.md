@@ -83,8 +83,10 @@ lanczos"; "you can delete anything stale or no longer needed"; "if you need spac
 /run/media/djg/vel-ssd"; "hdd read could be enough, just plan the async delay". The encoder's token states are 768-d,
 not 512 (EmbeddingGemma 2 via sentence-transformers: Transformer, mean pooling over all tokens, normalize; no dense
 projection), so "512" rested on a wrong width from Claude. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
-its trailing space merges into the caption's first token. Open:
-- The sequence width: the encoder's 768 as is, or reduced to 512.
+its trailing space merges into the caption's first token. Daniel (2026-11-05): "of it encodes to 768 thats fine." Running
+since 2026-11-05 23:00: text-to-image-2M shards 0–46, then the Lunara eval set (`scripts/precompute.py`,
+`scripts/precompute_lunara.py`), into `/mnt/luna/tiny-dit/precomputed/fused/`, log
+`/mnt/luna/tiny-dit/precompute_2026-11-05.log`. Open:
 - Fine-T2I's images are above 1K and partly not square: center crop or aspect buckets.
 - Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
@@ -353,7 +355,7 @@ layers of a 768x12 model. if success, even 2/3 or 3/4. always conv first, attn n
 depthwise conv over the meta channels only, (b) over all channels, then `out` into the meta channels: "for conv yes
 design b. maybe its ok to write image channels, but it could also write context into the render. meta only would put
 the swiglu gate before it. in earlier samples where we compared the canon conv vs without i saw a softer image, like it
-just copied context into render." "its ok if it needs some more time". Running: `128_d1024x16_conv_3k` (branch
+just copied context into render." "its ok if it needs some more time". Measured (FACTS, Architecture arms): `128_d1024x16_conv_3k` (branch
 `conv-meta`): `swpin_3k` with blocks 0, 2, ..., 14 a depthwise 3×3 conv over all 1024 channels after the adaLN
 modulation, then `out` (1024 → 896) into the meta channels, its sandwich norm and the attention gate; the MLP as before.
 
