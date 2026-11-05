@@ -420,3 +420,47 @@ Source: `/mnt/mars/ai/tiny-dit/runs/128_d768x12_{t1,tsig07,tshift15}_3k/score.js
 - Score R² per t of `t1` at step 3000: 0.971 / 0.916 / 0.855 / 0.785 / 0.706 / 0.616 / 0.514 / 0.400 / 0.281 / 0.170 (the null condition's mean R² differs by under 0.001 from the caption's).
 - One run per arm: the six steps share a trajectory and are not six confirmations. No seed-to-seed spread was measured at this pairing. Sample grids at step 3000 were not compared beyond a look at `t1` and `tsig07`: both are blurred compositions.
 
+
+## Spikes in `128_d1024x16_5ep` (2026-11-04)
+
+Source: `/mnt/mars/ai/tiny-dit/runs/128_d1024x16_5ep/` (d1024x16, slice readout, no branch norm, usui lr 1e-2 constant, fixed step), a replay from its step-15000 checkpoint with a trap on any micro-batch loss above 4, and scratch probes on its checkpoints.
+
+- Single-batch loss spikes, from 10 to 2.6e6, begin at step 4850 and recur about once per 260 steps, more often and larger as the run goes on (79 spike records after warmup); the fallback grad norm reaches 8.6e3 to 5e6. Each recovers. `tangent_live_fraction` falls from 0.94 at step 2500 to 0.64 at 37.5k (no earlier run went below 0.7). No d768 or d1024x12 run spiked.
+- Scores: 1.4617 (3750), 1.4445 (7500), 1.4385 (11250), 1.4295 (15000), 1.4266 (18750), 1.4233 (22500), 1.4266 (26250), 1.4209 (30000, the best), 1.4268 (33750), 1.8257 (37500, saved straight after a spike), 1.4914 (37605). Flat from about step 15000.
+- Residual stream rms at step 33750: 30–110, single entries 3300–4400 (about 1 at init; the d768 slice arm at 7.5k: rms 5–12, max ~490). 41k training rows through the step-33750 checkpoint: worst per-sample loss 2.25. On the eval rows the largest SwiGLU hidden value stays 25–67 at checkpoints 3750 to 33750, with no creep.
+- The trapped spike, step 16222: sample 60 (t 0.81), loss 15378 against a batch median of 1.2. In blocks 10–13 its SwiGLU hidden reached ~1e4 and the MLP output ~3e4; the stream rms rose from 20 to 200. Attention and `ada` outputs stayed normal. Scaling `w_up` by 0.9 / 0.8 on that snapshot cuts the sample's loss to 7912 / 3653: smooth amplification, no threshold. σ₁²/‖W‖²_F is 0.010–0.022 in every MLP matrix: no rank-1 outlier direction.
+- lr A/B, replay of steps 15000–16500 from the same checkpoint: lr 1e-2 about 6 spikes, lr 5e-3 one (step 16254, t 0.16, loss 15596). The lr sets how often, not how hard.
+- Weight norm against init, no weight decay: `ada` 5× at 3750 and 15.5× at 37500; `qkv` 3.3× / 10.8×; `w_gate`, `w_up`, `w_down` 3.3–3.5× / 9.4–10.9×; `time_mlp` 2.6× / 10×; `patch_embed` 1.1× / 2.2×; the `table` gate rows 14×. Growth decelerates; the update over the last 3750 steps is ~28 % of the norm, cosine ~0.1 to W. The relative step falls from 8.5e-4 to 4.3e-4 over the run by growth alone.
+- The function is tied to the grown norms. Checkpoint 30000, 256 eval rows (1.4287 as is): every Usui matrix projected to its init norm 3.12, to its step-3750 norm 2.92; one family ×0.7: `ada` 1.51, gate 1.58, `out` or `qkv` 1.78, `w_gate` 1.55, `w_up` or `w_down` 1.50, `patch_embed` 1.92.
+- Projection test, 1500 steps from checkpoint 30000 with the projection after every step (Usui fixed step at 1e-2): no pin 1.4286 → 1.4272 (one spike, loss 374); pinned to the step-3750 norms 2.92 → 1.4374, no spike; pinned to the init norms 3.12 → 1.4709, no spike. The relative steps were about 4.7e-4, 1e-3 and 3e-3: the plateau follows the relative step.
+
+## Branch norm and pin arms at d1024x16, 3000 steps (2026-11-04)
+
+Source: `runs/128_d1024x16_{base,sw,sw_b,swpin,idfinal}_3k/score.jsonl`. Same seed (41), data order and eval rows; t logit-normal σ 1; caption loss on the score grid.
+
+| arm | change from `base` | 1000 | 2000 | 3000 |
+|---|---|---|---|---|
+| `base_3k` | the `5ep` model and step (usui 1e-2, fixed step) | 1.5266 | 1.4861 | 1.4686 |
+| `sw_3k_b` | sandwich norm | 1.5309 | 1.4839 | 1.4680 |
+| `swpin_3k` | sandwich norm, pinned to init norm, relative step 2e-3 | 1.5329 | 1.4796 | 1.4624 |
+| `idfinal_3k` | sandwich norm, learnable `Linear(1024, 128)` readout on the fallback, init [I \| 0], in place of the slice | 1.5306 | 1.4869 | 1.4710 |
+
+- `sw_3k` (scored at 3000 only) ended at 1.4680, the same as its repeat `sw_3k_b`: a same-seed rerun reproduces the score.
+- `swpin_3k` trails at 1000 and leads from 2000. The learned readout ends 0.003 behind the slice. One run per arm; 3000 steps is before the `5ep` run's first spike, so these arms measure cost, not stability.
+
+## `128_d1024x16_swpin_5ep` (2026-11-05)
+
+Source: `runs/128_d1024x16_swpin_5ep/` (`configs/128_d1024x16_swpin_5ep.toml`): `swpin_3k` for 5 epochs, 37,605 steps of 256; usui relative step 2e-3 and fallback lr 2.5e-3, warmup 500, both decaying linearly to a tenth; t σ 1. Checkpoints at 7500, 15000, 22500, 30000, 37500, 37605.
+
+| step | 3000 | 6000 | 9000 | 12000 | 15000 | 18000 | 21000 | 24000 | 27000 | 30000 | 33000 | 36000 | 37605 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| caption loss | 1.4626 | 1.4400 | 1.4298 | 1.4242 | 1.4180 | 1.4126 | 1.4082 | 1.4043 | 1.3990 | 1.3958 | 1.3919 | 1.3873 | 1.3856 |
+| R² | 0.6262 | 0.6305 | 0.6325 | 0.6334 | 0.6346 | 0.6358 | 0.6366 | 0.6373 | 0.6385 | 0.6390 | 0.6398 | 0.6407 | 0.6411 |
+
+- Against the unpinned `5ep` (section Spikes): level at 3000–3750, ahead from 7500 (0.011 at 15000, 0.025 at 30000); the end is 0.035 below the unpinned run's best.
+- No spike record after warmup (none more than 0.08 above the rolling median of 50-step means); fallback grad norm at most 0.023 after warmup.
+- The gain per 3000 steps grows as the lr falls: −0.0032 (27k→30k), −0.0039 (30k→33k), −0.0046 (33k→36k). Train loss by eighth of the run: 1.328, 1.217, 1.200, 1.188, 1.178, 1.168, 1.159, 1.150.
+- R² per score-grid t (0.16 … 0.84) at 6000: 0.971 / 0.920 / 0.862 / 0.796 / 0.720 / 0.631 / 0.529 / 0.413 / 0.289 / 0.173; at the end: 0.972 / 0.924 / 0.870 / 0.807 / 0.734 / 0.648 / 0.547 / 0.430 / 0.301 / 0.179. The late gain is at mid t (about +0.017 at t 0.47–0.66), +0.001 at t 0.16, +0.006 at t 0.84.
+- The null-embedding score at the end is 1.3891, 0.0035 above the caption's (the last run to score it).
+- Samples, final grid against the unpinned run's at 30k, by eye: the unpinned grid is mush; the final grid has coherent figures, lighting and backgrounds, with class-level prompt following (the red-haired woman, the man at the beach, a cabin with a bear-like shape, text-like marks on the sign). Faces melt; no shark, no chess.
+- Which of the sandwich norm and the pin removed the spikes is not separated: neither ran this long alone.
