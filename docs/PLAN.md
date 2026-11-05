@@ -76,7 +76,8 @@ to bs256 again"; about 140 ms of each step is fixed, so batch 256 runs at about 
 When to add 256 px is open again (Daniel, 2026-11-05). On 2026-11-02 it was "too early … Theres still no hint of a
 cat"; `128_d1024x16_swpin_5ep` now follows prompts at class level (FACTS). It needs the images downloaded again and a
 precompute (B5: Lanczos from the 512 crops), and it interacts with G2: a patch over 4× the latent area keeps 256 px at
-the current 64 tokens.
+the current 64 tokens. Daniel (2026-11-05): "we might reach a limit where same data stops generalizing. 128px doesn't
+seem saturated yet."
 
 ### C2. Which LR from scratch, and how long a warmup?
 
@@ -99,6 +100,13 @@ decay? I think 4e-3 had a headstart but later the model needs softer touches. I 
 `128_4e-3_ep2`, the 4e-3 run's weights and optimizer state, one more pass at half lr (usui 2e-3, fallback 5e-4). Then
 `128_4e-3_ep3`: Daniel, "Next epoch is same lr but double bs", one pass at batch 256, its records, evals and checkpoints
 every 128k images as before.
+
+The continuation of `swpin_5ep` runs at 1e-4 flat (archive 2026-11-05, continuation lr) and learns about 6× slower per
+step than the end of `swpin_5ep` (FACTS, Continuation lr arms). Daniel (2026-11-05): "We still progress just slower so
+lets let it run. Just that maybe 4e-4 is probably very good next time even if it doesnt look good first." A
+2000-step arm after an lr change mostly shows the noise floor moving, so it favours the lowest lr. The read that would
+rank lrs for continued learning, none agreed: flat arms long enough to pass the transient (about 5k steps), ranked
+by the score slope after it; optionally a short anneal at the end of the best one, to check the ranking survives it.
 
 ### C3. Timestep shift values per stage
 

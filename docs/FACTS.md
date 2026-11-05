@@ -501,6 +501,7 @@ Source: `runs/128_d1024x16_swpin_cont_lr{2e-5,1e-4,2e-4,4e-4}/score.jsonl`. 2000
 | 4e-4 | 1.3884 | 1.3883 | 1.3882 | 1.3884 | 1.3884 | 0.6406 |
 
 - 2e-5 and 1e-4 end level; 2e-4 is 0.0012 behind and still falling; 4e-4 jumps 0.003 above the start at once and stays flat. Per t, 1e-4 and 2e-5 differ by at most 0.0005 in R². Train loss by quarter (σ 0.7, not comparable with the 5-epoch run's): 1e-4 1.1403 / 1.1386 / 1.1367 / 1.1381, 2e-5 within 0.0002 of it.
+- Score slope per 1000 steps (`score.jsonl`, read 2026-11-05): `swpin_5ep` from 33000 to 37000, usui lr decaying from about 4e-4 to 2e-4, −1.4e-3; `128_d1024x16_swpin_cont_3ep` (1e-4 flat from the 1e-4 arm's 39605, seed 43) from 40000 to 49000, −2.3e-4, at 1.3807 by 49000; the 4e-4 arm from 38000 to 39605, 0.
 
 Reference spectra, the same measures on cached pretrained models (scratch `ref_spectra.py` on the GPU, `/mnt/mars/ai/tiny-dit/probes/spectra_reference.json`; mean over layers; effective rank and r90 as fractions of the shorter side). Their optimizers and token counts are not known here; both trained far longer than this run's ~0.6B tokens.
 
