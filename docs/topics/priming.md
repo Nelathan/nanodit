@@ -34,7 +34,7 @@ The method as the writeup gives it:
 - "I1 on the primal vae, like masked language modeling i assume." Stage 1 runs in the Primal latent, as a
   reconstruction of corrupted latent tokens, the image analogue of masked language modeling.
 - "This is not trivial code."
-- "V0 makes this quite honest i think." V0 is the x0 velocity target we train with (SPEC §4, Ostris): the output is
+- "V0 makes this quite honest i think." He meant x0 (there is no V0): the x0 velocity target we train with (SPEC §4, Ostris): the output is
   image-shaped at every t, so a reconstruction objective on corrupted latents fits it without a new head.
 - Its own topic doc (this file) and branch.
 

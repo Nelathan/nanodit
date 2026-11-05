@@ -30,4 +30,4 @@ A run is launched in the background: `nohup .venv/bin/python scripts/train.py co
 - Configs state every field that differs from the current defaults (`pin_weights = false`, `t_sigma = 1.0` in older ones), so a config still describes its run.
 - wandb groups series on the first slash only; keep keys one level deep (`train/…`, `eval/…`, one group per bucketed topic).
 - The 256 px pass re-downloads each shard: the 128 px pass deleted the tars (7.5 to 11 GB each, FACTS). Encoding both resolutions in one pass would avoid it.
-- GPU sharing, the data location and the editable usuitrack are in `AGENTS.md`, "Running things". The GPU sits next to Daniel's family: long runs are coil whine for hours.
+- GPU sharing, the data location and the editable usuitrack are in `AGENTS.md`, "Running things". The GPU sits next to Daniel's family: long runs mean hours of audible airflow.
