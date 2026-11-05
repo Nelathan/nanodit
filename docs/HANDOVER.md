@@ -16,7 +16,7 @@ Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) holds everyt
 
 ## Next
 
-1. Continue `swpin_5ep` from step 37605 at usui lr 1e-4 flat, fallback 1.25e-4, t σ 0.7 (archive 2026-11-05, continuation lr); the 2000-step arm `128_d1024x16_swpin_cont_lr1e-4` is its first stretch. Length not set.
+1. Continue `swpin_5ep` from step 37605 at usui lr 1e-4 flat, fallback 1.25e-4, t σ 0.7 (archive 2026-11-05, continuation lr); the 2000-step arm `128_d1024x16_swpin_cont_lr1e-4` is its first stretch; `128_d1024x16_swpin_cont_3ep` runs 3 epochs (22,563 steps, seed 43) from its step 39605, launched 2026-11-05.
 2. PLAN G9: whether Usui holds back the weights' rank; the first reads are in FACTS (Spectra of the pinned weights).
 3. Model changes, each a fresh run: the 4× patch embed writing the meta channels (G2), the conv placed differently (G10); with them, when to add 256 px (C1, B5).
 4. Priming: `topics/priming.md` (PLAN I1); read the paper and repo first. EDM2 (G8).
