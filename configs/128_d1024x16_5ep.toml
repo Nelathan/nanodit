@@ -11,6 +11,7 @@ micro_batch = 64
 steps = 37605
 seed = 41
 usui_lr = 0.01
+pin_weights = false
 beta = 0.99
 rank_fraction = 0.1
 fallback_lr = 0.0025

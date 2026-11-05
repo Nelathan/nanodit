@@ -84,7 +84,7 @@ Consequence of the identity patch embed with x0 velocity: the zero gates make ev
 
 ## 6. Optimizer: UsuiTrack
 
-- Usui's fixed step on every tracked matrix: sized by `lr` and the matrix's shape, not relative to its norm, since a model trained from scratch has zero-initialized matrices with no norm to be relative to.
+- Every tracked matrix is pinned to the Frobenius norm it has at its first step (Usui's `pin_norm`), and takes Usui's trust step, so `lr` is a constant relative step for the whole run: the weights cannot grow, and the step does not shrink as they would have. No tracked matrix is zero-initialized (§5), so every one has a norm to keep.
 - Frame size: one rank fraction for every tracked matrix.
 - Frames drawn at random when the optimizer is built (Usui's `frame_init="random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers, then a linear decay over the run to a configured fraction of the peak.

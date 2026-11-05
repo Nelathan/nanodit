@@ -60,7 +60,7 @@ class Config:
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
-    pin_weights: bool = False  # PLAN G6: Usui matrices keep their init norm; usui_lr is then a relative step, not Usui's fixed one
+    pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
 
 
