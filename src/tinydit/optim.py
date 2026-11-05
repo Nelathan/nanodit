@@ -10,14 +10,14 @@ LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")
 USUI_EXCLUDED = ("table",)
 
 
-def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float, pin_weights: bool = False) -> tuple[UsuiTrack, StochasticAdamW]:
+def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float, pin_weights: bool) -> tuple[UsuiTrack, StochasticAdamW]:
     """UsuiTrack for the 2-D Linear weights, StochasticAdamW (AdamW whose bf16 updates round stochastically)
     for everything else (1-D, biases, tables, null embedding); betas (0.9, 0.99), no
     weight decay, as in usuitrack SPEC "Fallback path".
     Molegrad is attached to the model (which must already be on its device), so the tracked matrices
     never get a `.grad`; it hooks the optimizer, which stays the only handle.
-    Every tracked matrix takes Usui's fixed step, one lr unit for all, from a frame drawn at random (SPEC §6).
-    With `pin_weights` each keeps its init norm and takes the trust step instead, so `usui_lr` is a constant relative step."""
+    Frames are drawn at random. With `pin_weights` every tracked matrix keeps its init norm and takes the trust step, so
+    `usui_lr` is a constant relative step (SPEC §6); without, Usui's fixed step, one lr unit for all."""
     sided, fallback = {"left": [], "auto": []}, []
     for name, param in model.named_parameters():
         if param.ndim == 2 and not any(key in name for key in USUI_EXCLUDED):

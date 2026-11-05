@@ -22,7 +22,7 @@ run, name = sys.argv[1], sys.argv[2]
 with open(f"{run}/config.toml", "rb") as f:
     depth = tomllib.load(f)["depth"]
 model = DiT(torch.zeros(768), depth)
-matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
+matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
 # optimizer.pt keys its state by position across the param groups
 placed = [(id(p), g["side"]) for g in matrix.param_groups for p in g["params"]]
 index = [key for key, _ in placed].index(id(model.get_parameter(name)))

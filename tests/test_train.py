@@ -158,7 +158,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
-    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
+    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     matrix.load_state_dict(usui_state)
     fallback.load_state_dict(adam_state)
 
@@ -310,7 +310,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         torch.manual_seed(1)
         model = DiT(torch.randn(768), depth=2)
         open_gates(model)
-        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
         loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0)
@@ -330,7 +330,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     model = DiT(torch.randn(768), depth=2)
     open_gates(model)
     model.bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     start = {n: p.detach().clone() for n, p in model.named_parameters()}
     g = torch.Generator().manual_seed(0)
     x = torch.randn(8, 2, 16, 16, generator=g)
