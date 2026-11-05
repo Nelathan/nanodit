@@ -270,15 +270,26 @@ explosive weights." "Backwards can only put changes where activations sit and th
 help here, but is inefficient." "Higher rank usui always helps but diminishing. Gradient wise its already optimal
 subspace. But even tail contributes, its a power law."
 
-Open: whether the gap to the pretrained models is Usui's (the rank-0.1 frame drops the gradient's tail every step), the
-training length (theirs is far longer), or this task. Candidate reads, none agreed:
-- A 3000-step arm at Usui's largest frame (rank fraction 0.5, Usui's cap at half the shorter side), against `swpin_3k`:
-  loss and the same spectra at 3000 (FACTS has `swpin_3k`'s). A config change only.
-- A full-rank optimizer arm (AdamW on every matrix) of the same length: the reference for "even AdamW". Needs code.
-- The spectrum of one step's dense gradient on a checkpoint (a probe outside Molegrad): how heavy the tail is that the
-  frame drops.
-- Ways to help, if Usui is the cause: a higher rank fraction; a small random component in the frame each refresh to
-  reach the tail (Daniel's zero-order direction is the extreme of this).
+Daniel (2026-11-05, later): "Dont trust the capture, its just probes. Its comparable but not true fixpoint." "It
+could well be age. At least its more than 10%." "Dropping tails did harm the initial final layer bottleneck, but on most
+matrices it doesnt make any difference. Im leaning onto the original paper subtrack. No idea how they argued subspace is
+good enough. My variant is arguably better, i have proven tracking is better and the polar + row norm is principled
+higher rank." "I know gradient is low rank, no need to probe." "Rank 0.5 will help spectrum and a little loss but the
+point is having a small space is all you need."
+
+His question: "Applying polar to weights would surely break them. How about hadamard rotation that keeps it intact but
+maximizes rank? Even possible?" Not as stated: an orthogonal rotation on either side (W → HW, W → WH) leaves every
+singular value unchanged, so the rank and spectrum are invariant; any change to the spectrum changes the function.
+What a Hadamard rotation does change is the basis: it spreads energy evenly over coordinates (the incoherence QuaRot and
+SpinQuant use), which would matter only to the basis-dependent parts of the optimizer, such as a row norm.
+
+Open: whether the concentration is Usui's (the rank-0.1 frame drops the gradient's tail every step), the training length
+(theirs is far longer; the 3-epoch continuation shows whether it keeps falling), or this task. Not wanted: the rank 0.5
+arm and the dense-gradient probe. Remaining candidates, none agreed:
+- A full-rank optimizer arm (AdamW on every matrix) of `swpin_3k`'s length: the reference for "even AdamW". Needs code.
+- The same spectra on the continuation's checkpoints: whether the effective rank still falls with age.
+- Ways to help, if Usui is the cause: a small random component in the frame each refresh to reach the tail (Daniel's
+  zero-order direction is the extreme of this).
 
 ### G10. The depthwise conv, placed differently
 

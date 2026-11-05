@@ -518,4 +518,4 @@ Reference spectra, the same measures on cached pretrained models (scratch `ref_s
 | ours, `swpin_3k` at 3000 (constant relative step 2e-3): MLP / `qkv` / `gate`, `out` | 0.33 / 0.32 / 0.18–0.19 | 0.26–0.29 / 0.32 / 0.20 |
 
 - Our MLP matrices hold 90 % of their energy in about a sixth of the directions; the pretrained MLPs need about 0.7. Attention is lower in every model, ours lowest.
-- Usui's `grad_capture` (‖G Q‖/‖G‖, the gradient share its rank-0.1 frame holds) reads 0.98–1.03 over the whole `swpin_5ep` run (`train.jsonl`; above 1 under Molegrad, where the full gradient is not formed; how it is estimated there is not checked). Each step's gradient is already about rank 0.1 k by that read.
+- Usui's `grad_capture` (‖G Q‖/‖G‖, the gradient share its rank-0.1 frame holds) reads 0.98–1.03 over the whole `swpin_5ep` run (`train.jsonl`; above 1 under Molegrad, where the full gradient is not formed). It is a probed estimate: comparable across runs and steps, not the true capture (Daniel, 2026-11-05).
