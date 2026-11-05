@@ -107,6 +107,13 @@ lets let it run. Just that maybe 4e-4 is probably very good next time even if it
 2000-step arm after an lr change mostly shows the noise floor moving, so it favours the lowest lr. The read that would
 rank lrs for continued learning, none agreed: flat arms long enough to pass the transient (about 5k steps), ranked
 by the score slope after it; optionally a short anneal at the end of the best one, to check the ranking survives it.
+Running: `128_d1024x16_swpin_slope_lr{4e-4,1e-3}`, 5000 steps each from the end of `swpin_cont_3ep` (queue
+`runs/queue_slope_2026-11-05.sh`); `swpin_cont_3ep`'s own last stretch is the 1e-4 slope.
+
+Daniel (2026-11-05) on beta and batch: "higher beta makes it [`grad_moment_cosine`] less negative but diminishing returns
+we cant turn it positive. only lower lr can but that stops proper learning. probably beta is just fine. actually
+increasing batchsize is more common. but we want more progress, well i think more bs doenst give us lower loss per
+walltime."
 
 ### C3. Timestep shift values per stage
 
