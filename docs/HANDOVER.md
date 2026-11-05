@@ -4,7 +4,7 @@ Written 2026-10-31, night; rewritten 2026-11-05. Orientation only; `PLAN.md` car
 
 ## Where it stands
 
-The model of the current runs (`configs/128_d1024x16_swpin_5ep.toml`; SPEC §3 still states width 512, depth 12): a d1024 × 16 single-stream DiT with the slice readout (the output is the first 128 stream channels, the patch embed the identity on them), a sandwich norm on every branch output, SwiGLU 4×, no conv. Usui trains every matrix but the adaLN table, each pinned to its init Frobenius norm with a constant relative step; both lrs warm up 500 steps and decay linearly to a tenth. Training t is logit-normal σ 0.7. The checkpoint score is the caption loss and R² on the Lunara eval rows at 10 fixed t. `PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests -q`: 64 pass.
+The model of the current runs (SPEC §3): a d1024 × 16 single-stream DiT with the slice readout (the output is the first 128 stream channels, the patch embed the identity on them), a sandwich norm on every branch output, SwiGLU 4×, no conv. Usui trains every matrix but the adaLN table, each pinned to its init Frobenius norm with a constant relative step; both lrs warm up 500 steps and decay linearly to a tenth. Training t is logit-normal σ 0.7. The checkpoint score is the caption loss and R² on the Lunara eval rows at 10 fixed t. `PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests -q`: 64 pass.
 
 The best model is `runs/128_d1024x16_swpin_5ep` (5 epochs of the 47 deduped shards at 128 px, batch 256, 37,605 steps): score 1.3856, no spike, class-level prompt following in the samples, still improving at the end (FACTS). It trained at σ 1. The unpinned `128_d1024x16_5ep` before it spiked from step 4850 (FACTS, Spikes); G6 closed on that (archive 2026-11-05).
 

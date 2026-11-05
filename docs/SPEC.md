@@ -39,9 +39,9 @@ Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectio
 
 | Component | Decision |
 |---|---|
-| Width | 512 |
-| Depth | 12 layers (24 later, once it produces images) |
-| Attention | MHA, 8 heads × head dim 64. No GQA (no KV cache, nothing to save) |
+| Width | 1024 |
+| Depth | 16 layers |
+| Attention | MHA, 16 heads × head dim 64. No GQA (no KV cache, nothing to save) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
@@ -68,9 +68,9 @@ Default: fan-in normal, `std = 1/√fan_in`.
 
 | Role | Init | Optimizer (§6) |
 |---|---|---|
-| Patch embed 128→512 | identity on the first 128 output channels, fan-in normal on the rest, zero bias | Usui |
+| Patch embed 128→1024 | identity on the first 128 output channels, fan-in normal on the rest, zero bias | Usui |
 | Timestep MLP | fan-in normal | Usui |
-| Text projection 768→512 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
+| Text projection 768→1024 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
 | Q, K, V | fan-in normal | Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |

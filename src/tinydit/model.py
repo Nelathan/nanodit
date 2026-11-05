@@ -83,7 +83,7 @@ class Block(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, depth: int = 12, width: int = 512):
+    def __init__(self, null_embedding: Tensor, depth: int, width: int):
         super().__init__()
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())

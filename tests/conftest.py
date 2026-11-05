@@ -14,7 +14,7 @@ def open_gates(model):
 def model():
     torch.manual_seed(0)
     null = torch.nn.functional.normalize(torch.randn(TEXT_DIM), dim=0)
-    return DiT(null, depth=2)
+    return DiT(null, depth=2, width=512)
 
 
 @pytest.fixture

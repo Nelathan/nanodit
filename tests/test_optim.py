@@ -9,7 +9,7 @@ from tinydit.optim import build_optimizers
 
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
-    model = DiT(torch.randn(768), depth=2)
+    model = DiT(torch.randn(768), depth=2, width=512)
     matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     names = {id(p): n for n, p in model.named_parameters()}
     usui = {names[id(p)] for g in matrix.param_groups for p in g["params"]}
@@ -22,7 +22,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
 
 
 def test_residual_stream_output_matrices_track_their_left_side():
-    model = DiT(torch.randn(768), depth=2)
+    model = DiT(torch.randn(768), depth=2, width=512)
     matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     names = {id(p): n for n, p in model.named_parameters()}
     side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
@@ -34,7 +34,7 @@ def test_residual_stream_output_matrices_track_their_left_side():
 
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2).bfloat16()
+    model = DiT(torch.randn(768), depth=2, width=512).bfloat16()
     fallback_lr = 1e-3
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr, pin_weights=False)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
@@ -54,7 +54,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
 def trained_model(steps=2):
     """A depth-2 bf16 model with open gates (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2)
+    model = DiT(torch.randn(768), depth=2, width=512)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
@@ -95,7 +95,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
     grads = []
     for micro_batch in (8, 2):
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), depth=2)
+        model = DiT(torch.randn(768), depth=2, width=512)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
@@ -117,7 +117,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(768), depth=2).bfloat16()
+    restored = DiT(torch.zeros(768), depth=2, width=512).bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     for optimizer, saved in zip(resumed, state[1]):
@@ -132,7 +132,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
 
 
 def test_pinned_matrices_keep_their_init_norm_under_the_trust_step():
-    model = DiT(torch.randn(768), depth=2)
+    model = DiT(torch.randn(768), depth=2, width=512)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3, pin_weights=True)
