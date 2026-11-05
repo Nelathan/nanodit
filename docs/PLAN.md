@@ -315,12 +315,25 @@ on a free GPU: FACTS, Sweep throughput.
 
 ### I1. Priming: reconstruction pretraining, then distributional post-training
 
-Daniel (2026-11-05) brought a writeup of Kim et al., "Are We Overthinking One-Step Generation?" (arXiv 2610.20331;
-REFERENCES): stage 1 trains reconstruction at one fixed noise level, stage 2 post-trains the generator distributionally
-(Sinkhorn / optimal transport) in a frozen feature space, for one-step generation. Their stage-1 ablation over the noise
-level is in REFERENCES; how their s maps onto our t is unchecked. Open: whether any part
-fits here, as a pretraining of the DiT or as a one-step post-training of a checkpoint, and what feature space we would
-have. Settle: read the paper and the repo first.
+Daniel (2026-11-05) wants to explore Priming Models (Kim, Park et al., "Are We Overthinking One-Step Generation?",
+arXiv 2610.20331); his writeup of the two X threads is kept verbatim in `references/priming-threads.md`. He proposes it
+gets its own topic doc and branch when the work starts. The method: stage 1 trains one network to reconstruct clean
+images from inputs corrupted at a single fixed noise level, with no time embedding, and feeds it pure noise at
+generation; stage 2 post-trains that one-step generator by matching the distribution of its samples to real ones in a
+frozen feature space (Sinkhorn / optimal transport, or simpler pairwise or kernel losses). Claimed: one-step ImageNet 256
+FID 1.19, text-to-image GenEval 0.82 one-step; T2I and world models work with essentially one real reference per
+condition; on action chunks the distributional loss runs on the raw normalized data with no feature encoder. Stage 1 is
+sensitive to its noise level (the s ablation, REFERENCES).
+
+What maps onto this project, my reading, nothing tested:
+- Our flow model is a stage-1 network at every t at once. Whether a priming run starts from scratch at one fixed t, or
+  from the hero checkpoint frozen at one t (the paper names fine-tuning multi-step models into one-step generators as
+  related work), is the first choice. How their s maps onto our t (x_t = (1 − t) x₀ + t ε) is unchecked.
+- The feature space for stage 2: the Primal latent itself, Euclidean as in their action-chunk result, costs nothing; a
+  frozen image encoder on decoded samples costs a VAE decode per sample.
+- One reference per prompt is our data's shape: each caption has one image.
+Open: whether any of it fits, and which of the two starts. Settle: read the paper and the repo first, then the topic
+doc proposes the arms.
 
 ---
 

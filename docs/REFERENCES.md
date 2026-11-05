@@ -17,8 +17,8 @@ What each source establishes for this project.
   https://github.com/JaeyeonKim01/priming, blog https://moepien.github.io/blog/better-priming/. Stage 1: reconstruction
   pretraining at one fixed noise level; stage 2: distributional post-training (Sinkhorn / optimal transport) in a frozen
   feature space, for one-step generation. Stage-1 noise-level ablation as Daniel's writeup quotes it (FID):
-  s 0.5 → 2.46, 0.7 → 1.76, 0.8 → 1.65, 0.9 → 1.97, 1.0 → 65.08. Known here only through that writeup; paper, repo and
-  numbers unverified (PLAN I1).
+  s 0.5 → 2.46, 0.7 → 1.76, 0.8 → 1.65, 0.9 → 1.97, 1.0 → 65.08. Known here only through Daniel's writeup, kept verbatim in
+  `references/priming-threads.md`; paper, repo and numbers unverified (PLAN I1).
 
 ## Components
 
