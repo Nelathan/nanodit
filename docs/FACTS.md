@@ -448,6 +448,17 @@ Source: `runs/128_d1024x16_{base,sw,sw_b,swpin,idfinal}_3k/score.jsonl`. Same se
 - `sw_3k` (scored at 3000 only) ended at 1.4680, the same as its repeat `sw_3k_b`: a same-seed rerun reproduces the score.
 - `swpin_3k` trails at 1000 and leads from 2000. The learned readout ends 0.003 behind the slice. One run per arm; 3000 steps is before the `5ep` run's first spike, so these arms measure cost, not stability.
 
+## Architecture arms at d1024x16, 3000 steps (2026-11-05)
+
+Source: `runs/128_d1024x16_p16meta_3k/{score,train}.jsonl`, against `swpin_3k` above (same config, seed 41, data order and eval rows); throughput is the median `imgs_per_s` after the first 250 steps.
+
+| arm | change from `swpin_3k` | 1000 | 2000 | 3000 | img/s |
+|---|---|---|---|---|---|
+| `swpin_3k` | | 1.5329 | 1.4796 | 1.4624 | 376 |
+| `p16meta_3k` | patch 16 (512-d tokens, 16 tokens at 128 px) carried in the first 512 channels; patch embed `Linear(512, 512)` into the meta channels only; slice readout of 512 | 1.6407 | 1.5732 | 1.5428 | 767 |
+
+- `p16meta_3k` is 0.080 behind per step at 3000 and 2.04× as fast. Per wall-clock its 3000 steps buy what `swpin_3k` has at about step 1470, linearly interpolated 1.508: 0.035 behind at equal time.
+
 ## `128_d1024x16_swpin_5ep` (2026-11-05)
 
 Source: `runs/128_d1024x16_swpin_5ep/` (`configs/128_d1024x16_swpin_5ep.toml`): `swpin_3k` for 5 epochs, 37,605 steps of 256; usui relative step 2e-3 and fallback lr 2.5e-3, warmup 500, both decaying linearly to a tenth; t σ 1. Checkpoints at 7500, 15000, 22500, 30000, 37500, 37605.
@@ -502,6 +513,7 @@ Source: `runs/128_d1024x16_swpin_cont_lr{2e-5,1e-4,2e-4,4e-4}/score.jsonl`. 2000
 
 - 2e-5 and 1e-4 end level; 2e-4 is 0.0012 behind and still falling; 4e-4 jumps 0.003 above the start at once and stays flat. Per t, 1e-4 and 2e-5 differ by at most 0.0005 in R². Train loss by quarter (σ 0.7, not comparable with the 5-epoch run's): 1e-4 1.1403 / 1.1386 / 1.1367 / 1.1381, 2e-5 within 0.0002 of it.
 - Score slope per 1000 steps (`score.jsonl`, read 2026-11-05): `swpin_5ep` from 33000 to 37000, usui lr decaying from about 4e-4 to 2e-4, −1.4e-3; `128_d1024x16_swpin_cont_3ep` (1e-4 flat from the 1e-4 arm's 39605, seed 43) from 40000 to 49000, −2.3e-4, from 50000 to 62168 −1.5e-4, ending at 1.3789; the 4e-4 arm from 38000 to 39605, 0.
+- Slope arms from `swpin_cont_3ep`'s 62168, 5000 steps flat, seed 44 (`runs/128_d1024x16_swpin_slope_lr{4e-4,1e-3}/score.jsonl`, read 2026-11-05): 4e-4 jumps to 1.3850 at 62500 and ends at 1.3859 (+0.0070 on 1.3789), slope +0.3e-4 per 1000; 1e-3 jumps to 1.3977 and ends at 1.4009 (+0.0220), slope +2.0e-4 (linear fits over the scores from 63000; from 64000, −0.4e-4 and +0.1e-4). 1e-4 is the only lr of the three still falling.
 
 Reference spectra, the same measures on cached pretrained models (scratch `ref_spectra.py` on the GPU, `/mnt/mars/ai/tiny-dit/probes/spectra_reference.json`; mean over layers; effective rank and r90 as fractions of the shorter side). Their optimizers and token counts are not known here; both trained far longer than this run's ~0.6B tokens.
 

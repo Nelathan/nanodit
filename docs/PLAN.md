@@ -134,8 +134,8 @@ lets let it run. Just that maybe 4e-4 is probably very good next time even if it
 2000-step arm after an lr change mostly shows the noise floor moving, so it favours the lowest lr. The read that would
 rank lrs for continued learning, none agreed: flat arms long enough to pass the transient (about 5k steps), ranked
 by the score slope after it; optionally a short anneal at the end of the best one, to check the ranking survives it.
-Running: `128_d1024x16_swpin_slope_lr{4e-4,1e-3}`, 5000 steps each from the end of `swpin_cont_3ep` (queue
-`runs/queue_slope_2026-11-05.sh`); `swpin_cont_3ep`'s own last stretch is the 1e-4 slope.
+Read: `128_d1024x16_swpin_slope_lr{4e-4,1e-3}`, 5000 steps each from the end of `swpin_cont_3ep`, against
+`swpin_cont_3ep`'s own last stretch at 1e-4 (FACTS, Continuation lr arms): neither higher lr falls within 5000 steps.
 
 Daniel (2026-11-05) on beta and batch: "higher beta makes it [`grad_moment_cosine`] less negative but diminishing returns
 we cant turn it positive. only lower lr can but that stops proper learning. probably beta is just fine. actually
@@ -227,6 +227,13 @@ tokens), so the latent fills half of the 1024-wide stream and the slice readout 
 at 256 px (C1). With it, whether the patch embed writes only the meta channels (the stream beyond the latent slice, the
 slice carrying the latent unchanged) or all channels as now (SPEC §3: identity on the slice, learned everywhere); Daniel
 prefers meta only. A model change, so a fresh run, not a continuation (archive 2026-11-05, continuation lr).
+
+Daniel (2026-11-05): "g2 yes to test if cost is not to bad. how do other t2i have it? i mean patchembed. it should be
+obvious success that patchembed just fills in the missing columns as meta channels." And, later: "for patch size, i just
+wanted to mind that the original idea was 128/512 and we now have 1024, so to be bold try 512/1024. current works well it
+might just be overprovisioned, we already picked the 2 channel vae to have more real estate." Elsewhere: DiT, PixArt, SD3
+and Flux take 16 px per token (f8 VAE, patch 2), SANA 32 px (f32 DC-AE, patch 1); the 512/1024 arm takes 32 px.
+Measured: `128_d1024x16_p16meta_3k` (branch `g2-patch16`, meta-only patch embed), FACTS (Architecture arms).
 
 ### G3. The common mode in the residual stream
 
@@ -340,6 +347,15 @@ The conv before attention made no difference at d768 (G5; FACTS) and was dropped
 attention in some blocks, rather than before it; the conv writing only the meta channels (G2); its output stacked into
 the MLP input (SANA's Mix-FFN puts a depthwise conv inside the MLP). Settle: one arm per placement against the current
 model, at a scale and length agreed when it runs.
+
+Daniel (2026-11-05): "conv instead of attn, writing to meta only, i think thats the cleanest variant. would be half the
+layers of a 768x12 model. if success, even 2/3 or 3/4. always conv first, attn next." On the two forms offered, (a) the
+depthwise conv over the meta channels only, (b) over all channels, then `out` into the meta channels: "for conv yes
+design b. maybe its ok to write image channels, but it could also write context into the render. meta only would put
+the swiglu gate before it. in earlier samples where we compared the canon conv vs without i saw a softer image, like it
+just copied context into render." "its ok if it needs some more time". Running: `128_d1024x16_conv_3k` (branch
+`conv-meta`): `swpin_3k` with blocks 0, 2, ..., 14 a depthwise 3×3 conv over all 1024 channels after the adaLN
+modulation, then `out` (1024 → 896) into the meta channels, its sandwich norm and the attention gate; the MLP as before.
 
 ---
 
