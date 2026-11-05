@@ -10,7 +10,15 @@ What each source establishes for this project.
 - **Li & He, "Back to Basics: Let Denoising Generative Models Denoise" (JiT), arXiv 2511.13720.**
   Pure x0 prediction with large patches; the manifold/bottleneck argument for why the target matters with fat tokens.
 - **Karras et al., EDM / EDM2.** Preconditioning (`c_skip`, `c_out`); EMA length as a major quality knob (EDM2).
+  arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models") is taken to be EDM2: magnitude-preserving
+  layers; Daniel's pointer for the weight pin (PLAN G8), not read beyond the abstract.
 - **Esser et al., SD3.** Rectified flow at scale, logit-normal timestep sampling, resolution-dependent shift.
+- **Kim et al., "Are We Overthinking One-Step Generation?" (Priming), arXiv 2610.20331.** Repo
+  https://github.com/JaeyeonKim01/priming, blog https://moepien.github.io/blog/better-priming/. Stage 1: reconstruction
+  pretraining at one fixed noise level; stage 2: distributional post-training (Sinkhorn / optimal transport) in a frozen
+  feature space, for one-step generation. Stage-1 noise-level ablation as Daniel's writeup quotes it (FID):
+  s 0.5 → 2.46, 0.7 → 1.76, 0.8 → 1.65, 0.9 → 1.97, 1.0 → 65.08. Known here only through that writeup; paper, repo and
+  numbers unverified (PLAN I1).
 
 ## Components
 

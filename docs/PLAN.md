@@ -73,14 +73,19 @@ fraction if `tangent_live_fraction` falls; it did not fall at batch 64 (FACTS, 1
 throughput is unmeasured. Settle: when the 256 px stage is planned. Daniel, at 128 px, after the sweep: "honestly we might go back
 to bs256 again"; about 140 ms of each step is fixed, so batch 256 runs at about 850 img/s against 580 (FACTS, Sweep throughput).
 
+When to add 256 px is open again (Daniel, 2026-11-05). On 2026-11-02 it was "too early … Theres still no hint of a
+cat"; `128_d1024x16_swpin_5ep` now follows prompts at class level (FACTS). It needs the images downloaded again and a
+precompute (B5: Lanczos from the 512 crops), and it interacts with G2: a patch over 4× the latent area keeps 256 px at
+the current 64 tokens.
+
 ### C2. Which LR from scratch, and how long a warmup?
 
-The lr is Usui's fixed step (SPEC §6): a moment that fills its rank writes
-`‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
+The lr is now a constant relative step on pinned weights (SPEC §6, archive 2026-11-05); what follows was measured
+under Usui's fixed step, where a moment that fills its rank writes `‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
 and beta 0.99, Daniel's "for now" after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
 negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: the sweep at 128 px, usui lr 2e-4, 1e-3, 2e-3 and 4e-3, one pass each over the deduped shards 0–46
 at batch 128, warmup 5% of the run, no decay for now (archive 2026-11-02, LR sweep). Usui's README recommends a
-decay; whether to add one stays open after the sweep. The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
+decay; the runs now decay linearly (SPEC §6). The 300-step reads at warmup 20, 50 and 100 are in FACTS (Fixed-step runs). The final linear, the conv, the adaLN tables and the null embedding
 train on the fallback at `fallback_lr` with betas (0.9, 0.99), a second sweep axis; they move
 faster than the Usui matrices, and the null embedding turns away from its init in the
 first 1000 steps (FACTS, Runs at usui lr 2e-3). Daniel: "we should also lower fallback lr i
@@ -99,6 +104,16 @@ every 128k images as before.
 ### C3. Timestep shift values per stage
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
+
+### C4. Which constant lr continues the hero checkpoint?
+
+Daniel (2026-11-05): continue training from `128_d1024x16_swpin_5ep` (step 37605) rather than start from scratch,
+unless the model changes; the continuation trains at t σ 0.7 (SPEC §4; the run itself trained at σ 1). Open: which
+constant relative step. The run ended at 2e-4 after a linear decay from 2e-3, and its gain per 3000 steps was still
+growing as the lr fell (FACTS). Settle: short constant-lr arms from the final checkpoint, around 2e-4, 5e-4 and 1e-3,
+same data order and score grid. Caveat for reading them: over a short horizon a lower lr wins by the anneal effect alone,
+so a short arm favours the low end; the arms would need to run long enough for the higher lr's faster descent to show, or
+be read with a short decay tail at their end.
 
 ---
 
@@ -176,6 +191,12 @@ to first explore one axis". The depth arm waits (G4).
 Patch 8 gives 64 tokens at 128 px. Patch 4 gives 256: about 4× the FLOPs at the same parameters, the axis DiT
 found as strong as model size (XL/2 against XL/8). Not measured here.
 
+The other direction, from Daniel (2026-11-05): a patch embed over 4× the latent area (`pixel_unshuffle(16)`, 512-d
+tokens), so the latent fills half of the 1024-wide stream and the slice readout is 512 channels; 16 tokens at 128 px, 64
+at 256 px (C1). With it, whether the patch embed writes only the meta channels (the stream beyond the latent slice, the
+slice carrying the latent unchanged) or all channels as now (SPEC §3: identity on the slice, learned everywhere); Daniel
+prefers meta only. A model change, so a fresh run, not a continuation (C4).
+
 ### G3. The common mode in the residual stream
 
 By mid-depth most of each image's stream energy is one vector shared by its tokens, written by attention in blocks
@@ -230,18 +251,40 @@ Daniel: the extras (deep supervision of the slice, an untied extra SwiGLU) are n
 
 Daniel (2026-11-03, going to bed, "tomorrow I wanna see the best model we can produce"): the slice readout becomes the base model (commit `56b4515`, branch `slice-base`), with the conv dropped ("useless"), RoPE on every head dim, and a deeper MLP (SwiGLU hidden 4 x width; his earlier "increase mlp to 8" at G1 was not read as a ratio, so 4 is Claude's pick and a single constant, `MLP_RATIO`). The run is `128_d1024x16_5ep` (`configs/128_d1024x16_5ep.toml`): d1024, 16 layers, 293.8M parameters, usui lr 1e-2 constant for 5 epochs with no anneal ("we will run 5 epochs with no anneal and decide how to do from there"), fallback 2.5e-3, rank fraction 0.1 ("we can do 0.05 again because we have no bottleneck, but I don't think it is worth it, so keep 0.1"), batch 256, 37,605 steps, 5 % warmup of the first epoch, checkpoint 2 x per epoch (every 3750 steps), eval every 1000. The first 250 steps ran at 330 img/s, so about 8 hours plus evals. Not decided and left open: the final anneal; F1 (RoPE base 10000 kept; with every dim rotated, the slowest frequencies move under 0.001 rad across a 16-position axis and act as position-free dims); a seed repeat of the slice arm.
 
-### G6. Bounding the stream and the weights
-
-The `128_d1024x16_5ep` run spiked from step 5k and diverged after 30k (measurements: FACTS, to be written). Decided by Daniel (2026-11-04): new inits get a sandwich norm (LFM3's form: an RMSNorm with a learnable weight on each branch's output, before the zero-init gate and the residual add). Open:
-- Whether a weight pin is needed on top, and which: Frobenius per matrix or per output row; target the init norm, unit norm with a constant output multiplier, or a learned scalar gain. It would sit in Usui's step 8, where the stochastic rounding already happens. Arms on a fresh init: sandwich only, plus a pin, plus a pin with learned gains.
-- Whether a pin needs an explicit anneal (the absolute Usui lr decays relative to the weights as they grow; a pin removes that).
-- Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models", magnitude-preserving layers; I take it to be EDM2, not verified beyond the abstract).
-
 ### G7. Does the narrower timestep distribution hold at hero length and in the samples?
 
 The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3000-step arms at d768x12 gave it a small, consistent edge at t 0.26 to 0.66 and a loss at t 0.16 and 0.84 (FACTS, Timestep distribution arms). Open:
 - Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
 - Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
+- `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation (C4) is the first long run at σ 0.7.
+
+### G8. What the pin leaves open
+
+Every Usui matrix is pinned to its init Frobenius norm and takes a constant relative step (SPEC §6, archive 2026-11-05).
+Open:
+- Whether a learned scalar gain per pinned matrix (direction pinned, gain on the fallback) helps: some scale is free in
+  the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
+  point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
+- A pin per output row instead of per matrix.
+- Which of the sandwich norm and the pin removed the spikes; Daniel reads it as the sandwich norm.
+- Reading, from Daniel: arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models",
+  magnitude-preserving layers; taken to be EDM2, not verified beyond the abstract).
+
+### G9. How did the weights grow from their initial subspace to full rank?
+
+Daniel (2026-11-05): study the rank evolution over the `swpin_5ep` checkpoints (7500, 15000, 22500, 30000, 37500, 37605;
+the init rebuilds from seed 41). Usui writes each step through a frame of rank 0.1 × the shorter side, and the pin holds
+‖W‖ fixed, so what changes is the direction. Candidate reads per matrix: the singular spectrum and effective rank of W
+and of W − W₀, and the overlap of the top singular subspaces with W₀'s, against the step. Settle: a scratch script over
+the checkpoints; numbers go to FACTS.
+
+### G10. The depthwise conv, placed differently
+
+The conv before attention made no difference at d768 (G5: conv off 1.4805 against 1.4807) and was dropped. Daniel
+(2026-11-05): that may have been a design mistake rather than a verdict on the conv. Candidates: the conv in place of
+attention in some blocks, rather than before it; the conv writing only the meta channels (G2); its output stacked into
+the MLP input (SANA's Mix-FFN puts a depthwise conv inside the MLP). Settle: one arm per placement against the current
+model, at a scale and length agreed when it runs.
 
 ---
 
@@ -265,6 +308,19 @@ decay helped very short runs before "but wasnt worth it keeping in the code. bc 
 "right, do stack the eigh calls". No random-frame comparison run: "by step 1k it is caught up fully with zero
 difference". Both are usuitrack changes, in the `zero-init` worktree. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Block compile measured
 on a free GPU: FACTS, Sweep throughput.
+
+---
+
+## Group I. Training schemes beyond flow matching
+
+### I1. Priming: reconstruction pretraining, then distributional post-training
+
+Daniel (2026-11-05) brought a writeup of Kim et al., "Are We Overthinking One-Step Generation?" (arXiv 2610.20331;
+REFERENCES): stage 1 trains reconstruction at one fixed noise level, stage 2 post-trains the generator distributionally
+(Sinkhorn / optimal transport) in a frozen feature space, for one-step generation. Their stage-1 ablation over the noise
+level is in the writeup (best near s 0.8, collapse at s 1.0); how s maps onto our t is unchecked. Open: whether any part
+fits here, as a pretraining of the DiT or as a one-step post-training of a checkpoint, and what feature space we would
+have. Settle: read the paper and the repo first.
 
 ---
 
