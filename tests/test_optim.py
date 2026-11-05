@@ -16,8 +16,8 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.0.q_norm.weight", "blocks.0.attn_norm.weight", "blocks.1.mlp_norm.weight"} <= adam
-    assert {"ada.1.weight", "blocks.0.qkv.weight", "blocks.0.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
+    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.0.conv_norm.weight", "blocks.1.mlp_norm.weight"} <= adam
+    assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
     assert {g["step_rule"] for g in matrix.param_groups} == {"fixed"}
 
 
@@ -28,7 +28,7 @@ def test_residual_stream_output_matrices_track_their_left_side():
     side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
     for name in ("blocks.0.out.weight", "blocks.1.w_down.weight", "patch_embed.weight"):
         assert side[name] == "left"
-    for name in ("blocks.0.qkv.weight", "blocks.0.w_up.weight", "ada.1.weight"):
+    for name in ("blocks.1.qkv.weight", "blocks.0.w_up.weight", "ada.1.weight"):
         assert side[name] == "auto"
 
 
@@ -48,7 +48,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     assert len(matrices) > 10 and framed == set(matrices) and moved == {"patch_embed.weight", "ada.1.weight"}
     # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
     # (only the first 128 channels, the ones F reads, have an upstream gradient yet)
-    assert abs(model.blocks[0].table[[2, 5], :TOKEN_DIM].float().abs().mean() / fallback_lr - 1) < 0.05
+    assert abs(model.blocks[1].table[[2, 5], :TOKEN_DIM].float().abs().mean() / fallback_lr - 1) < 0.05
 
 
 def trained_model(steps=2):
@@ -80,7 +80,7 @@ def train_step(model, optimizers, x, text, micro_batch=8):
 
 def test_tracked_matrices_have_no_gradient_and_still_move():
     model, optimizers = trained_model(steps=0)
-    qkv = model.blocks[0].qkv.weight
+    qkv = model.blocks[1].qkv.weight
     before = qkv.detach().clone()
     train_step(model, optimizers, *batch(0))
     train_step(model, optimizers, *batch(1))
@@ -122,7 +122,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     for optimizer, saved in zip(resumed, state[1]):
         optimizer.load_state_dict(saved)
-    qkv = restored.blocks[0].qkv
+    qkv = restored.blocks[1].qkv
     assert not qkv.basis.requires_grad  # reads the loaded frame, no refit pending
     assert torch.equal(qkv.basis, resumed[0].state[qkv.weight]["frame"])
     torch.manual_seed(5)

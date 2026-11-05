@@ -94,10 +94,36 @@ def test_gradient_reaches_every_zero_init_role(model, text):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    block = model.blocks[0]
-    assert block.table[[2, 5]].abs().max() > 0
+    conv, attn = model.blocks
+    assert conv.table[[2, 5]].abs().max() > 0 and attn.table[[2, 5]].abs().max() > 0
     assert model.ada[1].weight.view(6, 512, 512)[[2, 5]].abs().max() > 0
-    assert block.qkv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
+    assert attn.qkv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
+    assert conv.conv.weight.grad.abs().max() > 0
+
+
+def test_a_conv_block_writes_only_the_meta_channels(model, text):
+    open_gates(model)
+    seen = {}
+    model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
+    model.blocks[0].table.data[5] = 0  # close the MLP gate: what changes is the conv branch alone
+    model(torch.randn(3, 2, 64, 64), torch.rand(3), text)
+    change = seen["stream_out"] - seen["stream_in"]
+    assert (change[..., :TOKEN_DIM] == 0).all() and change[..., TOKEN_DIM:].abs().max() > 0
+
+
+def test_a_conv_block_mixes_only_neighbouring_tokens(model, text):
+    open_gates(model)
+    seen = {}
+    model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream=out))
+    x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
+    model(x, t, text[:1])
+    before = seen["stream"]
+    x[0, :, 0:8, 0:8] += 1  # token (0, 0)
+    model(x, t, text[:1])
+    moved = (seen["stream"] - before).abs().amax(-1).view(8, 8) > 0
+    expected = torch.zeros(8, 8, dtype=torch.bool)
+    expected[:2, :2] = True
+    assert torch.equal(moved, expected)
 
 
 class TestRope:

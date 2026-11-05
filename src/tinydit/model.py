@@ -53,30 +53,44 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 
 class Block(nn.Module):
-    def __init__(self, width: int):
+    """A conv block mixes tokens with a depthwise 3x3 conv over the token grid and writes only the meta
+    channels (the ones past TOKEN_DIM); its MLP then decides what reaches the image channels. Otherwise
+    the token mixer is gated attention."""
+
+    def __init__(self, width: int, conv: bool):
         super().__init__()
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
-        self.qkv = nn.Linear(width, 3 * width, bias=False)
-        self.gate = nn.Linear(width, width, bias=False)
-        self.q_norm = nn.RMSNorm(HEAD_DIM)
-        self.k_norm = nn.RMSNorm(HEAD_DIM)
-        self.out = nn.Linear(width, width, bias=False)
-        self.attn_norm = nn.RMSNorm(width)
+        self.is_conv = conv
+        if conv:
+            self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
+            self.out = nn.Linear(width, width - TOKEN_DIM, bias=False)
+            self.conv_norm = nn.RMSNorm(width - TOKEN_DIM)
+        else:
+            self.qkv = nn.Linear(width, 3 * width, bias=False)
+            self.gate = nn.Linear(width, width, bias=False)
+            self.q_norm = nn.RMSNorm(HEAD_DIM)
+            self.k_norm = nn.RMSNorm(HEAD_DIM)
+            self.out = nn.Linear(width, width, bias=False)
+            self.attn_norm = nn.RMSNorm(width)
         self.mlp_norm = nn.RMSNorm(width)
         self.w_gate = nn.Linear(width, hidden, bias=False)
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
 
-    def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor]) -> Tensor:
+    def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], h: int, w: int) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
-        q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
-        q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
-        attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
-        x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
+        if self.is_conv:
+            mixed = self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
+            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zeros on the image channels
+        else:
+            q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
+            q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
+            attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
+            x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
         return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
@@ -91,7 +105,7 @@ class DiT(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width)
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
-        self.blocks = nn.ModuleList(Block(width) for _ in range(depth))
+        self.blocks = nn.ModuleList(Block(width, conv=i % 2 == 0) for i in range(depth))  # conv first, attention next
         self.init_weights()
 
     @torch.no_grad()
@@ -101,6 +115,8 @@ class DiT(nn.Module):
                 m.weight.normal_(0, m.in_features**-0.5)
                 if m.bias is not None:
                     m.bias.zero_()
+            elif isinstance(m, nn.Conv2d):
+                m.weight.normal_(0, (m.in_channels // m.groups * m.kernel_size[0] * m.kernel_size[1]) ** -0.5)
         mod = self.ada[1]
         mod.weight.view(N_MOD, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD, self.width, self.width)
         mod.weight.view(N_MOD, self.width, self.width)[list(GATE_ROWS)] = 0
@@ -122,5 +138,5 @@ class DiT(nn.Module):
 
         tokens = self.patch_embed(tokens)
         for block in self.blocks:
-            tokens = block(tokens, mod, rope)
+            tokens = block(tokens, mod, rope, h, w)
         return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()

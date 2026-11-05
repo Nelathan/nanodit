@@ -151,7 +151,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     checkpoint = run / "checkpoints" / "step_0000003"
     first = load_file(run / "checkpoints" / "step_0000002" / "model.safetensors")
     last = load_file(checkpoint / "model.safetensors")
-    assert not torch.equal(first["blocks.0.qkv.weight"], last["blocks.0.qkv.weight"])  # a UsuiTrack matrix moved
+    assert not torch.equal(first["blocks.1.qkv.weight"], last["blocks.1.qkv.weight"])  # a UsuiTrack matrix moved
 
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
     restored = DiT(torch.zeros(768), depth=2, width=512).bfloat16()
@@ -344,8 +344,8 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     assert {p.dtype for p in model.parameters()} == {torch.bfloat16}
     # The QK-norm gain (1.0, ulp 2^-7) takes AdamW steps of 1e-3, a fraction of an ulp: round-to-nearest
     # leaves it bit-identical (checked: 0 of its elements move), stochastic rounding moves about a quarter.
-    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
-    assert changed["blocks.0.q_norm.weight"] > 0.1
+    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.1.q_norm.weight", "blocks.1.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
+    assert changed["blocks.1.q_norm.weight"] > 0.1
     assert all(fraction > 0.02 for fraction in changed.values()), changed
 
 
