@@ -52,5 +52,14 @@ What each source establishes for this project.
   (jpg, txt with an original and an enhanced prompt, json), mostly above 1K, some subsets at random aspect ratios;
   Apache-2.0. Claims semantic dedup, safety and aesthetic filters and a VLM quality audit removing over 95 % of
   candidates (the authors' claim). A candidate for the second image dataset (PLAN G1).
+- **MONET** — https://huggingface.co/datasets/jasperai/monet
+  103.8M pairs distilled from 2.9B, 70.8 TB (Jasper Research, Apache-2.0). Mostly real web images (LAION-2B-en 46.3M,
+  COYO 18.5M, Common-Catalog-CC-BY 11.0M, Megalith-10M 8.0M, CC12M 6.2M) plus 13.8M synthetic (Z-Image, FLUX.1-schnell,
+  FLUX.2-klein-4B); alt-text plus up to four synthetic captions (Florence-2 short, ShareGPT4V, InternVL3, Gemini long);
+  images below 512 px and LAION aesthetic below 5 dropped, pHash/SSCD dedup, NSFW and watermark filters. Parquet
+  configs carry 384 px thumbnails, metadata, embeddings and VAE latents; WebDataset carries full resolution. Daniel
+  (2026-11-05): with PD12M "rather world knowledge images, not so much t2i".
 - **PD12M** (not chosen) — https://huggingface.co/datasets/Spawning/PD12M
   12.4M public-domain/CC0 pairs, recaptioned, S3-hosted. Alternative if real-image aesthetics or licensing matter.
+  Daniel (2026-11-05): the second set of the original plan, left out of the notes; world knowledge images rather than
+  text-to-image.

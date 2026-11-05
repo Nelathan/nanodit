@@ -62,6 +62,26 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 ---
 
+### B6. The data sets and the encode
+
+Daniel (2026-11-05): "the one you forgot in the original plan was Spawning/PD12M then theres also jasperai/monet both
+are rather world knowledge images, not so much t2i. lunara is too small for pretraining but an option for finetune
+later. if we pull any set, we should create 128 and 256 and gemma class and its encoding sequence. luna has 800GB free
+but its a hdd. we can use it for storage before putting the shuffled set on mars. you can do that for current data too.
+thats a good job for overnight." Candidates in REFERENCES, Data: Fine-T2I, PD12M, MONET; `moonworks/lunara-aesthetic`
+for a fine-tune (D5).
+
+Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
+sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
+free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
+32 GB, 256 px latents 128 GB; the token sequence at 512-d bf16 (the encoder's hidden width) and about 30 tokens per
+caption (mean; p95 64, max 132, on 3,000 captions, without the prompt prefix) about 70 GB unpadded. Open:
+- Which sequence: the encoder's last hidden states (512-d, before pooling and the dense projection to 768), or
+  projected; with or without the prompt prefix's tokens; padded to a fixed length or ragged.
+- The downsampler for this encode (B5): Lanczos for 256 px, and whether 128 px is re-encoded with it or the bicubic
+  latents stay.
+- What fits on mars: the 256 px set and the sequences do not fit beside the current 128 px files.
+
 ## Group C. LR sweep and step budget
 
 ### C1. Batch size and step budget at 256 px
