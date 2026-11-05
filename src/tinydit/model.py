@@ -6,9 +6,9 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-PATCH = 8
+PATCH = 16
 LATENT_CHANNELS = 2
-TOKEN_DIM = LATENT_CHANNELS * PATCH * PATCH  # 128
+TOKEN_DIM = LATENT_CHANNELS * PATCH * PATCH  # 512
 HEAD_DIM = 64
 TEXT_DIM = 768
 TIME_DIM = 256
@@ -20,7 +20,7 @@ MLP_RATIO = 4  # SwiGLU hidden over the stream width
 
 
 def patchify(x: Tensor) -> tuple[Tensor, int, int]:
-    """[B, 2, H, W] latent -> [B, h*w, 128] row-major tokens and the grid (h, w)."""
+    """[B, 2, H, W] latent -> [B, h*w, 512] row-major tokens and the grid (h, w)."""
     tokens = F.pixel_unshuffle(x, PATCH)
     return tokens.flatten(2).transpose(1, 2), tokens.shape[2], tokens.shape[3]
 
@@ -87,7 +87,7 @@ class DiT(nn.Module):
         super().__init__()
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
-        self.patch_embed = nn.Linear(TOKEN_DIM, width)
+        self.patch_embed = nn.Linear(TOKEN_DIM, width - TOKEN_DIM)  # writes the meta channels only
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width)
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
@@ -107,7 +107,6 @@ class DiT(nn.Module):
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
-        self.patch_embed.weight[:TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the first 128 channels of the stream start as the input patch
 
     def forward(self, x: Tensor, t: Tensor, text: Tensor) -> Tensor:
         """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W].
@@ -120,7 +119,7 @@ class DiT(nn.Module):
         mod = self.ada(c).view(-1, N_MOD, self.width)
         rope = rope_angles(h, w, x.device)
 
-        tokens = self.patch_embed(tokens)
+        tokens = torch.cat([tokens, self.patch_embed(tokens)], dim=-1)  # the first 512 channels carry the patch unchanged
         for block in self.blocks:
             tokens = block(tokens, mod, rope)
         return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()

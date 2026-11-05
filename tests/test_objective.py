@@ -1,6 +1,8 @@
 import pytest
 import torch
 
+from conftest import open_gates
+
 from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
 
 
@@ -74,6 +76,7 @@ def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_th
 
 
 def test_flow_loss_passes_gradient_to_the_network(model, text):
+    open_gates(model)  # the patch embed writes only the meta channels, which reach F through the blocks
     loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), text, shift=1.0)
     assert per_sample.shape == t.shape == (3,)
     loss.backward()

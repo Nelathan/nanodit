@@ -7,10 +7,10 @@ from conftest import open_gates
 from tinydit.model import DiT, HEAD_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
-@pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
+@pytest.mark.parametrize("size, tokens", [(128, 16), (256, 64)])
 def test_output_shape_and_token_count(model, text, size, tokens):
     x = torch.randn(3, 2, size // 2, size // 2)
-    assert patchify(x)[0].shape == (3, tokens, 128)
+    assert patchify(x)[0].shape == (3, tokens, TOKEN_DIM)
     assert model(x, torch.rand(3), text).shape == x.shape
 
 
@@ -21,26 +21,25 @@ def test_patchify_roundtrip():
 
 
 def test_patchify_places_each_latent_pixel_in_its_token_and_channel():
-    # Non-square: 4 x 6 tokens. Pixel (channel 1, row 19, col 42) is in patch (2, 5), at offset (3, 2) inside it.
-    x = torch.zeros(1, 2, 32, 48)
-    x[0, 1, 19, 42] = 1
+    # Non-square: 4 x 6 tokens. Pixel (channel 1, row 38, col 84) is in patch (2, 5), at offset (6, 4) inside it.
+    x = torch.zeros(1, 2, 64, 96)
+    x[0, 1, 38, 84] = 1
     tokens, h, w = patchify(x)
     assert (h, w) == (4, 6)
-    expected = torch.zeros(1, 24, 128)
-    expected[0, 2 * 6 + 5, 1 * 64 + 3 * 8 + 2] = 1
+    expected = torch.zeros(1, 24, TOKEN_DIM)
+    expected[0, 2 * 6 + 5, 1 * 256 + 6 * 16 + 4] = 1
     assert torch.equal(tokens, expected)
     assert torch.equal(unpatchify(tokens, h, w), x)
 
 
 def test_output_is_the_input_at_init(model, text):
-    """The stream's first 128 channels start as the input patch and the zero gates add nothing, so F = x_t: v = 0."""
+    """The stream's first 512 channels are the input patch and the zero gates add nothing, so F = x_t: v = 0."""
     x = torch.randn(3, 2, 64, 64)
     assert torch.equal(model(x, torch.rand(3), text), x)
 
 
-def test_patch_embed_starts_as_the_identity_on_the_first_channels(model):
-    assert torch.equal(model.patch_embed.weight[:TOKEN_DIM], torch.eye(TOKEN_DIM))
-    assert (model.patch_embed.bias == 0).all()
+def test_patch_embed_writes_only_the_meta_channels(model):
+    assert model.patch_embed.weight.shape == (model.width - TOKEN_DIM, TOKEN_DIM)
 
 
 def test_output_is_the_first_channels_of_the_stream(model, text):
@@ -48,11 +47,11 @@ def test_output_is_the_first_channels_of_the_stream(model, text):
     seen = {}
     model.blocks[-1].register_forward_hook(lambda module, args, out: seen.update(stream=out))
     out = model(torch.randn(3, 2, 64, 64), torch.rand(3), text)
-    assert torch.equal(out, unpatchify(seen["stream"][..., :TOKEN_DIM].float(), 8, 8))
+    assert torch.equal(out, unpatchify(seen["stream"][..., :TOKEN_DIM].float(), 4, 4))
 
 
 def test_gate_rows_start_at_zero_and_shift_scale_rows_do_not(model):
-    weight = model.ada[1].weight.view(6, 512, 512)
+    weight = model.ada[1].weight.view(6, model.width, model.width)
     table = model.blocks[0].table
     for rows in (weight, table):
         assert (rows[[2, 5]] == 0).all()
@@ -96,7 +95,7 @@ def test_gradient_reaches_every_zero_init_role(model, text):
         optimizer.step()
     block = model.blocks[0]
     assert block.table[[2, 5]].abs().max() > 0
-    assert model.ada[1].weight.view(6, 512, 512)[[2, 5]].abs().max() > 0
+    assert model.ada[1].weight.view(6, model.width, model.width)[[2, 5]].abs().max() > 0
     assert block.qkv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
 
 
