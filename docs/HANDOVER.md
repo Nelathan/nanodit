@@ -16,10 +16,10 @@ Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) holds everyt
 
 ## Next
 
-1. The continuation lr (PLAN C4): short constant-lr arms from `swpin_5ep/checkpoints/step_0037605` at σ 0.7, read with the short-horizon bias in mind. Daniel: continue from this checkpoint rather than restart, unless the model changes.
-2. The rank study over the `swpin_5ep` checkpoints (PLAN G9).
+1. Continue `swpin_5ep` from step 37605 at usui lr 1e-4 flat, fallback 1.25e-4, t σ 0.7 (archive 2026-11-05, continuation lr); the 2000-step arm `128_d1024x16_swpin_cont_lr1e-4` is its first stretch. Length not set.
+2. PLAN G9: whether Usui holds back the weights' rank; the first reads are in FACTS (Spectra of the pinned weights).
 3. Model changes, each a fresh run: the 4× patch embed writing the meta channels (G2), the conv placed differently (G10); with them, when to add 256 px (C1, B5).
-4. Reading: Priming (PLAN I1), EDM2 (G8).
+4. Priming: `topics/priming.md` (PLAN I1); read the paper and repo first. EDM2 (G8).
 
 A run is launched in the background: `nohup .venv/bin/python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &` with `PYTHONPATH` at the worktree's `src`; a run directory that exists is refused. A resumed run takes `init_from` at a checkpoint and `warmup = 0`.
 
