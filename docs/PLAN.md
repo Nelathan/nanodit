@@ -74,19 +74,27 @@ for a fine-tune (D5).
 Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
 sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
 free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
-32 GB, 256 px latents 128 GB; the token sequence at 768-d bf16 and about 30 tokens per caption (mean; p95 64, max 132,
-on 3,000 captions, without the prompt prefix) about 90 GB unpadded.
+32 GB, 256 px latents 128 GB; the token sequence unpadded without the prompt prefix at 1,536 B per token (768-d bf16):
+the first encoded rows average 58 tokens, 90 KB, so about 170 GB per 1.9M rows (the 30-token mean estimated from 3,000
+captions was low); at the 512-d states (1,024 B per token) about 115 GB, the figure for the shuffled set.
 
 Daniel (2026-11-05): "512 for cross attention, gets down projected to 64 anyway so keep it straightforward. drop the
 prefix tokens. unpadded"; "yes lets build a fused dataset of both sources, dedup later too. both in 128 and 256 with
 lanczos"; "you can delete anything stale or no longer needed"; "if you need space you can use vel-ssd too:
-/run/media/djg/vel-ssd"; "hdd read could be enough, just plan the async delay". The encoder's token states are 768-d,
-not 512 (EmbeddingGemma 2 via sentence-transformers: Transformer, mean pooling over all tokens, normalize; no dense
-projection), so "512" rested on a wrong width from Claude. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
+/run/media/djg/vel-ssd"; "hdd read could be enough, just plan the async delay". EmbeddingGemma 2's residual stream is
+512-d (24 layers); its `embedding_projection` (768x512, after the final norm, per token) lifts the token states to 768
+before the mean pooling and normalize. The encode stores the projected 768-d states, which span only 512 dimensions;
+the pooled embedding is 768-d. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
 its trailing space merges into the caption's first token. Daniel (2026-11-05): "of it encodes to 768 thats fine." Running
 since 2026-11-05 23:00: text-to-image-2M shards 0–46, then the Lunara eval set (`scripts/precompute.py`,
 `scripts/precompute_lunara.py`), into `/mnt/luna/tiny-dit/precomputed/fused/`, log
-`/mnt/luna/tiny-dit/precompute_2026-11-05.log`. Open:
+`/mnt/luna/tiny-dit/precompute_2026-11-05.log`.
+
+Daniel (2026-11-06), after the 512-d residual was re-verified: "but redoing just the sequence is cheaper. do it on
+finish. so 2". `scripts/reencode_sequence.py` re-encodes the captions of every fused shard (no images) to the 512-d
+token states before the projection, into `fused/sequence512_<shard>.parquet` (key, sequence); it starts when the encode
+exits, log `/mnt/luna/tiny-dit/reencode_sequence_2026-11-06.log`. The shuffle then joins on `key` and drops the 768-d
+`sequence`. Open:
 - Fine-T2I's images are above 1K and partly not square: center crop or aspect buckets.
 - Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
