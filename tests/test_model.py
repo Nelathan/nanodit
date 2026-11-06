@@ -217,3 +217,19 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(model, prompt):
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
+
+
+def test_a_gdn_conv_block_mixes_every_token_and_still_writes_only_the_meta_channels(prompt):
+    model = build(conv_period=2, gdn=True)
+    open_gates(model)
+    model.blocks[0].table.data[5] = 0  # close the MLP gate: what changes is the mixer alone
+    seen = {}
+    model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
+    x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
+    model(x, t, prompt.rows(0, 1))
+    first = seen["stream_out"] - seen["stream_in"]
+    x[0, :, 0:8, 0:8] += 1
+    model(x, t, prompt.rows(0, 1))
+    second = seen["stream_out"] - seen["stream_in"]
+    assert (first[..., :TOKEN_DIM] == 0).all() and (second[..., :TOKEN_DIM] == 0).all()
+    assert (second - first)[0, -1].abs().max() > 0  # the far corner token feels token (0, 0) through the global state
