@@ -147,6 +147,10 @@ by the score slope after it; optionally a short anneal at the end of the best on
 Read: `128_d1024x16_swpin_slope_lr{4e-4,1e-3}`, 5000 steps each from the end of `swpin_cont_3ep`, against
 `swpin_cont_3ep`'s own last stretch at 1e-4 (FACTS, Continuation lr arms): neither higher lr falls within 5000 steps.
 
+No learning-rate sweep from scratch has been run since the weights were pinned; the sweep above predates the pin and
+measured a different update rule. Daniel's aim (2026-11-06) is a constant lr for the whole run with an anneal only at the end. The spec's
+schedule section still says a linear decay over the whole run, so it differs from this aim until the schedule is decided.
+
 Daniel (2026-11-05) on beta and batch: "higher beta makes it [`grad_moment_cosine`] less negative but diminishing returns
 we cant turn it positive. only lower lr can but that stops proper learning. probably beta is just fine. actually
 increasing batchsize is more common. but we want more progress, well i think more bs doenst give us lower loss per
@@ -156,9 +160,9 @@ walltime."
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
 
-### C4. Does an edge-of-stability prediction for momentum optimizers bear on the lr that C2 sweeps?
+### C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate we choose?
 
-Daniel (2026-11-06): "Add this to plan" with https://jeffreycider.github.io/posts/bubbleforce/ (REFERENCES, Optimizer).
+Added at Daniel's request, 2026-11-06: https://jeffreycider.github.io/posts/bubbleforce/ (listed in REFERENCES).
 The post (Cheng and Zheng, 2026) claims that for non-adaptive optimizers, Muon included, the equilibrium is
 `lr · pathspring = bubbleforce`: pathspring is the top real eigenvalue of the optimizer step's Jacobian (the Hessian for
 SGD), and bubbleforce is set by the momentum kernel alone (2 for SGD, `2(1+β)/(1-β)` for heavy ball). It predicts that
@@ -167,11 +171,17 @@ iterations, on a nanoGPT Muon run; raising β does not follow it (about 10% off)
 the end under lr decay, for which the authors give no theory, and one scheduled-sharpness run ends at 2 to 10 times the
 prediction. Adam-type optimizers are outside it by the authors' account (dead neurons spoil the eigenvalue
 measurements). Code: https://github.com/jeffreycider/bubbleforce.
+This is optimizer work that belongs to the usuitrack repo; Daniel wants it started here, because it may settle cleanly
+why the cosine between the gradient and the momentum (`grad_moment_cosine`) is negative in our runs: more momentum makes
+it less negative with diminishing returns, and only a lower lr turns it up, which stops proper learning (the lr
+question above). A negative cosine means the gradient points against the accumulated step, an oscillation, which is
+what the post's edge-of-stability picture describes for momentum: the largest root of the step's characteristic
+polynomial sits on the unit circle, and where it sits on it sets the oscillation (my reading of the post, untested).
 Open:
 - Whether Usui's pinned, relative-step update counts as non-adaptive in the post's sense; unread, nothing is assumed.
 - Whether pathspring (Arnoldi on Hessian-vector products) is measurable on this model at an affordable cost; the post
   reports 16 to 33 HVPs per point on 8×H100s for a 12-layer, 768-wide model.
-- Whether it would explain what C2 measures: loss falling with lr up to 4e-3, and the common mode (G3) growing with it.
+- Whether it would explain what the 2026-11-02 lr sweep measured: loss kept falling as lr rose to 4e-3, and the common mode (the component every token's residual stream shares) grew with it.
 
 ---
 
