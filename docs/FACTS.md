@@ -573,3 +573,17 @@ Source: Hugging Face `ma-xu/fine-t2i`, file listing with sizes and the first tar
 - The two random-resolution groups have 26 distinct sizes in 1,000 images, 9 aspect ratios: 1:1, 5:4, 4:5, 4:3, 3:4, 3:2, 2:3, 16:9 and 9:16. The json carries `image_aspect_ratio` and `image_resolution`.
 - The curated photos have 589 distinct sizes in 1,024 images, camera sizes up to 6000 x 4000; 3:2 and 2:3 dominate (433 and 298 of 1,024 at the nearest 64-token grid), 4:3, 3:4 and 16:9 follow.
 - Token grids (8 x 8 tokens is a 128 px square) of about 64 tokens with the best aspect, resized to the grid's exact size without a crop: the synthetic sets stretch by at most 5 % (1:1 0, 4:3 and 3:4 3.6 % and 3.7 %, 5:4 and 4:5 2.9 %, 16:9 and 9:16 3.1 % and 3.0 %, 3:2 and 2:3 4.8 % and 5.0 %); the sample of curated photos stretches by a median 4.8 %, at most 7.6 %.
+
+## Cross attention and conv period at d768x12, 3000 steps (F3, G10, 2026-11-06)
+
+Lunara eval caption loss on the same rows in the same order, batch 256, seed 41, usui lr 2e-3, `configs/128_d768x12_*`; images per second is the median of the training log. The baseline and the conv arms train on the old 47-shard set, the cross arm on the 16-shard trial set (798,005 rows); no arm passes over its data once.
+
+| arm | 1000 | 2000 | 3000 | img/s |
+|---|---|---|---|---|
+| `swpin_3k`, pooled embedding only | 1.5532 | 1.5023 | 1.4855 | 682 |
+| `swpin_cross_3k`, cross attention in every block, pooled embedding in the adaLN | 1.5670 | 1.5159 | 1.5024 | 488 |
+| `conv2_3k`, conv in blocks 0, 2, 4, … (1/2) | 1.5449 | 1.5003 | 1.4852 | 822 |
+| `conv3_3k`, conv in 2/3 of the blocks | 1.5451 | 1.5015 | 1.4859 | 874 |
+| `conv4_3k`, conv in 3/4 of the blocks | 1.5474 | 1.5037 | 1.4884 | 901 |
+
+Against the baseline: cross attention +0.014 / +0.014 / +0.017 and 0.72× the speed, no recompile warnings in its log. Conv 1/2 is level (−0.0003 at 3000) at 1.20× the speed, conv 2/3 level (+0.0004) at 1.28×, conv 3/4 +0.003 at 1.32×. Conv has the lower loss at 1000 steps in all three (−0.006 to −0.008) and gives it back by 3000.

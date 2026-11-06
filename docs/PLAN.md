@@ -95,10 +95,10 @@ since that is cheaper than restarting the encode. `scripts/reencode_sequence.py`
 token states before the projection, into `fused/sequence512_<shard>.parquet` (key, sequence); it starts when the encode
 exits, log `/mnt/luna/tiny-dit/reencode_sequence_2026-11-06.log`. The shuffle then joins on `key` and drops the 768-d
 `sequence`. Open:
-- Fine-T2I's images are above 1K and partly not square. Decided: no crop; the images go into aspect buckets (token grids of about
+- Fine-T2I's images are above 1K and partly not square. Decided: no square crop; the images go into aspect buckets (token grids of about
   the same token count, the image resized to the grid's exact size), and the data is fused, deduplicated and shuffled in one
   pass once it is encoded. The sizes are good (FACTS, Fine-T2I image sizes): nine aspect ratios, at most 5 % stretch on the
-  synthetic sets at 128 px, more on the curated photos. Open: the bucket set (a larger token count for less stretch), how the
+  synthetic sets at 128 px, more on the curated photos. Revised (2026-11-06): stretch is worse than a crop, so each image is scaled to cover its bucket with its aspect kept and only the overflow is cropped; the point was not to crop everything to 1:1. Open: the bucket set (a larger token count for less stretch), how the
   stream draws a bucket per batch, and one file per bucket (the latent width differs). The model already takes any grid.
 - Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
@@ -276,6 +276,19 @@ guidance replace both. These details are my choices and not yet confirmed. Settl
 (`128_d768x12_swpin_3k` pooled only, `..._cross_3k` with cross attention), then the choices: every block or some,
 whether the pooled path stays, the token width.
 
+Read 2026-11-06 (FACTS, cross attention and conv period): `..._cross_3k` ends 0.017 behind the pooled-only baseline and 28 % slower. Daniel: this
+decides nothing, since following a sequence is much harder and cannot be learned in 3000 steps; the pooled-only model followed prompts
+oddly after five epochs, which is a young model or the pooled vector conflating concepts. Changes asked for: the cross attention gets no
+adaLN rows, and the cross, self and conv mixers may run in parallel into one output projection (topic doc `topics/block-design.md`, which
+holds the arms and their status).
+
+### F4. Block layout: mixers, parallel blocks, RoPE and head sharing
+
+Daniel's list of 2026-11-06, in `topics/block-design.md` with the ledger: meta-only patch embed at one primal block per token, parallel
+mixers with one meta-only output projection, a sparse layout of conv layers with an occasional cross-and-self layer, a PaLM-style parallel
+MLP, RoPE against partial RoPE against NoPE, MHA against GQA for self-attention (MHA is not cheap in runtime and a 1-megapixel image
+costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the blocks.
+
 ---
 
 ## Group G. Scale and signal propagation
@@ -316,6 +329,10 @@ channels should be an obvious success. The original idea was 128/512 and the str
 estate. Other models: DiT, PixArt, SD3
 and Flux take 16 px per token (f8 VAE, patch 2), SANA 32 px (f32 DC-AE, patch 1); the 512/1024 arm takes 32 px.
 Measured: `128_d1024x16_p16meta_3k` (branch `g2-patch16`, meta-only patch embed), FACTS (Architecture arms).
+
+Daniel, 2026-11-06: that arm packed four primal blocks into each token ("4 blocks per latent"), which was the bad part, and it combined the
+token size with the meta-only write. The token stays one primal block (8 px, 128 dims; patch 12 does not divide the 64×64 latent). The
+untested arm is the meta-only write alone at 8 px (`topics/block-design.md`).
 
 ### G3. The common mode in the residual stream
 
@@ -438,6 +455,10 @@ whereas meta only would put the SwiGLU gate before it; in earlier samples that c
 image was softer, as if it just copied context into the render. It may take more time. Measured (FACTS, Architecture arms): `128_d1024x16_conv_3k` (branch
 `conv-meta`): `swpin_3k` with blocks 0, 2, ..., 14 a depthwise 3×3 conv over all 1024 channels after the adaLN
 modulation, then `out` (1024 → 896) into the meta channels, its sandwich norm and the attention gate; the MLP as before.
+
+At d768x12 (FACTS, cross attention and conv period, 2026-11-06): conv in 1/2, 2/3 and 3/4 of the blocks all end level with the pooled-only baseline
+at 3000 steps (−0.0003, +0.0004, +0.003) and run 1.20×, 1.28× and 1.32× as fast. Daniel prefers 3/4: a faster model allows more layers. The conv is
+the basic form; next is how GDN2 does it, and writing all channels once the model is smart enough. adaLN stays for the conv layers.
 
 ---
 
