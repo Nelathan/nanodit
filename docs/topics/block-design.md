@@ -19,7 +19,7 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
 
 1. **Meta-only patch embed at one primal block per token** (2026-11-06). The patch is concatenated unchanged into the first 128 channels,
    `Linear(128 → width − 128)` fills the rest. The 16 px arm changed this and the token size together; the token size was the bad
-   part ("4 blocks per latent"). Token size stays one block. Variants: the same with a small MLP in the embed. Open → arm `metaembed`.
+   part ("4 blocks per latent"). Token size stays one block. Variants: the same with a small MLP in the embed. Queued → `conv4_metaembed_3k`.
 2. **Cross attention gets no adaLN**: no shift, scale or gate rows from the pooled embedding or the timestep; it keeps
    a static learned gate per channel (my choice, to keep the zero-init identity). Open.
 3. **The 3k cross-attention trial decides nothing**: following a sequence is much harder and cannot be learned in 3000 steps;
@@ -27,7 +27,7 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
    conflating concepts. The pair needs a longer budget, or a prompt-following read rather than caption loss. Recorded.
 4. **Parallel mixers with one output projection writing only the meta channels** (an experiment, not a rule): self-attention,
    cross attention and the conv all read the same modulated input and their outputs are summed through one `out`. Three mixer
-   types: conv, self, cross. Open → arm `parallel_mixers`.
+   types: conv, self, cross. Open, needs cross attention back in the model.
 5. **Sparse layout**: n conv-only layers, then one layer with cross and self attention; if self-attention is cheap, more often.
    Open, after 4.
 6. **Conv at 3/4 of the blocks is the edge and preferred** (a faster model allows more layers). Read: loss level at 3000, 1.32× faster.
@@ -35,12 +35,12 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
 7. **adaLN stays for the conv layers.** Pooled-embedding ada is redundant once tokens arrive through cross attention but cheaper than
    the alternative; the conv blocks already take their modulation rows, so it works as is.
 8. **PaLM-style parallel block**: the MLP in parallel with the attention (one norm, one modulation), read for speed and loss.
-   Open → arm `parallel_mlp`.
+   Queued → `conv4_pmlp_3k`.
 9. **Cross attention: aggressive GQA and NoPE** — the keys come from an already-encoded sequence. NoPE already holds (no RoPE on
    the keys). Open → GQA arm after cross attention is back in.
 10. **Self-attention ablations never run**: RoPE vs partial RoPE vs NoPE; MHA vs GQA. MHA was argued as cheap, but the runtime
     shows attention is not cheap even at 64 tokens (conv in its place gives 1.2–1.3×), and a 1-megapixel image costs far more.
-    Open → arms `rope_partial`, `rope_none`, `gqa`.
+    Queued → `conv4_nope_3k`, `conv4_rope25_3k`, `conv4_gqa3_3k`. Half the frequencies would be a null: the 8 slow ones turn under 0.07 rad across the 8×8 grid, so they are already position-free; a quarter keeps only the fast ones.
 11. **Fine-T2I: crop when it must be, never stretch** (not all to 1:1). Recorded in PLAN B6.
 
 ## Base for the next arms
@@ -57,10 +57,11 @@ attention ablations only mean something where attention is. Cross attention rejo
 | `conv2_3k` | conv in 1/2 of the blocks | read | 1.4852 | level, 1.20× |
 | `conv3_3k` | conv in 2/3 | read | 1.4859 | level, 1.28× |
 | `conv4_3k` | conv in 3/4 | read | 1.4884 | level within 0.003, 1.32×; the new base |
-| `metaembed` | meta-only patch embed, 8 px token (1.) | to build | | |
-| `parallel_mlp` | PaLM block (8.) | to build | | |
-| `rope_partial`, `rope_none` | rope on part / none of the head dims (10.) | to build | | |
-| `gqa` | grouped self-attention heads (10.) | to build | | |
+| `conv4_metaembed_3k` | meta-only patch embed, 8 px token (1.) | queued 2026-11-06 | | |
+| `conv4_pmlp_3k` | PaLM block (8.) | queued | | |
+| `conv4_nope_3k` | no rotary position (10.) | queued | | |
+| `conv4_rope25_3k` | a quarter of the rotary frequencies, the 4 fastest per axis (10.) | queued after the block queue | | |
+| `conv4_gqa3_3k` | 3 key/value heads against 12 (10.) | queued | | |
 
 ## Lessons
 
@@ -68,3 +69,6 @@ attention ablations only mean something where attention is. Cross attention rejo
   the attention baseline catches up by 3000. Early lead plus late equality reads as the conv learning local mixing faster, with nothing
   more to learn at this length; a longer run is what shows whether attention's global mixing pays later.
 - Caption loss at 3000 steps cannot judge token conditioning. It measures the class-level signal the pooled embedding already carries.
+
+Queue: `/mnt/mars/ai/tiny-dit/runs/queue_blocks_2026-11-06.sh` runs metaembed, pmlp, nope, gqa3 in that order (`queue_rope25_2026-11-06.sh` adds rope25 after it), about 15 minutes each; code on branch `conv-meta`. Arms compare against `conv4_3k` (1.4884 at 3000, 1.5474 at 1000, 1.5037 at 2000).
+- Rotary frequencies at 8×8 tokens: only the fastest 4 of 16 per axis turn more than 0.5 rad across the grid; partial RoPE contrasts must cut below half to differ from full RoPE. At 1 megapixel the grid is far larger and the slow frequencies matter, so a 64-token RoPE read does not carry over.
