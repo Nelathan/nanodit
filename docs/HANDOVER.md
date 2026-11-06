@@ -1,33 +1,45 @@
 # Handover
 
-Written 2026-10-31, night; rewritten 2026-11-05. Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `AGENTS.md` how to run things.
+Morning report, 2026-11-06 (night run). Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` how to run things.
 
 ## Where it stands
 
-The model of the current runs (SPEC §3): a d1024 × 16 single-stream DiT with the slice readout (the output is the first 128 stream channels, the patch embed the identity on them), a sandwich norm on every branch output, SwiGLU 4×, no conv. Usui trains every matrix but the adaLN table, each pinned to its init Frobenius norm with a constant relative step; both lrs warm up 500 steps and decay linearly to a tenth. Training t is logit-normal σ 0.7. The checkpoint score is the caption loss and R² on the Lunara eval rows at 10 fixed t. `PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests -q`: 64 pass.
+**The architecture is merged on the trunk (`lr-decay`, commit 62b5727) and SPEC §3/§5 state it. Accept it or change it; it is not moving by itself.** d768 × 12 for trials, d768 × 16 with SwiGLU 4× planned for the long run. Every 4th block is attention (GQA with a quarter of the heads as key/value heads, RoPE on the first quarter of the frequencies); the other three are depthwise-3×3 conv blocks writing the meta channels only, with adaLN from the pooled caption kept. The patch embed concatenates the raw 128-d patch with `Linear(128 → width−128)`. Cross attention (attention blocks only, no ada, zero gate) and `pooled_ada = false` are experiment switches, off / on by default. PaLM-parallel MLP is dropped. Reads behind it: FACTS "Architecture at d768x12", `docs/topics/block-design.md` (ledger of every suggestion), `docs/log/2026-11-06-*`. 77 tests pass (`PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests -q`, about 90 s).
 
-The best model is `runs/128_d1024x16_swpin_5ep` (5 epochs of the 47 deduped shards at 128 px, batch 256, 37,605 steps): score 1.3856, no spike, class-level prompt following in the samples, still improving at the end (FACTS). It trained at σ 1. The unpinned `128_d1024x16_5ep` before it spiked from step 4850 (FACTS, Spikes); G6 closed on that (archive 2026-11-05).
+SPEC still says width 1024 in the §3 table; the trial and planned long run are d768. Not changed, since it is a size decision.
 
-Data: `/mnt/mars/ai/tiny-dit/precomputed/128_shuffled_0-46.parquet` (1,925,416 rows, each image once), bicubic 128 px latents; the null embedding and the Lunara eval set beside it.
+Still open (yours): which attention types sit in which layers under the 3/4 conv pattern, and whether self and cross attention are sequential or parallel into one meta-only out projection. I proposed a pattern-string layer layout (`conv conv conv self+cross`, `|` for parallel); unanswered. Cross attention versus pooled ada is to be tested with and without ada at a length where tokens can matter; the 3k arm decides nothing.
+
+## Running on the GPU (one job at a time)
+
+1. `queue_6k_2026-11-06.sh` (branch `conv-meta`, old pooled-only model): 6000-step references `conv4_gqa3_rope25_meta`, `conv4`, `attn`, each scored at 256 px into `score_256.jsonl` and `queue_6k_2026-11-06.log`. The first is done (256 px caption loss 1.3804).
+2. `queue_trunk_2026-11-06.sh` waits for (1), then runs on the trunk: `arch_6k` (the reference; scored at 256 px), the d768×16 lr sweep 2e-3 / 1e-3 / 5e-4 (3000 steps each, constant lr, fallback 1.25×), `arch_cross_6k`, `arch_crossonly_6k`, then priming stage 1 (`arch_prime_s80_3k`: shift 4, t sigma 0.0001) and stage 2 (`arch_prime_s80_cont_3k`, from its checkpoint, normal t), the latter scored at 256 px. Log: `runs/queue_trunk_2026-11-06.log`. It ends with the line `queue done`.
+
+Priming needs no new code: the first stage is the existing `shift` / `t_sigma` knobs, the second `init_from` with `warmup = 0`. Its verdict is the continuation against `arch_6k` at equal total steps.
+
+Runs live under `/mnt/mars/ai/tiny-dit/runs/`; each finished run gets a dated note in `docs/log/` and a one-line insight in FACTS.
+
+## Not done yet from the overnight brief
+
+- **GDN2-style conv mixer** (does it beat plain conv): not started. Delta-rule erase/write has no non-causal 2D analog; the plan is a per-branch depthwise 3×3 + SiLU + L2-normalised q/k front-end with a global non-causal linear attention and an output gate, writing meta channels, on its own branch compared with plain conv at 6k.
+- **256 px training readiness**: the trial 256 shuffle was killed by the memory reaper (3.3 GB of latents per 256 px shard). `shuffle.py` has to deal each shard in row slices before it is run again; not restarted. The model scores 128 px checkpoints at 256 px already (`score_checkpoint.py`).
+- **Second dataset (Fine-T2I) and cross-dedup**: not started. Plan: per-tar download → resize to cover and crop overflow into the 7 aspect buckets → small staged images, then a GPU stage for latents and caption embeddings; per-bucket files and a stream drawing one bucket per batch; dedup against dataset 1 by exact latent bytes and a pooled-latent signature. The raw tars (2.3 TB) do not fit on `/mnt/luna`, hence per tar. Download is about 16 h.
+- **One-epoch readiness for d768×16, both datasets**: waits on the lr sweep (constant 1e-3 is the working guess) and on the two items above.
 
 ## Branches
 
-Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) holds everything: it sits on `t-dist` (`../tiny-dit-tdist`), on `sandwich-norm` (`../tiny-dit`), on `slice-base`; `master` is behind all of them. The `.venv` in `../tiny-dit-decay` is a symlink to `../tiny-dit-tdist/.venv`, excluded in `info/exclude`. The other worktrees are throwaway arms. usuitrack commits `9abfa3c` and `bb21798` (opt-in `pin_norm`, the pinned norm kept as a float) wait for Daniel's review, as do `2f377b0` and `721191d` from before.
+Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) is the trunk, with the conv-meta merge committed. `conv-meta` (`../tiny-dit-conv`) holds the old pooled-only model with the experiment knobs and the 6k configs; the queue above still runs from it, so leave it alone until the queue ends, then it can be deleted. `g2-patch16` (`../tiny-dit-g2`) is the closed 16 px patch arm. The `.venv` of `../tiny-dit-decay` is the one used by all worktrees (`PYTHONPATH=<worktree>/src` selects the code).
 
-## Next
-
-1. Continue `swpin_5ep` from step 37605 at usui lr 1e-4 flat, fallback 1.25e-4, t σ 0.7 (archive 2026-11-05, continuation lr); the 2000-step arm `128_d1024x16_swpin_cont_lr1e-4` is its first stretch; `128_d1024x16_swpin_cont_3ep` runs 3 epochs (22,563 steps, seed 43) from its step 39605, launched 2026-11-05.
-2. PLAN G9: whether Usui holds back the weights' rank; the first reads are in FACTS (Spectra of the pinned weights).
-3. Model changes, each a fresh run: the 4× patch embed writing the meta channels (G2), the conv placed differently (G10); with them, when to add 256 px (C1, B5).
-4. Priming: `topics/priming.md` (PLAN I1); read the paper and repo first. EDM2 (G8).
-
-A run is launched in the background: `nohup .venv/bin/python scripts/train.py configs/<name>.toml > /mnt/mars/ai/tiny-dit/runs/<name>.log 2>&1 &` with `PYTHONPATH` at the worktree's `src`; a run directory that exists is refused. A resumed run takes `init_from` at a checkpoint and `warmup = 0`.
+The older configs (`128_d1024x16_*`, `128_d768x12_ep*`, sweeps) are unchanged but now build the new architecture, so they no longer reproduce their old runs; their checkpoints do not load.
 
 ## Traps
 
 - `pgrep -f <name>` matches the shell wrapper of any agent command that contains the name, so a waiter on a script name can wait on itself. Find and kill runs by PID.
-- Checkpoints load only into the model they were trained with: the unpinned `5ep` ones and everything before the sandwich norm do not load into the current `DiT`.
-- Configs state every field that differs from the current defaults (`pin_weights = false`, `t_sigma = 1.0` in older ones), so a config still describes its run.
-- wandb groups series on the first slash only; keep keys one level deep (`train/…`, `eval/…`, one group per bucketed topic).
-- The 256 px pass re-downloads each shard: the 128 px pass deleted the tars (7.5 to 11 GB each, FACTS). Encoding both resolutions in one pass would avoid it.
+- Checkpoints load only into the model they were trained with: everything before the 2026-11-06 merge does not load into the current `DiT`.
+- A run is launched in the background (`run_in_background`, not `&` in a foreground command, which is killed). A run directory that exists is refused; one whose `wandb.init` failed has to be deleted. A resumed run takes `init_from` at a checkpoint and `warmup = 0`.
+- zsh does not word-split unquoted variables; long argument lists go through a bash script file.
+- pyarrow int32 offsets cap a chunk at 2 GB: take slices.
+- wandb groups series on the first slash only; keep keys one level deep. The entity and key depth are in `AGENTS.md`.
+- With the concat patch embed the patch embed gets zero gradient at step 0 (no gate reads the meta channels yet); only `ada.1.weight` moves on the first step. That is expected, not a bug.
 - GPU sharing, the data location and the editable usuitrack are in `AGENTS.md`, "Running things". The GPU sits next to Daniel's family: long runs mean hours of audible airflow.
+- Cleanup when idle: shock checkpoints (about 31 GB on mars), `/mnt/luna/tiny-dit/probe_fine`.
