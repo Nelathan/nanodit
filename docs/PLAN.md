@@ -156,6 +156,23 @@ walltime."
 
 The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
 
+### C4. Does an edge-of-stability prediction for momentum optimizers bear on the lr that C2 sweeps?
+
+Daniel (2026-11-06): "Add this to plan" with https://jeffreycider.github.io/posts/bubbleforce/ (REFERENCES, Optimizer).
+The post (Cheng and Zheng, 2026) claims that for non-adaptive optimizers, Muon included, the equilibrium is
+`lr · pathspring = bubbleforce`: pathspring is the top real eigenvalue of the optimizer step's Jacobian (the Hessian for
+SGD), and bubbleforce is set by the momentum kernel alone (2 for SGD, `2(1+β)/(1-β)` for heavy ball). It predicts that
+halving or doubling lr and lowering β move the sharpness to the predicted equilibrium, some within a few
+iterations, on a nanoGPT Muon run; raising β does not follow it (about 10% off); the baseline run falls behind it near
+the end under lr decay, for which the authors give no theory, and one scheduled-sharpness run ends at 2 to 10 times the
+prediction. Adam-type optimizers are outside it by the authors' account (dead neurons spoil the eigenvalue
+measurements). Code: https://github.com/jeffreycider/bubbleforce.
+Open:
+- Whether Usui's pinned, relative-step update counts as non-adaptive in the post's sense; unread, nothing is assumed.
+- Whether pathspring (Arnoldi on Hessian-vector products) is measurable on this model at an affordable cost; the post
+  reports 16 to 33 HVPs per point on 8×H100s for a 12-layer, 768-wide model.
+- Whether it would explain what C2 measures: loss falling with lr up to 4e-3, and the common mode (G3) growing with it.
+
 ---
 
 ## Group D. Sampling and eval

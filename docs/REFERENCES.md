@@ -31,6 +31,15 @@ What each source establishes for this project.
   8K context, task prefixes, bf16 or fp32 only (fp16 yields NaN). Attention direction not stated on the card.
 - **UsuiTrack** — Daniel's optimizer (SubTrack++ + FlashOptim), local.
 
+## Optimizer
+
+- **bubbleforce: Predicting the Edge-of-Stability for Muon**, Cheng and Zheng, 2026 (the page gives no date).
+  https://jeffreycider.github.io/posts/bubbleforce/ · code https://github.com/jeffreycider/bubbleforce.
+  Extends the edge of stability to non-adaptive optimizers with momentum (Muon): `lr · pathspring = bubbleforce`,
+  bubbleforce from the roots of the momentum kernel's characteristic polynomial. Tested on a 12-layer, 768-wide nanoGPT
+  with Muon; the equilibrium claim for real training is a conjecture, the proofs assume a frozen Jacobian and a slowly
+  moving Hessian; Adam outside its scope. PLAN C4.
+
 ## Architecture references
 
 - **MOSS-Image Technical Report**, arXiv 2610.23374. 5B single-stream DiT, Qwen3.5-9B text encoder, FLUX.2 VAE,
