@@ -41,7 +41,11 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
 10. **Self-attention ablations never run**: RoPE vs partial RoPE vs NoPE; MHA vs GQA. MHA was argued as cheap, but the runtime
     shows attention is not cheap even at 64 tokens (conv in its place gives 1.2–1.3×), and a 1-megapixel image costs far more.
     Queued → `conv4_nope_3k`, `conv4_rope25_3k`, `conv4_gqa3_3k`. Half the frequencies would be a null: the 8 slow ones turn under 0.07 rad across the 8×8 grid, so they are already position-free; a quarter keeps only the fast ones.
-11. **Fine-T2I: crop when it must be, never stretch** (not all to 1:1). Recorded in PLAN B6.
+11. **256 px is available, so test position codes and head sharing where the grid is bigger, and interpolate** (2026-11-06). Two reads:
+    the 128 px checkpoints scored on a 256 px Lunara set (a 16×16 grid the model never saw: how RoPE, partial RoPE and NoPE carry across
+    resolution), then arms trained at 256 px (base, NoPE, quarter RoPE, GQA) where attention costs more and position has room to matter.
+    Queued behind the 128 px arms; `scripts/score_checkpoint.py` (branch `conv-meta`) does the first.
+12. **Fine-T2I: crop when it must be, never stretch** (not all to 1:1). Recorded in PLAN B6.
 
 ## Base for the next arms
 
@@ -57,11 +61,11 @@ attention ablations only mean something where attention is. Cross attention rejo
 | `conv2_3k` | conv in 1/2 of the blocks | read | 1.4852 | level, 1.20× |
 | `conv3_3k` | conv in 2/3 | read | 1.4859 | level, 1.28× |
 | `conv4_3k` | conv in 3/4 | read | 1.4884 | level within 0.003, 1.32×; the new base |
-| `conv4_metaembed_3k` | meta-only patch embed, 8 px token (1.) | queued 2026-11-06 | | |
-| `conv4_pmlp_3k` | PaLM block (8.) | queued | | |
-| `conv4_nope_3k` | no rotary position (10.) | queued | | |
-| `conv4_rope25_3k` | a quarter of the rotary frequencies, the 4 fastest per axis (10.) | queued after the block queue | | |
-| `conv4_gqa3_3k` | 3 key/value heads against 12 (10.) | queued | | |
+| `conv4_metaembed_3k` | meta-only patch embed, 8 px token (1.) | read | 1.4869 | level (−0.0015), same speed; the 16 px loss was the 4-blocks-per-token packing, not the meta-only write |
+| `conv4_pmlp_3k` | PaLM block (8.) | read | 1.4908 | +0.0024 and no speed gain: dropped |
+| `conv4_nope_3k` | no rotary position (10.) | read | 1.4895 | +0.0011 at 128 px, +0.0034 on the unseen 256 px grid |
+| `conv4_rope25_3k` | a quarter of the rotary frequencies, the 4 fastest per axis (10.) | read | 1.4883 | level with full RoPE at both resolutions |
+| `conv4_gqa3_3k` | 3 key/value heads against 12 (10.) | read | 1.4888 | level, 1.2 % faster; the saving grows with the grid |
 
 ## Lessons
 
@@ -72,3 +76,7 @@ attention ablations only mean something where attention is. Cross attention rejo
 
 Queue: `/mnt/mars/ai/tiny-dit/runs/queue_blocks_2026-11-06.sh` runs metaembed, pmlp, nope, gqa3 in that order (`queue_rope25_2026-11-06.sh` adds rope25 after it), about 15 minutes each; code on branch `conv-meta`. Arms compare against `conv4_3k` (1.4884 at 3000, 1.5474 at 1000, 1.5037 at 2000).
 - Rotary frequencies at 8×8 tokens: only the fastest 4 of 16 per axis turn more than 0.5 rad across the grid; partial RoPE contrasts must cut below half to differ from full RoPE. At 1 megapixel the grid is far larger and the slow frequencies matter, so a 64-token RoPE read does not carry over.
+- Conv carries across resolution far better than attention: trained at 128 px, the 3/4-conv model scores 0.031 better than the all-attention one on the 256 px grid, though it is 0.003 worse at 128 px. Local mixing does not depend on how many tokens there are; global attention at 256 tokens meets position offsets it never saw.
+- At 64 tokens none of NoPE, quarter RoPE or GQA costs anything, and the 256 px read keeps that order: full or partial RoPE best, NoPE worst by 0.003. Position helps a little when the grid grows, and a quarter of the frequencies carries all of it.
+- The parallel MLP buys no speed (no fusion of the two branches under `torch.compile` at this size) and loses a little: dropped.
+- Meta-only embed at one primal block per token is free and slightly ahead at both resolutions; it keeps the first 128 channels as the raw latent. Keep.
