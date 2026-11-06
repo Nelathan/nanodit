@@ -65,7 +65,7 @@ class Config:
     parallel_mlp: bool = False  # PaLM block: the MLP reads the mixer's modulated input and both add to the stream together
     rope_fraction: float = 1.0  # the share of each axis' rotary frequencies that rotate; 0 is NoPE
     kv_heads: int | None = None  # key/value heads of the self-attention; None is one per query head
-    conv_period: int = 2  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
+    conv_period: int = 1  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
 
 
