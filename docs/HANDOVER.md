@@ -21,14 +21,14 @@ Runs live under `/mnt/mars/ai/tiny-dit/runs/`; each finished run gets a dated no
 
 ## Not done yet from the overnight brief
 
-- **GDN2-style conv mixer** (does it beat plain conv): not started. Delta-rule erase/write has no non-causal 2D analog; the plan is a per-branch depthwise 3×3 + SiLU + L2-normalised q/k front-end with a global non-causal linear attention and an output gate, writing meta channels, on its own branch compared with plain conv at 6k.
-- **256 px training readiness**: the trial 256 shuffle was killed by the memory reaper (3.3 GB of latents per 256 px shard). `shuffle.py` has to deal each shard in row slices before it is run again; not restarted. The model scores 128 px checkpoints at 256 px already (`score_checkpoint.py`).
+- **GDN2-style conv mixer**: built on branch `gdn-conv` (`../tiny-dit-gdn`, 78 tests pass): in the conv blocks q, k, v each go through a depthwise 3×3 and SiLU, q and k are L2-normalised, a global non-causal linear attention (`state = Σ k vᵀ`) with an output gate writes the meta channels. Delta-rule erase/write has no non-causal 2D analog, so this is GDN2's front-end and gating, not its recurrence. `queue_gdn_2026-11-06.sh` runs `arch_gdn_6k` after the trunk queue; the read is it against `arch_6k` (loss, 256 px score, step time).
+- **256 px training readiness**: `shuffle.py` now reads each shard in 4096-row pieces (the 256 px shuffle was killed by the memory reaper on 3.3 GB shards); tests cover it. The 256 px trial shuffle is not restarted (an earlier instruction said not to without being asked); command was `scripts/shuffle.py OUT 256 SHARD…` on shards 0-15. Memory use of a 256 px training step is untested.
 - **Second dataset (Fine-T2I) and cross-dedup**: not started. Plan: per-tar download → resize to cover and crop overflow into the 7 aspect buckets → small staged images, then a GPU stage for latents and caption embeddings; per-bucket files and a stream drawing one bucket per batch; dedup against dataset 1 by exact latent bytes and a pooled-latent signature. The raw tars (2.3 TB) do not fit on `/mnt/luna`, hence per tar. Download is about 16 h.
 - **One-epoch readiness for d768×16, both datasets**: waits on the lr sweep (constant 1e-3 is the working guess) and on the two items above.
 
 ## Branches
 
-Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) is the trunk, with the conv-meta merge committed. `conv-meta` (`../tiny-dit-conv`) holds the old pooled-only model with the experiment knobs and the 6k configs; the queue above still runs from it, so leave it alone until the queue ends, then it can be deleted. `g2-patch16` (`../tiny-dit-g2`) is the closed 16 px patch arm. The `.venv` of `../tiny-dit-decay` is the one used by all worktrees (`PYTHONPATH=<worktree>/src` selects the code).
+Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) is the trunk, with the conv-meta merge committed. `conv-meta` (`../tiny-dit-conv`) holds the old pooled-only model with the experiment knobs and the 6k configs; the queue above still runs from it, so leave it alone until the queue ends, then it can be deleted. `gdn-conv` (`../tiny-dit-gdn`) is the GDN-style mixer arm. `g2-patch16` (`../tiny-dit-g2`) is the closed 16 px patch arm. The `.venv` of `../tiny-dit-decay` is the one used by all worktrees (`PYTHONPATH=<worktree>/src` selects the code).
 
 The older configs (`128_d1024x16_*`, `128_d768x12_ep*`, sweeps) are unchanged but now build the new architecture, so they no longer reproduce their old runs; their checkpoints do not load.
 
