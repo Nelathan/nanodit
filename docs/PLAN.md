@@ -95,7 +95,11 @@ since that is cheaper than restarting the encode. `scripts/reencode_sequence.py`
 token states before the projection, into `fused/sequence512_<shard>.parquet` (key, sequence); it starts when the encode
 exits, log `/mnt/luna/tiny-dit/reencode_sequence_2026-11-06.log`. The shuffle then joins on `key` and drops the 768-d
 `sequence`. Open:
-- Fine-T2I's images are above 1K and partly not square: center crop or aspect buckets.
+- Fine-T2I's images are above 1K and partly not square. Decided: no crop; the images go into aspect buckets (token grids of about
+  the same token count, the image resized to the grid's exact size), and the data is fused, deduplicated and shuffled in one
+  pass once it is encoded. The sizes are good (FACTS, Fine-T2I image sizes): nine aspect ratios, at most 5 % stretch on the
+  synthetic sets at 128 px, more on the curated photos. Open: the bucket set (a larger token count for less stretch), how the
+  stream draws a bucket per batch, and one file per bucket (the latent width differs). The model already takes any grid.
 - Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
 ## Group C. LR sweep and step budget
@@ -188,6 +192,24 @@ map set it). It is consistent with the beta dependence of the real runs in one p
 parameter (FACTS, Momentum cosine on a noisy quadratic). The lr dependence cannot be read from the runs so far, since
 the lr pair also differs in beta, warmup and rank fraction. The toy leaves out the normalisation, the polar map and the
 turning frame, which change the Jacobian the post's pathspring is defined on.
+Daniel's reading (2026-11-06): a higher lr usually does make the cosine more negative, and a tiny lr makes it positive;
+the sign is a spectrum effect, set by how many channels oscillate against how many are stable. A scratch toy with many
+directions of power-law sharpness and a descent signal goes the same way (positive at a tiny lr, negative as the lr
+rises); it is not saved. In the LLM lane a good fit read about -0.01; the DiT adds the noise of denoising and of the
+sampled t, and Daniel believes that is the difference to the -0.4 here.
+Cautious stepping (zero the entries where the moment and the projected gradient differ in sign) was tried in
+usuitrack and did not work out nicely. A linear filter on the moments instead, writing the mean of the last and the
+current moment, was never tried. In the toy it fails: the half step of extra lag moves the edge from `2(1+β)/(1-β)`
+(398 at β 0.99) down to `lr · sharpness = 2`, for every β, so it is not worth an arm. A kernel with no response at
+period 2 needs weight on the newest gradient to stay stable, which MaxEntSlop fixes by construction.
+The lr-jump test (2026-11-06, FACTS) bears on this: from a late checkpoint, a higher constant lr made the cosine more
+negative (about -0.04, -0.08 and -0.11 at 1e-4, 4e-4 and 1e-3), and the network answered by flattening: the top Hessian
+eigenvalue fell 35 % at 1e-3 within 150 steps and stayed put at the control lr, for about 2 % more loss and no spikes.
+Reading: the cosine follows lr times sharpness, not the lr, and the pinned lr is not a stability ceiling, since the
+curvature adapts to it. That favours a constant lr with a late anneal: the extra loss at a high lr looks like a higher
+noise floor, which the anneal removes; whether it recovers the 2 % is untested. The cosine at 10x the lr is still far from
+the -0.4 of the earlier runs, so the lr alone does not explain those. Next: lower the lr again after a high-lr stretch and
+see whether the curvature rebounds (then the anneal is partly progressive sharpening and should stay short).
 Open:
 - Whether the normalised gradient, the polar map and the turning frame keep the update inside the post's non-adaptive class; the momentum kernel itself does.
 - Whether pathspring (Arnoldi on Hessian-vector products) is measurable on this model at an affordable cost; the post
@@ -241,6 +263,18 @@ SPEC says "small random". Std 0.02 on the shared 512→4096 projection makes the
 blocks' and the final layer's shift/scale far from zero at init (FACTS, init), so
 `1 + scale` starts far from 1. A fan-in-scaled or 10× smaller init would start near
 identity.
+
+### F3. Cross attention to the token states
+
+Daniel asked for it (2026-11-06). Every block gets a cross-attention sublayer between the self-attention and the MLP: queries
+from the stream, keys and values from the encoder's 512-d token states (the pre-projection states of the sequence
+columns, rms-normalised once), a per-head q/k norm, no RoPE, a post-norm like the other branches, padded tokens masked. Its shift,
+scale and gate rows extend the adaLN table (nine rows now; the gate starts at zero like the others). The pooled embedding
+keeps conditioning the adaLN. The null prompt is the pooled null embedding with the two tokens of the empty caption as
+learned parameters (`null_tokens` in `null_embedding.safetensors`), padded to the batch's length. Prompt dropout and
+guidance replace both. These details are my choices and not yet confirmed. Settle by a paired trial at d768x12
+(`128_d768x12_swpin_3k` pooled only, `..._cross_3k` with cross attention), then the choices: every block or some,
+whether the pooled path stays, the token width.
 
 ---
 
@@ -347,12 +381,12 @@ The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3
 ### G8. What the pin leaves open
 
 Every Usui matrix is pinned to its init Frobenius norm and takes a constant relative step (SPEC §6, archive 2026-11-05).
+The sandwich norm was necessary against the loss spikes (2026-11-06); no arm checks it again.
 Open:
 - Whether a learned scalar gain per pinned matrix (direction pinned, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
 - A pin per output row instead of per matrix.
-- Which of the sandwich norm and the pin removed the spikes; The reading is the sandwich norm.
 - Reading: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?

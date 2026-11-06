@@ -548,3 +548,28 @@ Reference spectra, the same measures on cached pretrained models (scratch `ref_s
 The cosine is nearly a function of the fraction alone. The real `grad_moment_cosine` at step 1000 is -0.41 at beta 0.9 (`128_fixed_2e-3_9k`) and -0.10 at beta 0.99 (`128_fixed_2e-3_b099_1k`), same lr, other settings equal. The script fits the fraction at which beta 0.9 reads -0.41 (0.203) and scales it to beta 0.99, where bubbleforce is 10.5 times larger (0.0194): it reads -0.124. That is consistent with the observed -0.10 in one pair of readings with one fitted parameter. It assumes the same sharpness in both runs, which an edge-of-stability equilibrium would not give, the beta 0.99 reading is still drifting (+0.09, -0.01, -0.10 at steps 300, 500, 1000), and a real matrix has many directions of different sharpness. Any monotone curve would order the two runs the same way.
 
 What the toy cannot say: the lr direction. The two lr readings (`128_fixed_2e-2_9k`, -0.33 to -0.36, against `128_fixed_2e-3_9k`, -0.39 to -0.45, steps 501 to 4300) also differ in beta (0.95 against 0.9), warmup and rank fraction, so no lr effect can be read from them. The early positive values of the smoke runs (+0.44 to +0.51 over steps 3 to 11) are not in the toy, which has no gradient signal.
+
+## Learning-rate jump from `swpin_cont_3ep` (C4, 2026-11-06)
+
+Source: `runs/128_d1024x16_shock_lr{1e-4,4e-4,1e-3}/` (`sharpness.jsonl`, `train.jsonl`; `scripts/probe_sharpness.py`; configs `configs/128_d1024x16_shock_*.toml`). Each arm continues `128_d1024x16_swpin_cont_3ep` from step 62168 for 300 steps at a constant Usui relative step (fallback 1.25x it), with the optimizer state of the checkpoint. The top Hessian eigenvalue is read at 17 checkpoints on one fixed batch of the first 128 Lunara rows (one fixed noise and t each), fp32, central-difference Hessian-vector products, 12 power iterations; 40 iterations agree to four digits at the start and the three end checkpoints.
+
+| usui lr after the jump | top eigenvalue at 62168 / at 62468 | change | mean `grad_moment_cosine`, steps 12 to 300 | mean loss, 7 logs to step 150 | mean loss, last 4 logs |
+|---|---|---|---|---|---|
+| 1e-4 (control) | 28.0 / 28.9 | +3 % | -0.04 | 1.132 | 1.129 |
+| 4e-4 | 28.0 / 26.6 | -5 % | -0.08 | 1.136 | 1.137 |
+| 1e-3 | 28.0 / 18.3 | -35 % | -0.11 (-0.15 at step 12) | 1.148 | 1.155 |
+
+- The control stays between 27.9 and 29.1 at every checkpoint. The 4e-4 arm falls to 25.4 by step 62340 and sits at 26 to 27 after. The 1e-3 arm falls to 21.8 by step 62280, to 19 by 62340 and reads 18.3 to 19.7 from 62400, still drifting down slowly at the end.
+- The cosine is more negative at the higher lr, and in the 1e-3 arm it eases from -0.15 to about -0.10 over the first 100 steps as the eigenvalue falls.
+- No loss spike in any arm. The losses are the means of 16 logged micro-batch averages, so the 0.01 to 0.02 gaps are at the noise of that estimate; the sharpness change at 1e-3 is not.
+- One seed and one fixed batch per arm; the batch is the eval rows (conditional loss, no prompt dropout).
+- Not read from this: how the cosine depends on beta (the arms share beta 0.99), and whether the lower sharpness is kept when the lr is lowered again.
+
+## Fine-T2I image sizes (B6, 2026-11-06)
+
+Source: Hugging Face `ma-xu/fine-t2i`, file listing with sizes and the first tar of each of the five groups, read on `/mnt/luna/tiny-dit/probe_fine/` (about 1 GB; image headers only, sizes counted, nothing encoded). The groups: `curated` 192 tars, 279 GB, 1,024 images per tar; `synthetic_{enhanced,original}_prompt_{random,square}_resolution` 1,621 / 1,688 / 1,544 / 1,311 tars, 510 / 513 / 554 / 467 GB, 1,000 images per tar. In all, 6,363 files and 2.3 TB, about 6.16M synthetic pairs and 168k curated photos.
+
+- The two square groups have six sizes: 512, 768, 1024, 1536, 2048 and 2560 px, all 1:1.
+- The two random-resolution groups have 26 distinct sizes in 1,000 images, 9 aspect ratios: 1:1, 5:4, 4:5, 4:3, 3:4, 3:2, 2:3, 16:9 and 9:16. The json carries `image_aspect_ratio` and `image_resolution`.
+- The curated photos have 589 distinct sizes in 1,024 images, camera sizes up to 6000 x 4000; 3:2 and 2:3 dominate (433 and 298 of 1,024 at the nearest 64-token grid), 4:3, 3:4 and 16:9 follow.
+- Token grids (8 x 8 tokens is a 128 px square) of about 64 tokens with the best aspect, resized to the grid's exact size without a crop: the synthetic sets stretch by at most 5 % (1:1 0, 4:3 and 3:4 3.6 % and 3.7 %, 5:4 and 4:5 2.9 %, 16:9 and 9:16 3.1 % and 3.0 %, 3:2 and 2:3 4.8 % and 5.0 %); the sample of curated photos stretches by a median 4.8 %, at most 7.6 %.
