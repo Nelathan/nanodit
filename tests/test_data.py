@@ -49,6 +49,7 @@ def shuffle_module(buckets):
     spec.loader.exec_module(module)
     module.BUCKETS = buckets  # 20 rows would leave most of 64 buckets empty, which 50k-row shards never do
     module.ROW_GROUP = 3  # several row groups per bucket, so the stream sees several per block
+    module.TAKE_ROWS = 5  # a shard is read in several pieces, as a 256 px one must be
     return module
 
 
