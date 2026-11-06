@@ -35,21 +35,23 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Plain DiT: no text tokens in the sequence (pooled conditioning only), bidirectional self-attention over image tokens.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix by a depthwise 3×3 convolution over the token grid (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; blocks with cross attention (an experiment switch, off by default) also read the 512-d token states.
 
 | Component | Decision |
 |---|---|
 | Width | 1024 |
 | Depth | 16 layers |
-| Attention | MHA, 16 heads × head dim 64. No GQA (no KV cache, nothing to save) |
+| Mixer | Every 4th block (the 4th, 8th, …) is self-attention, the others a conv block: depthwise 3×3 over all channels after modulation, an output Linear of width → width − 128 that writes the meta channels only, a branch norm and the gate |
+| Attention | GQA: 16 query heads × head dim 64, a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
-| Position | 2D axial RoPE on all of each head's dims (32 for rows, 32 for columns) |
+| Position | 2D axial RoPE on the first quarter of the frequencies per axis, the rest position-free; the convs carry local position |
+| Cross attention (switch) | In attention blocks only, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
 | MLP | SwiGLU, hidden 4 × width |
-| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's shift/scale/gate, plus a small learned table per block |
+| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's six shift/scale/gate vectors (mixer, MLP), plus a learned 6×width table per block; per image, not per token |
 | Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |
-| Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed starts as the identity on those channels, so the stream carries the working latent and each block adds a correction |
+| Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to the meta channels |
 | Size | Parameter counts by width and depth in FACTS |
 
 Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), DeepSeek sparse attention (no long context).
@@ -68,19 +70,20 @@ Default: fan-in normal, `std = 1/√fan_in`.
 
 | Role | Init | Optimizer (§6) |
 |---|---|---|
-| Patch embed 128→1024 | identity on the first 128 output channels, fan-in normal on the rest, zero bias | Usui |
+| Patch embed 128→(width − 128) | fan-in normal, zero bias; the first 128 channels are the raw patch, no parameters | Usui |
 | Timestep MLP | fan-in normal | Usui |
 | Text projection 768→1024 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
-| Q, K, V | fan-in normal | Usui |
+| Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
+| Conv block depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linear on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |
-| adaLN shift / scale rows | small random | Usui, with the shared projection; tables on the fallback |
+| adaLN shift / scale rows (and the cross-attention gate, a vector of zeros on the fallback) | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
 | Branch-norm gains, QK-RMSNorm gains, biases | ones / zero | fallback |
 
-Consequence of the identity patch embed with x0 velocity: the zero gates make every block the identity, so `F = x_t` and `v̂ = 0` at step 0, and the loss reaches the patch embed and the gate rows at once; the blocks behind the gates follow as the gates open.
+Consequence of the concatenated patch embed with x0 velocity: the zero gates make every block the identity, so `F = x_t` and `v̂ = 0` at step 0. The loss reaches the shared adaLN projection and the gate rows at once; the patch embed's meta channels are read by no gate yet, so it and the blocks behind the gates follow as the gates open.
 
 ## 6. Optimizer: UsuiTrack
 

@@ -47,6 +47,8 @@ dataset = "{tmp_path / 's.parquet'}"
 null_embedding = "{tmp_path / 'null.safetensors'}"
 depth = 2
 width = 512
+conv_period = 2
+cross = true
 batch = {batch}
 micro_batch = {micro_batch}
 steps = {steps}
@@ -158,10 +160,10 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     checkpoint = run / "checkpoints" / "step_0000003"
     first = load_file(run / "checkpoints" / "step_0000002" / "model.safetensors")
     last = load_file(checkpoint / "model.safetensors")
-    assert not torch.equal(first["blocks.0.qkv.weight"], last["blocks.0.qkv.weight"])  # a UsuiTrack matrix moved
+    assert not torch.equal(first["blocks.1.qkv.weight"], last["blocks.1.qkv.weight"])  # a UsuiTrack matrix moved
 
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
-    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
+    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True).bfloat16()
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
@@ -316,7 +318,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     results = []
     for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
+        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         size = 8 // micro_batches
@@ -335,7 +337,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
 
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
@@ -352,15 +354,15 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     assert {p.dtype for p in model.parameters()} == {torch.bfloat16}
     # The QK-norm gain (1.0, ulp 2^-7) takes AdamW steps of 1e-3, a fraction of an ulp: round-to-nearest
     # leaves it bit-identical (checked: 0 of its elements move), stochastic rounding moves about a quarter.
-    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.0.q_norm.weight", "blocks.0.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
-    assert changed["blocks.0.q_norm.weight"] > 0.1
+    changed = {n: (model.get_parameter(n) != start[n]).float().mean() for n in ("blocks.1.q_norm.weight", "blocks.1.qkv.weight", "blocks.1.w_down.weight", "patch_embed.weight")}
+    assert changed["blocks.1.q_norm.weight"] > 0.1
     assert all(fraction > 0.02 for fraction in changed.values()), changed
 
 
 @pytest.mark.parametrize("saved_pinned", [False, True])
 def test_a_resumed_run_takes_its_step_rule_and_pin_from_the_config_not_the_checkpoint(train, tmp_path, saved_pinned):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True).bfloat16()
     open_gates(model)
     fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
     saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=saved_pinned)

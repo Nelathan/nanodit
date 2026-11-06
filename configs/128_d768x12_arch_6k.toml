@@ -1,5 +1,5 @@
-# `128_d768x12_swpin_3k.toml` with cross attention to the 512-d token states in every block; the first 16 shards, fused with their sequences and shuffled (`scripts/shuffle.py`). Fields: scripts/train.py Config.
-name = "128_d768x12_swpin_cross_3k"
+# The merged model (conv in 3/4 of the blocks, 3 KV heads, a quarter of the RoPE frequencies, meta-only patch embed) at d768x12 on the 16-shard trial set, 6000 steps, pooled caption only. Fields: scripts/train.py Config.
+name = "128_d768x12_arch_6k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parquet"
@@ -8,7 +8,7 @@ depth = 12
 width = 768
 batch = 256
 micro_batch = 64
-steps = 3000
+steps = 6000
 seed = 41
 usui_lr = 0.002
 pin_weights = true
@@ -19,7 +19,7 @@ warmup = 376
 shift = 1.0
 t_sigma = 1.0
 log_every = 50
-checkpoint_every = 3000
+checkpoint_every = 6000
 eval_every = 1000
 eval_prompts = "eval_prompts.txt"
 eval_seed = 1

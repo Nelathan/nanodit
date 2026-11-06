@@ -59,6 +59,9 @@ class Config:
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
+    conv_period: int = 4  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
+    cross: bool = False  # the attention blocks also read the caption's token states by cross attention
+    pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
     pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
 
@@ -246,7 +249,7 @@ def main(config_path: str) -> None:
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     null = load_file(cfg.null_embedding)
-    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width).to(device, torch.bfloat16)
+    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
@@ -274,7 +277,7 @@ def main(config_path: str) -> None:
     for step in range(start + 1, last + 1):
         loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
-        fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"]]
+        fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]  # the null tokens have none without cross attention
         interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))
         lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
         for optimizer, schedule in zip(optimizers, schedules):

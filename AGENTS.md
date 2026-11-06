@@ -17,8 +17,10 @@ has the stages and layout.
 - `docs/PLAN.md` — the open-questions ledger, grouped: what is unsure, how each
   would be settled, current evidence. Questions only; measured numbers live in FACTS. Read
   before running an experiment or changing a default.
-- `docs/FACTS.md` — measured numbers, each with source and date; replaced, not
-  appended to, when a new read supersedes it.
+- `docs/FACTS.md` — a dense index of insights and the measured numbers behind them, each with source
+  and date; replaced, not appended to, when a new read supersedes it. Not a logbook.
+- `docs/log/` — the logbook: one note per run or read, `YYYY-MM-DD-title.md`, with the full tables;
+  FACTS and PLAN point to them where helpful.
 - `docs/archive/` — closed questions and decisions, one note per session or
   closure, named `YYYY-MM-DD-kebab-title.md`. Read for the reasons; never rewrite.
 - `docs/topics/` — one doc per line of work Daniel opens as its own topic (its plan, design and reads), linked

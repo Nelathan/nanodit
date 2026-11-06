@@ -574,46 +574,13 @@ Source: Hugging Face `ma-xu/fine-t2i`, file listing with sizes and the first tar
 - The curated photos have 589 distinct sizes in 1,024 images, camera sizes up to 6000 x 4000; 3:2 and 2:3 dominate (433 and 298 of 1,024 at the nearest 64-token grid), 4:3, 3:4 and 16:9 follow.
 - Token grids (8 x 8 tokens is a 128 px square) of about 64 tokens with the best aspect, resized to the grid's exact size without a crop: the synthetic sets stretch by at most 5 % (1:1 0, 4:3 and 3:4 3.6 % and 3.7 %, 5:4 and 4:5 2.9 %, 16:9 and 9:16 3.1 % and 3.0 %, 3:2 and 2:3 4.8 % and 5.0 %); the sample of curated photos stretches by a median 4.8 %, at most 7.6 %.
 
-## Cross attention and conv period at d768x12, 3000 steps (F3, G10, 2026-11-06)
+## Architecture at d768x12 (F3, F4, G2, G10, 2026-11-06)
 
-Lunara eval caption loss on the same rows in the same order, batch 256, seed 41, usui lr 2e-3, `configs/128_d768x12_*`; images per second is the median of the training log. The baseline and the conv arms train on the old 47-shard set, the cross arm on the 16-shard trial set (798,005 rows); no arm passes over its data once.
+Caption loss on the Lunara rows, same rows and noise per arm; full tables in `log/2026-11-06-cross-attention-and-conv-period-3k.md`, `log/2026-11-06-block-design-arms-3k.md`, `log/2026-11-06-step-speed-by-layout.md`.
 
-| arm | 1000 | 2000 | 3000 | img/s |
-|---|---|---|---|---|
-| `swpin_3k`, pooled embedding only | 1.5532 | 1.5023 | 1.4855 | 682 |
-| `swpin_cross_3k`, cross attention in every block, pooled embedding in the adaLN | 1.5670 | 1.5159 | 1.5024 | 488 |
-| `conv2_3k`, conv in blocks 0, 2, 4, … (1/2) | 1.5449 | 1.5003 | 1.4852 | 822 |
-| `conv3_3k`, conv in 2/3 of the blocks | 1.5451 | 1.5015 | 1.4859 | 874 |
-| `conv4_3k`, conv in 3/4 of the blocks | 1.5474 | 1.5037 | 1.4884 | 901 |
+- Conv replacing attention in 1/2, 2/3 and 3/4 of the blocks ends level with the all-attention baseline at 3000 steps (1.4855 against 1.4852, 1.4859, 1.4884) and trains 1.20×, 1.28×, 1.32× faster; it leads by 0.007 at step 1000.
+- Trained at 128 px and scored on the unseen 256 px grid, conv in 3/4 is 0.031 better than all attention (1.4045 against 1.4353), though 0.003 worse at 128 px.
+- Cross attention in every block, pooled embedding in the adaLN, ends 0.017 behind pooled-only at 3000 steps and runs 0.72× as fast. 3000 steps cannot judge token conditioning.
+- On the conv-in-3/4 base at 3000 steps, within 0.003 at 128 px: meta-only patch embed at 8 px token −0.0015, NoPE +0.0011, quarter RoPE −0.0001, 3 KV heads +0.0004, PaLM parallel MLP +0.0024. At 256 px NoPE is +0.0034, the others within 0.0025 of the base; quarter RoPE and meta-only embed are the best.
+- Step speed (forward + backward, d768x12, bf16, compiled): per-token time 14.6 µs + 1.78 ns·N for all attention, 11.5 µs + 0.41 ns·N for conv in 3/4; conv is 1.27× at 128 px, 1.66× at 1024 px, 2.4× projected at 2048 px. GQA gives a flat 2–3 % (conv base), 5–9 % (all attention).
 
-Against the baseline: cross attention +0.014 / +0.014 / +0.017 and 0.72× the speed, no recompile warnings in its log. Conv 1/2 is level (−0.0003 at 3000) at 1.20× the speed, conv 2/3 level (+0.0004) at 1.28×, conv 3/4 +0.003 at 1.32×. Conv has the lower loss at 1000 steps in all three (−0.006 to −0.008) and gives it back by 3000.
-
-## Block-design arms on the conv-in-3/4 base, 3000 steps (F4, 2026-11-06)
-
-Branch `conv-meta`, base `128_d768x12_conv4_3k`; each arm adds one knob. Eval caption loss on Lunara: at 128 px the scores of the run, at 256 px the 128 px checkpoint scored on a 16×16 token grid it never trained on (`scripts/score_checkpoint.py`, 256 px Lunara from the fused shard). Losses at 256 px sit lower than at 128 px, so only the comparison between models at one resolution carries meaning.
-
-| arm | 1000 | 2000 | 3000 | at 256 px | img/s |
-|---|---|---|---|---|---|
-| `swpin_3k`, all attention | 1.5532 | 1.5023 | 1.4855 | 1.4353 | 682 |
-| `conv4_3k`, the base | 1.5474 | 1.5037 | 1.4884 | 1.4045 | 901 |
-| `conv4_metaembed_3k`, patch embed writes the meta channels only (8 px token) | 1.5472 | 1.5037 | 1.4869 | 1.4030 | 899 |
-| `conv4_pmlp_3k`, PaLM parallel MLP | 1.5491 | 1.5052 | 1.4908 | 1.4070 | 904 |
-| `conv4_nope_3k`, no rotary position | 1.5488 | 1.5052 | 1.4895 | 1.4079 | 895 |
-| `conv4_rope25_3k`, a quarter of the rotary frequencies | 1.5481 | 1.5033 | 1.4883 | 1.4035 | 902 |
-| `conv4_gqa3_3k`, 3 key/value heads against 12 | 1.5477 | 1.5054 | 1.4888 | 1.4037 | 912 |
-
-At 256 px the conv base is 0.031 below the all-attention baseline, against 0.003 above it at 128 px. Every knob sits within 0.003 of the base at 128 px; at 256 px NoPE is +0.0034 (from +0.0011), the parallel MLP +0.0025, meta-only embed −0.0015, quarter RoPE −0.0010, GQA −0.0008.
-
-## Training-step speed by layout and resolution (F4, 2026-11-06, `scripts/bench_speed.py` on branch `conv-meta`)
-
-d768x12, bf16, blocks compiled, forward + backward (no optimizer), 4096 tokens per batch, RTX 4070 Super. Images per second at 128 / 256 / 512 / 1024 px (64 / 256 / 1024 / 4096 tokens):
-
-| layout | 128 | 256 | 512 | 1024 | tokens/s at 64 → 4096 tokens |
-|---|---|---|---|---|---|
-| all attention | 1071.5 | 260.6 | 59.2 | 11.2 | 68.6k → 45.9k |
-| conv in 1/2 | 1230.9 | 312.1 | 72.2 | 15.4 | 78.8k → 63.1k |
-| conv in 3/4 | 1361.3 | 340.9 | 80.8 | 18.6 | 87.1k → 76.2k |
-| conv in 3/4, 3 KV heads | 1400.7 | 350.8 | 82.1 | 19.0 | 89.6k → 77.8k |
-| all attention, 3 KV heads | 1153.0 | 284.8 | 62.3 | 12.2 | 73.8k → 50.0k |
-
-Per-token time fits a + b·N (N tokens per image): all attention a = 14.6 µs, b = 1.78 ns; conv in 3/4 a = 11.5 µs, b = 0.41 ns (about a quarter of the attention layers, a quarter of b). Conv in 3/4 over all attention: 1.27× at 128 px, 1.31× at 256, 1.36× at 512, 1.66× at 1024, and the fit gives 2.4× at 2048 px (16,384 tokens: 3.3 against 1.4 images per second). GQA with 3 key/value heads adds 2–3 % on conv in 3/4 and 5–9 % on all attention at every size; it leaves b unchanged (1.78 → 1.60 ns all attention, 0.41 → 0.42 conv), so the gain is the smaller key/value projection, not cheaper attention.

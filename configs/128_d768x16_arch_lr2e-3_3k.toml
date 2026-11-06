@@ -1,10 +1,10 @@
-# The small-model baseline of the current recipe (sandwich norm, pinned Usui matrices; `128_d1024x16_swpin_3k.toml` at d768x12), pooled conditioning only: run with the code of commit e45a2c9, before cross attention. Fields: scripts/train.py Config.
-name = "128_d768x12_swpin_3k"
+# The merged model at d768x16 (MLP 4x), constant usui lr 2e-3 (fallback 1.25x) after the warmup, on the 16-shard trial set, 3000 steps: the lr sweep for the one-epoch run. Fields: scripts/train.py Config.
+name = "128_d768x16_arch_lr2e-3_3k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
-dataset = "/mnt/mars/ai/tiny-dit/precomputed/128_shuffled_0-46.parquet"
+dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parquet"
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
-depth = 12
+depth = 16
 width = 768
 batch = 256
 micro_batch = 64
@@ -25,5 +25,5 @@ eval_prompts = "eval_prompts.txt"
 eval_seed = 1
 guidance = 4.0
 sampler_steps = 30
-eval_set = "/mnt/mars/ai/tiny-dit/precomputed/128/lunara_art_eval.parquet"
+eval_set = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_128_seq512.parquet"
 wandb_project = "tiny-dit"
