@@ -534,3 +534,17 @@ Reference spectra, the same measures on cached pretrained models (scratch `ref_s
 
 - Our MLP matrices hold 90 % of their energy in about a sixth of the directions; the pretrained MLPs need about 0.7. Attention is lower in every model, ours lowest.
 - Usui's `grad_capture` (‖G Q‖/‖G‖, the gradient share its rank-0.1 frame holds) reads 0.98–1.03 over the whole `swpin_5ep` run (`train.jsonl`; above 1 under Molegrad, where the full gradient is not formed). It is a probed estimate: comparable across runs and steps, not the true capture (Daniel, 2026-11-05).
+
+## Momentum cosine on a noisy quadratic (2026-11-06)
+
+`scripts/probe_momentum_cosine.py`, CPU, seed 0: one quadratic direction (sharpness 1), white gradient noise, UsuiTrack's moment `M = beta M + (1 - beta) g` written as `-lr M` (the polar map, the gradient normalisation and the frame are not modelled). The characteristic polynomial is `z^2 - (1 + beta - eta lam (1 - beta)) z + beta`; its roots reach -1 at `eta lam = 2 (1 + beta) / (1 - beta)` (38 at beta 0.9, 78 at 0.95, 398 at 0.99), and the root radius is `sqrt(beta)` below it.
+
+| `eta lam` / bubbleforce | 0.01 | 0.1 | 0.3 | 0.6 | 0.9 | 0.99 |
+|---|---|---|---|---|---|---|
+| `cos(g_t, M_{t-1})`, beta 0.9 | -0.04 | -0.26 | -0.52 | -0.76 | -0.95 | -0.995 |
+| beta 0.95 | -0.06 | -0.29 | -0.53 | -0.77 | -0.95 | -0.995 |
+| beta 0.99 | -0.08 | -0.31 | -0.55 | -0.77 | -0.95 | -0.995 |
+
+The cosine is nearly a function of the fraction alone. The real `grad_moment_cosine` at step 1000 is -0.41 at beta 0.9 (`128_fixed_2e-3_9k`) and -0.10 at beta 0.99 (`128_fixed_2e-3_b099_1k`), same lr, other settings equal. The script fits the fraction at which beta 0.9 reads -0.41 (0.203) and scales it to beta 0.99, where bubbleforce is 10.5 times larger (0.0194): it reads -0.124. That is consistent with the observed -0.10 in one pair of readings with one fitted parameter. It assumes the same sharpness in both runs, which an edge-of-stability equilibrium would not give, the beta 0.99 reading is still drifting (+0.09, -0.01, -0.10 at steps 300, 500, 1000), and a real matrix has many directions of different sharpness. Any monotone curve would order the two runs the same way.
+
+What the toy cannot say: the lr direction. The two lr readings (`128_fixed_2e-2_9k`, -0.33 to -0.36, against `128_fixed_2e-3_9k`, -0.39 to -0.45, steps 501 to 4300) also differ in beta (0.95 against 0.9), warmup and rank fraction, so no lr effect can be read from them. The early positive values of the smoke runs (+0.44 to +0.51 over steps 3 to 11) are not in the toy, which has no gradient signal.

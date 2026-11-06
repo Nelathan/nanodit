@@ -177,8 +177,19 @@ it less negative with diminishing returns, and only a lower lr turns it up, whic
 question above). A negative cosine means the gradient points against the accumulated step, an oscillation, which is
 what the post's edge-of-stability picture describes for momentum: the largest root of the step's characteristic
 polynomial sits on the unit circle, and where it sits on it sets the oscillation (my reading of the post, untested).
+Decided 2026-11-06: the authors' code is a reference only; we implement our own for our harness.
+First read, UsuiTrack's update (`usuitrack/optimizer.py` in the usuitrack repo, branch `zero-init`): the moment is an exponential average of unit projected
+gradients, `M = beta M + (1 - beta) Z/||Z||`, which is the post's momentum kernel `c_j = (1 - beta) beta^j` (weights sum
+to 1, no Nesterov) acting on the normalised gradient; the write is `lr · ||W||` times the Newton-Schulz polar factor of
+`M` (the post's Muon case), inside a low-rank frame that itself turns each step. On a noisy quadratic with that kernel,
+bubbleforce is `2(1 + beta)/(1 - beta)` and the cosine between gradient and previous moment falls from 0 to -1 as
+the effective step times the sharpness approaches it (the effective step is not `lr`: the normalisation and the polar
+map set it). It is consistent with the beta dependence of the real runs in one pair of readings, with one fitted
+parameter (FACTS, Momentum cosine on a noisy quadratic). The lr dependence cannot be read from the runs so far, since
+the lr pair also differs in beta, warmup and rank fraction. The toy leaves out the normalisation, the polar map and the
+turning frame, which change the Jacobian the post's pathspring is defined on.
 Open:
-- Whether Usui's pinned, relative-step update counts as non-adaptive in the post's sense; unread, nothing is assumed.
+- Whether the normalised gradient, the polar map and the turning frame keep the update inside the post's non-adaptive class; the momentum kernel itself does.
 - Whether pathspring (Arnoldi on Hessian-vector products) is measurable on this model at an affordable cost; the post
   reports 16 to 33 HVPs per point on 8×H100s for a 12-layer, 768-wide model.
 - Whether it would explain what the 2026-11-02 lr sweep measured: loss kept falling as lr rose to 4e-3, and the common mode (the component every token's residual stream shares) grew with it.
