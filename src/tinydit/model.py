@@ -97,15 +97,16 @@ class Block(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, depth: int, width: int):
+    def __init__(self, null_embedding: Tensor, depth: int, width: int, conv_period: int = 2):
         super().__init__()
+        assert conv_period >= 1, conv_period
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
         self.patch_embed = nn.Linear(TOKEN_DIM, width)
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width)
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
-        self.blocks = nn.ModuleList(Block(width, conv=i % 2 == 0) for i in range(depth))  # conv first, attention next
+        self.blocks = nn.ModuleList(Block(width, conv=i % conv_period != conv_period - 1) for i in range(depth))  # conv first, attention next: every conv_period-th block is attention
         self.init_weights()
 
     @torch.no_grad()

@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from conftest import open_gates
-from tinydit.model import DiT, HEAD_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
+from tinydit.model import DiT, HEAD_DIM, TEXT_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
@@ -161,3 +161,9 @@ def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, text):
         block.w_down.weight.data *= 1e3
         block.out.weight.data *= 1e3
     assert torch.allclose(model(x, t, text), base, atol=1e-3)  # the post-norm removes the weights' scale
+
+
+@pytest.mark.parametrize("period, layout", [(1, [0] * 6), (2, [1, 0, 1, 0, 1, 0]), (3, [1, 1, 0, 1, 1, 0]), (4, [1, 1, 1, 0, 1, 1])])
+def test_every_conv_period_th_block_is_attention_and_conv_comes_first(period, layout):
+    model = DiT(torch.randn(TEXT_DIM), depth=6, width=512, conv_period=period)
+    assert [int(b.is_conv) for b in model.blocks] == layout
