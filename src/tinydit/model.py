@@ -35,10 +35,12 @@ def timestep_sinusoid(t: Tensor) -> Tensor:
     return torch.cat([args.cos(), args.sin()], dim=-1)
 
 
-def rope_angles(h: int, w: int, device: torch.device | None = None) -> tuple[Tensor, Tensor]:
-    """cos, sin of shape [h*w, HEAD_DIM/2]: the first half of the angles encodes the row, the second the column."""
+def rope_angles(h: int, w: int, device: torch.device | None = None, fraction: float = 1.0) -> tuple[Tensor, Tensor]:
+    """cos, sin of shape [h*w, HEAD_DIM/2]: the first half of the angles encodes the row, the second the column.
+    Only the first `fraction` of each axis' frequencies rotate; the rest get angle 0, so those dims carry no position."""
     pairs = HEAD_DIM // 4
     freqs = ROPE_BASE ** (-torch.arange(pairs, device=device) / pairs)
+    freqs = freqs * (torch.arange(pairs, device=device) < fraction * pairs)
     rows = torch.arange(h, device=device)[:, None].expand(h, w).reshape(-1, 1)
     cols = torch.arange(w, device=device)[None, :].expand(h, w).reshape(-1, 1)
     angles = torch.cat([rows * freqs, cols * freqs], dim=-1)
@@ -57,9 +59,10 @@ class Block(nn.Module):
     channels (the ones past TOKEN_DIM); its MLP then decides what reaches the image channels. Otherwise
     the token mixer is gated attention."""
 
-    def __init__(self, width: int, conv: bool):
+    def __init__(self, width: int, conv: bool, kv_heads: int, parallel_mlp: bool):
         super().__init__()
-        self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
+        self.width, self.heads, self.kv_heads, hidden = width, width // HEAD_DIM, kv_heads, MLP_RATIO * width
+        self.parallel_mlp = parallel_mlp
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         self.is_conv = conv
         if conv:
@@ -67,7 +70,7 @@ class Block(nn.Module):
             self.out = nn.Linear(width, width - TOKEN_DIM, bias=False)
             self.conv_norm = nn.RMSNorm(width - TOKEN_DIM)
         else:
-            self.qkv = nn.Linear(width, 3 * width, bias=False)
+            self.qkv = nn.Linear(width, width + 2 * kv_heads * HEAD_DIM, bias=False)
             self.gate = nn.Linear(width, width, bias=False)
             self.q_norm = nn.RMSNorm(HEAD_DIM)
             self.k_norm = nn.RMSNorm(HEAD_DIM)
@@ -85,28 +88,34 @@ class Block(nn.Module):
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
         if self.is_conv:
             mixed = self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
-            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zeros on the image channels
+            update = gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zeros on the image channels
         else:
-            q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
+            q, k, v = self.qkv(y).split([self.width, self.kv_heads * HEAD_DIM, self.kv_heads * HEAD_DIM], dim=-1)
+            q = q.view(B, N, self.heads, HEAD_DIM).transpose(1, 2)
+            k, v = (a.view(B, N, self.kv_heads, HEAD_DIM).transpose(1, 2) for a in (k, v))
             q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
-            attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
-            x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
-
+            attn = F.scaled_dot_product_attention(q, k, v, enable_gqa=self.kv_heads != self.heads).transpose(1, 2).reshape(B, N, self.width)
+            update = gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
+        if self.parallel_mlp:  # PaLM: the MLP reads the same modulated input as the mixer, both add to the stream together
+            return x + update + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
+        x = x + update
         y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
         return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, depth: int, width: int, conv_period: int = 2):
+    def __init__(self, null_embedding: Tensor, depth: int, width: int, conv_period: int = 2, meta_embed: bool = False,
+                 parallel_mlp: bool = False, rope_fraction: float = 1.0, kv_heads: int | None = None):
         super().__init__()
         assert conv_period >= 1, conv_period
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
-        self.patch_embed = nn.Linear(TOKEN_DIM, width)
+        self.meta_embed, self.rope_fraction = meta_embed, rope_fraction
+        self.patch_embed = nn.Linear(TOKEN_DIM, width - TOKEN_DIM if meta_embed else width)  # meta_embed: writes the meta channels only
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width)
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
-        self.blocks = nn.ModuleList(Block(width, conv=i % conv_period != conv_period - 1) for i in range(depth))  # conv first, attention next: every conv_period-th block is attention
+        self.blocks = nn.ModuleList(Block(width, i % conv_period != conv_period - 1, kv_heads or width // HEAD_DIM, parallel_mlp) for i in range(depth))  # conv first, attention next: every conv_period-th block is attention
         self.init_weights()
 
     @torch.no_grad()
@@ -124,7 +133,8 @@ class DiT(nn.Module):
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
-        self.patch_embed.weight[:TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the first 128 channels of the stream start as the input patch
+        if not self.meta_embed:
+            self.patch_embed.weight[:TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the first 128 channels of the stream start as the input patch
 
     def forward(self, x: Tensor, t: Tensor, text: Tensor) -> Tensor:
         """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W].
@@ -135,9 +145,9 @@ class DiT(nn.Module):
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype)) + self.text_proj(F.rms_norm(text, (TEXT_DIM,)).to(dtype))
         mod = self.ada(c).view(-1, N_MOD, self.width)
-        rope = rope_angles(h, w, x.device)
+        rope = rope_angles(h, w, x.device, self.rope_fraction)
 
-        tokens = self.patch_embed(tokens)
+        tokens = torch.cat([tokens, self.patch_embed(tokens)], dim=-1) if self.meta_embed else self.patch_embed(tokens)
         for block in self.blocks:
             tokens = block(tokens, mod, rope, h, w)
         return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()

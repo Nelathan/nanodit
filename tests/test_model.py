@@ -167,3 +167,38 @@ def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, text):
 def test_every_conv_period_th_block_is_attention_and_conv_comes_first(period, layout):
     model = DiT(torch.randn(TEXT_DIM), depth=6, width=512, conv_period=period)
     assert [int(b.is_conv) for b in model.blocks] == layout
+
+
+def run(model, x_seed=0):
+    torch.manual_seed(x_seed)
+    open_gates(model)
+    return model(torch.randn(3, 2, 64, 64), torch.rand(3), torch.randn(3, TEXT_DIM))
+
+
+def arm(**kw):
+    torch.manual_seed(0)
+    return DiT(torch.randn(TEXT_DIM), depth=4, width=512, conv_period=2, **kw)
+
+
+def test_meta_embed_carries_the_patch_unchanged_and_writes_only_the_meta_channels():
+    model = arm(meta_embed=True)
+    assert model.patch_embed.weight.shape == (512 - TOKEN_DIM, TOKEN_DIM)
+    x = torch.randn(3, 2, 64, 64)
+    assert torch.equal(model(x, torch.rand(3), torch.randn(3, TEXT_DIM)), x)  # gates closed: F = x_t
+
+
+def test_parallel_mlp_reads_the_mixers_input_and_changes_the_output():
+    assert not torch.allclose(run(arm()), run(arm(parallel_mlp=True)))
+
+
+def test_rope_fraction_zero_removes_position_from_attention():
+    cos, sin = rope_angles(4, 4, fraction=0.0)
+    assert cos.eq(1).all() and sin.eq(0).all()
+    cos, sin = rope_angles(4, 4, fraction=0.5)
+    assert sin[:, :8].abs().max() > 0 and sin[:, 8:16].eq(0).all() and sin[:, 16:24].abs().max() > 0  # per axis, 8 of 16 pairs rotate
+
+
+def test_grouped_query_attention_shrinks_the_key_value_projection_and_runs():
+    model = arm(kv_heads=2)
+    assert model.blocks[1].qkv.weight.shape == (512 + 2 * 2 * HEAD_DIM, 512)
+    assert run(model).shape == (3, 2, 64, 64)
