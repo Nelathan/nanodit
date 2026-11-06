@@ -5,6 +5,8 @@ import math
 import torch
 from torch import Tensor
 
+from .model import Prompt
+
 PROMPT_DROPOUT = 0.1
 
 
@@ -33,17 +35,18 @@ def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
     return (out - target(x, eps, x_t)).square().flatten(1).mean(1)
 
 
-def drop_prompts(text: Tensor, null_embedding: Tensor) -> Tensor:
-    dropped = torch.rand(text.shape[0], 1, device=text.device) < PROMPT_DROPOUT
-    return torch.where(dropped, null_embedding, text)
+def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
+    """Each row becomes the `null` prompt with probability PROMPT_DROPOUT."""
+    dropped = torch.rand(prompt.pooled.shape[0], device=prompt.pooled.device) < PROMPT_DROPOUT
+    return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, text: Tensor, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
     """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, t)
-    out = model(x_t, t, drop_prompts(text, model.null_embedding))
+    out = model(x_t, t, drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2])))
     per_sample = per_sample_loss(out, x, eps, x_t)
     return per_sample.mean(), per_sample, t
 

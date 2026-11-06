@@ -8,15 +8,17 @@ For every fused/*.parquet writes fused/sequence512_<name>.parquet with columns
                       768x512 `embedding_projection`; prompt prefix dropped, unpadded (n = bytes / 1024)
 The 768-d `sequence` of precompute.py is that projection of these states, so it carries no more than 512 dimensions.
 Captions are read from the shard; no images are touched. A shard whose output exists is skipped.
+Also adds the key `null_tokens` (fp32 [2, 512]), the token states of the empty caption, to null_embedding.safetensors when it is missing.
 """
 import time
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from safetensors.torch import load_file, save_file
 from sentence_transformers import SentenceTransformer
 
-from precompute import DEVICE, STAGE, bf16_bytes, encode_text
+from precompute import DEVICE, ROOT, STAGE, bf16_bytes, encode_text
 
 ROW_GROUP = 1024
 SCHEMA = pa.schema([("key", pa.string()), ("sequence", pa.binary())])
@@ -27,6 +29,13 @@ def encoder(device):
     st = SentenceTransformer("google/embeddinggemma-2", device=device, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})
     st[0].auto_model.language_model.embedding_projection.register_forward_hook(lambda module, args, out: args[0])
     return st
+
+
+def write_null_tokens(st, path):
+    """The null prompt's tokens (SPEC §5): the encoder's states of the empty caption, stored beside its pooled embedding."""
+    null = load_file(path)
+    null["null_tokens"] = encode_text(st, [""])[1][0].float().contiguous()
+    save_file(null, path)
 
 
 def reencode(src, out_path, st):
@@ -44,6 +53,9 @@ def reencode(src, out_path, st):
 
 if __name__ == "__main__":
     st = encoder(DEVICE)
+    null_path = ROOT / "precomputed" / "null_embedding.safetensors"
+    if "null_tokens" not in load_file(null_path):
+        write_null_tokens(st, null_path)
     fused = STAGE / "precomputed" / "fused"
     for src in sorted(fused.glob("*.parquet")):
         if src.name.startswith("sequence512_"):

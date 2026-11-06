@@ -17,13 +17,12 @@ import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
-from tinydit.data import Stream, read_rows
-from tinydit.model import DiT
+from tinydit.data import Stream, pad_sequences, read_rows
+from tinydit.model import DiT, Prompt
 from tinydit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
 from tinydit.optim import build_optimizers
 from tinydit.sampler import euler_sample
 
-PROMPT_PREFIX = "title: none | text: "  # SPEC §1
 T_BUCKETS = 10
 SCORE_TS = 10  # the score's t grid: equal-probability bins of the shift-1 logit-normal, whatever t the run trains on (SPEC §8)
 SCORE_SHIFT = 1.0
@@ -78,12 +77,16 @@ def load_checkpoint(model, optimizers, path: Path) -> int:
     return int(path.name.removeprefix("step_"))
 
 
-def embed_prompts(prompts: list[str]) -> torch.Tensor:
-    """[P, 768] EmbeddingGemma 2 embeddings (unit norm from the sentence-transformers pipeline), then freed."""
+def embed_prompts(prompts: list[str]) -> Prompt:
+    """The prompts as EmbeddingGemma 2 gives them (SPEC §1): the unit-norm pooled embeddings and the 512-d token states, as in the precomputed rows."""
+    from precompute import encode_text
+    from reencode_sequence import encoder
     from sentence_transformers import SentenceTransformer
 
-    encoder = SentenceTransformer("google/embeddinggemma-2", config_kwargs=dict(vision_config=None, audio_config=None), model_kwargs=dict(dtype=torch.float32), device="cpu")
-    return encoder.encode([PROMPT_PREFIX + p for p in prompts], convert_to_tensor=True)
+    pooler = SentenceTransformer("google/embeddinggemma-2", config_kwargs=dict(vision_config=None, audio_config=None), model_kwargs=dict(dtype=torch.float32), device="cpu")
+    pooled, _ = encode_text(pooler, prompts)
+    tokens, mask = pad_sequences(encode_text(encoder("cpu"), prompts)[1])
+    return Prompt(pooled, tokens, mask)
 
 
 def load_decoder(device: torch.device):
@@ -93,12 +96,12 @@ def load_decoder(device: torch.device):
 
 
 @torch.no_grad()
-def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
+def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
     """Fixed prompts, each with its own fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
     side = cfg.resolution // 2
-    n_prompts = len(text)
+    n_prompts = len(prompt.pooled)
     noise = torch.cat([torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed + i)) for i in range(n_prompts)])
-    latents = euler_sample(model, noise.to(device), text.to(device), cfg.sampler_steps, cfg.guidance)
+    latents = euler_sample(model, noise.to(device), prompt.to(device, torch.float32), cfg.sampler_steps, cfg.guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)
     images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P, 3, res, res]
     cols = math.ceil(math.sqrt(n_prompts))
@@ -114,7 +117,7 @@ def evaluate(model, decoder, text, cfg: Config, step: int, run_dir: Path, device
 
 
 @torch.no_grad()
-def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
+def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict:
     """The loss on fixed rows, each with its caption and fixed noise, at every t of a fixed grid: one number
     comparable across steps and runs, and its value at each t. The same for R² (`explained_variance`), per t and
     over the grid. Keys keep the `_caption` suffix of the records that also scored the null embedding."""
@@ -123,10 +126,10 @@ def score(model, x, text, noise, ts, batch: int, device: torch.device) -> dict:
         total = 0.0
         for i in range(0, len(x), batch):
             xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
-            tb = text[i : i + batch].to(device, torch.float32)
+            pb = prompt.rows(i, i + batch).to(device, torch.float32)
             t = torch.full((len(xb),), t_value, device=device)
             x_t = noisy(xb, eb, t)
-            total += per_sample_loss(model(x_t, t, tb).float(), xb, eb, x_t).sum()
+            total += per_sample_loss(model(x_t, t, pb).float(), xb, eb, x_t).sum()
         per_t.append(float(total) / len(x))
     errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
     return dict(
@@ -219,8 +222,8 @@ def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float
     per-sample losses, t and clean-latent energy (mean square) of every sample."""
     losses, per_samples, ts, energies = [], [], [], []
     for _ in range(micro_batches):
-        x, text = stream.next()
-        loss, per_sample, t = flow_loss(model, x, text, shift, sigma)
+        x, prompt = stream.next()
+        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma)
         (loss / micro_batches).backward()
         losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
     return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
@@ -242,7 +245,8 @@ def main(config_path: str) -> None:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
-    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth, cfg.width).to(device, torch.bfloat16)
+    null = load_file(cfg.null_embedding)
+    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width).to(device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
@@ -253,8 +257,8 @@ def main(config_path: str) -> None:
 
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lr_factor) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
-    eval_text, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
-    score_x, score_text = read_rows(cfg.eval_set, cfg.resolution)
+    eval_prompt, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
+    score_x, score_prompt = read_rows(cfg.eval_set, cfg.resolution)
     score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
     score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
 
@@ -284,8 +288,8 @@ def main(config_path: str) -> None:
             interval = Interval()
         paused = time.perf_counter()
         if step % cfg.eval_every == 0 or step == last:
-            evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
-            scores = score(model, score_x, score_text, score_noise, score_ts, cfg.micro_batch, device)
+            evaluate(model, decoder, eval_prompt, cfg, step, run_dir, device)
+            scores = score(model, score_x, score_prompt, score_noise, score_ts, cfg.micro_batch, device)
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)
             wandb.log(wandb_scores(scores), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:

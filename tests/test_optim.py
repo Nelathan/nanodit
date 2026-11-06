@@ -3,13 +3,14 @@ import copy
 import torch
 from conftest import open_gates
 
-from tinydit.model import TOKEN_DIM, DiT
+from tinydit.data import pad_sequences
+from tinydit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
 from tinydit.objective import flow_loss, noisy, target
 from tinydit.optim import build_optimizers
 
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
-    model = DiT(torch.randn(768), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
     matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     names = {id(p): n for n, p in model.named_parameters()}
     usui = {names[id(p)] for g in matrix.param_groups for p in g["params"]}
@@ -22,7 +23,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
 
 
 def test_residual_stream_output_matrices_track_their_left_side():
-    model = DiT(torch.randn(768), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
     matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     names = {id(p): n for n, p in model.named_parameters()}
     side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
@@ -34,7 +35,7 @@ def test_residual_stream_output_matrices_track_their_left_side():
 
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2, width=512).bfloat16()
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
     fallback_lr = 1e-3
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr, pin_weights=False)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
@@ -54,7 +55,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
 def trained_model(steps=2):
     """A depth-2 bf16 model with open gates (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
@@ -66,12 +67,13 @@ def trained_model(steps=2):
 def batch(seed):
     g = torch.Generator().manual_seed(seed)
     x = torch.randn(8, 2, 32, 32, generator=g)
-    return x, torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
+    tokens, mask = pad_sequences([torch.randn(2 + i % 4, SEQ_DIM, generator=g) for i in range(8)], torch.float32)
+    return x, Prompt(torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1), tokens, mask)
 
 
-def train_step(model, optimizers, x, text, micro_batch=8):
+def train_step(model, optimizers, x, prompt, micro_batch=8):
     for i in range(0, len(x), micro_batch):
-        loss, _, _ = flow_loss(model, x[i : i + micro_batch], text[i : i + micro_batch], shift=1.0)
+        loss, _, _ = flow_loss(model, x[i : i + micro_batch], prompt.rows(i, i + micro_batch), shift=1.0)
         (loss * micro_batch / len(x)).backward()
     for optimizer in optimizers:
         optimizer.step()
@@ -91,11 +93,11 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
 
 
 def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
-    x, text = batch(0)
+    x, prompt = batch(0)
     grads = []
     for micro_batch in (8, 2):
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), depth=2, width=512)
+        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
@@ -103,7 +105,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
         for i in range(0, 8, micro_batch):
             sl = slice(i, i + micro_batch)
             x_t = noisy(x[sl], eps[sl], t[sl])
-            loss = (model(x_t, t[sl], text[sl]) - target(x[sl], eps[sl], x_t)).square().mean()
+            loss = (model(x_t, t[sl], prompt.rows(i, i + micro_batch)) - target(x[sl], eps[sl], x_t)).square().mean()
             (loss * micro_batch / 8).backward()
         grads.append(model.blocks[0].table.grad.clone())
     # bf16 sums the split batch in a different order, so equal only up to rounding; a lost or doubled
@@ -117,7 +119,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(768), depth=2, width=512).bfloat16()
+    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     for optimizer, saved in zip(resumed, state[1]):
@@ -132,7 +134,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
 
 
 def test_pinned_matrices_keep_their_init_norm_under_the_trust_step():
-    model = DiT(torch.randn(768), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3, pin_weights=True)

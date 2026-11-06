@@ -14,7 +14,7 @@ Writes /mnt/luna/tiny-dit/precomputed/fused/data_<SHARD>.parquet with columns
 Both latents are encoded from a Lanczos resize of the 512 px crop (PLAN B5). The shard tar is downloaded to
 /mnt/luna and deleted once encoded; the next shard's tar downloads while one encodes. A shard whose parquet exists
 is skipped. Also writes /mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors (key `null`, fp32 [768]), the embedding of the
-empty caption, when it is missing.
+empty caption, when it is missing; reencode_sequence.py adds its tokens as `null_tokens`.
 """
 import io
 import json

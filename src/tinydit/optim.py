@@ -5,9 +5,9 @@ from usuitrack import Molegrad, StochasticAdamW, UsuiTrack
 
 # Weights on the residual stream's output side track their output (left) side; the rest read it or
 # have no stream side, and follow Usui's shape rule. Same convention as ai-toolkit's usuitrack.py.
-LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")
-# Tables are not shared linear maps.
-USUI_EXCLUDED = ("table",)
+LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")  # also the cross attention's cross_out.weight
+# Tables and the null prompt's tokens are not shared linear maps.
+USUI_EXCLUDED = ("table", "null")
 
 
 def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float, pin_weights: bool) -> tuple[UsuiTrack, StochasticAdamW]:

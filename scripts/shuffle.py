@@ -1,12 +1,17 @@
 """Shuffle precomputed shard Parquets into one Parquet, rows in uniformly random order (SPEC Precompute).
 
-usage: shuffle.py OUT SHARD [SHARD ...]
+usage: shuffle.py OUT RESOLUTION SHARD [SHARD ...]
+
+SHARD is a fused shard `fused/data_<name>.parquet`; its token sequences are read from the sibling
+`sequence512_data_<name>.parquet` (`scripts/reencode_sequence.py`), row for row. OUT has the columns key, source, caption,
+embedding, sequence (the 512-d token states) and latent_<RESOLUTION> of the shards; the other latent and the 768-d
+sequence stay behind.
 
 Two passes, so no more than one shard or one bucket is in memory. Pass 1 deals each shard's rows into BUCKETS
 temporary files, each row to a uniformly random one; pass 2 permutes each bucket in memory and appends it to
 OUT. A random bucket per row, then a random order inside each bucket, is a uniformly random permutation of all
-rows. Columns and schema are the shards'; OUT is written as OUT.tmp and renamed when complete. It needs about the
-shards' size again in free disk: the buckets, then OUT as each bucket is appended and deleted. A new shard means running it again over all shards.
+rows. OUT is written as OUT.tmp and renamed when complete. It needs about the shards' size again in free disk: the
+buckets, then OUT as each bucket is appended and deleted. A new shard means running it again over all shards.
 Each image is kept once: pass 1 drops a row whose latent bytes repeat an earlier row's, in shard order, so an image
 keeps the caption of its first row.
 """
@@ -16,10 +21,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 
-BUCKETS = 64  # 47 shards at 128 px, about 34 GB after dropping repeated images, make buckets of about 0.5 GB
+BUCKETS = 128  # about 150 GB of rows at 128 px make buckets of about 1.2 GB, under the 2 GB a binary column holds in one chunk
 ROW_GROUP = 1024
+TAKE_ROWS = 4096
 SEED = 0
 
 
@@ -36,23 +43,36 @@ def first_sightings(latents, seen: set[bytes]) -> np.ndarray:
     return keep
 
 
-def shuffle(shards: list[str], out: Path) -> None:
+def read_shard(shard: str, resolution: int, columns: list[str]) -> pa.Table:
+    """The shard's `columns` with the 512-d sequences in place of the 768-d ones."""
+    table = pq.read_table(shard, columns=columns)
+    path = Path(shard)
+    sequences = pq.read_table(path.with_name(f"sequence512_{path.name}"))
+    assert sequences["key"].equals(table["key"]), shard
+    return table.append_column("sequence", sequences["sequence"])
+
+
+def shuffle(shards: list[str], resolution: int, out: Path) -> None:
     rng = np.random.default_rng(SEED)
-    schema = pq.read_schema(shards[0])
+    latent = f"latent_{resolution}"
+    columns = ["key", "source", "caption", "embedding", latent]
+    fused = pq.read_schema(shards[0])
+    schema = pa.schema([fused.field(c) for c in columns] + [pa.field("sequence", pa.binary())])
     parts = [out.with_name(f"{out.name}.bucket{b:03d}") for b in range(BUCKETS)]
     writers = [pq.ParquetWriter(part, schema, compression="none") for part in parts]
     seen: set[bytes] = set()
     rows = 0
     for shard in shards:
-        table = pq.read_table(shard)
+        table = read_shard(shard, resolution, columns)
         assert table.schema.equals(schema), shard
-        read = len(table)
-        table = table.take(np.flatnonzero(first_sightings(table["latent"], seen)))
+        keep = first_sightings(table[latent], seen)
         bucket = rng.integers(BUCKETS, size=len(table))
-        for b, writer in enumerate(writers):
-            writer.write_table(table.take(np.flatnonzero(bucket == b)))
-        rows += len(table)
-        print(f"{shard}: {len(table)} rows dealt, {read - len(table)} repeated images dropped", flush=True)
+        for start in range(0, len(table), TAKE_ROWS):  # a take over the whole shard would concatenate its sequence chunks past the 2 GB a binary column holds
+            part = table.slice(start, TAKE_ROWS)
+            for b, writer in enumerate(writers):
+                writer.write_table(part.take(np.flatnonzero(keep[start : start + TAKE_ROWS] & (bucket[start : start + TAKE_ROWS] == b))))
+        rows += keep.sum()
+        print(f"{shard}: {keep.sum()} rows dealt, {len(table) - keep.sum()} repeated images dropped", flush=True)
     for writer in writers:
         writer.close()
     tmp = out.with_name(out.name + ".tmp")
@@ -67,4 +87,4 @@ def shuffle(shards: list[str], out: Path) -> None:
 
 
 if __name__ == "__main__":
-    shuffle(sys.argv[2:], Path(sys.argv[1]))
+    shuffle(sys.argv[3:], int(sys.argv[2]), Path(sys.argv[1]))

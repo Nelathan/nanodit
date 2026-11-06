@@ -8,8 +8,9 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from conftest import open_gates
-from test_data import write_shard
-from tinydit.model import DiT
+from test_data import shuffle_module, write_shard
+from tinydit.data import pad_sequences
+from tinydit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
 from tinydit.objective import flow_loss as real_flow_loss
 from tinydit.objective import noisy, t_quantiles, target
 from tinydit.optim import build_optimizers
@@ -25,11 +26,17 @@ def train():
     return module
 
 
+def random_prompt(n, generator=None):
+    tokens, mask = pad_sequences([torch.randn(2 + i % 4, SEQ_DIM, generator=generator) for i in range(n)], torch.float32)
+    return Prompt(torch.nn.functional.normalize(torch.randn(n, 768, generator=generator), dim=-1), tokens, mask)
+
+
 def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4, log_every=1):
     torch.manual_seed(0)
-    write_shard(tmp_path / "s.parquet", torch.randn(16, 2, 16, 16).bfloat16(), torch.randn(16, 768).bfloat16())
-    write_shard(tmp_path / "eval.parquet", torch.randn(5, 2, 16, 16).bfloat16(), torch.randn(5, 768).bfloat16())
-    save_file({"null": torch.randn(768)}, tmp_path / "null.safetensors")
+    for name, n in (("s", 16), ("eval", 5)):  # the training set and the eval set are both shuffled files
+        write_shard(tmp_path / f"{name}_shard.parquet", torch.randn(n, 2, 16, 16).bfloat16(), torch.randn(n, 768).bfloat16(), [torch.randn(2 + i % 4, SEQ_DIM).bfloat16() for i in range(n)])
+        shuffle_module(buckets=1).shuffle([str(tmp_path / f"{name}_shard.parquet")], 32, tmp_path / f"{name}.parquet")
+    save_file({"null": torch.randn(768), "null_tokens": torch.randn(NULL_TOKENS, SEQ_DIM)}, tmp_path / "null.safetensors")
     (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
     config.write_text(f"""
@@ -72,7 +79,7 @@ class StubDecoder:
 
 def stub_models(monkeypatch, train):
     monkeypatch.setenv("WANDB_MODE", "disabled")  # tests never reach the network
-    monkeypatch.setattr(train, "embed_prompts", lambda prompts: torch.nn.functional.normalize(torch.randn(len(prompts), 768), dim=-1))
+    monkeypatch.setattr(train, "embed_prompts", lambda prompts: random_prompt(len(prompts)))
     monkeypatch.setattr(train, "load_decoder", lambda device: StubDecoder())
 
 
@@ -154,7 +161,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert not torch.equal(first["blocks.0.qkv.weight"], last["blocks.0.qkv.weight"])  # a UsuiTrack matrix moved
 
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
-    restored = DiT(torch.zeros(768), depth=2, width=512).bfloat16()
+    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
@@ -165,24 +172,25 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
 
 def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
     class Echo(torch.nn.Module):  # its output depends on t and on the embedding it is given
-        def forward(self, x_t, t, text):
-            return x_t * t.view(-1, 1, 1, 1) + text[:, :1, None, None]
+        def forward(self, x_t, t, prompt):
+            return x_t * t.view(-1, 1, 1, 1) + prompt.pooled[:, :1, None, None]
 
     torch.manual_seed(0)
-    x, text, noise, ts = torch.randn(5, 2, 4, 4).bfloat16(), torch.randn(5, 768).bfloat16(), torch.randn(5, 2, 4, 4), torch.tensor([0.2, 0.7])
-    result = train.score(Echo(), x, text, noise, ts, 2, torch.device("cpu"))
+    x, noise, ts = torch.randn(5, 2, 4, 4).bfloat16(), torch.randn(5, 2, 4, 4), torch.tensor([0.2, 0.7])
+    prompt = random_prompt(5)
+    result = train.score(Echo(), x, prompt, noise, ts, 2, torch.device("cpu"))
     by_t = []
     for t_value in ts.tolist():
         t = torch.full((5,), t_value)
         x_t = noisy(x.float(), noise, t)
-        by_t.append(float((Echo()(x_t, t, text.float()) - target(x.float(), noise, x_t)).square().mean()))
+        by_t.append(float((Echo()(x_t, t, prompt) - target(x.float(), noise, x_t)).square().mean()))
     torch.testing.assert_close(result["loss_caption_by_t"], by_t)
     torch.testing.assert_close(result["loss_caption"], sum(by_t) / 2)
     energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
     r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
     torch.testing.assert_close(result["r2_caption_by_t"], r2_by_t)
     torch.testing.assert_close(result["r2_caption"], sum(r2_by_t) / 2)
-    torch.testing.assert_close(train.score(Echo(), x, text, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
+    torch.testing.assert_close(train.score(Echo(), x, prompt, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
 
 
 def test_existing_run_is_not_overwritten(train, tmp_path, monkeypatch):
@@ -291,12 +299,12 @@ class FixedBatches:
         return self.chunks[(self.i - 1) % len(self.chunks)]
 
 
-def fixed_flow_loss(model, x, text, shift, sigma):
+def fixed_flow_loss(model, x, prompt, shift, sigma):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
     x_t = noisy(x, eps, t)
-    per_sample = (model(x_t, t, text) - target(x, eps, x_t)).square().flatten(1).mean(1)
+    per_sample = (model(x_t, t, prompt) - target(x, eps, x_t)).square().flatten(1).mean(1)
     return per_sample.mean(), per_sample, t
 
 
@@ -304,15 +312,15 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     monkeypatch.setattr(train, "flow_loss", fixed_flow_loss)
     g = torch.Generator().manual_seed(0)
     x = torch.randn(8, 2, 16, 16, generator=g)
-    text = torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
+    prompt = random_prompt(8, g)
     results = []
     for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), depth=2, width=512)
+        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         size = 8 // micro_batches
-        chunks = [(x[i : i + size], text[i : i + size]) for i in range(0, 8, size)]
+        chunks = [(x[i : i + size], prompt.rows(i, i + size)) for i in range(0, 8, size)]
         loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0)
         results.append((loss, per_sample, t, [model.patch_embed.bias.grad, model.blocks[0].table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
@@ -327,16 +335,16 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
 
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2, width=512)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
     start = {n: p.detach().clone() for n, p in model.named_parameters()}
     g = torch.Generator().manual_seed(0)
     x = torch.randn(8, 2, 16, 16, generator=g)
-    text = torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1)
+    prompt = random_prompt(8, g)
     for _ in range(3):
-        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], text[:4]), (x[4:], text[4:])]), 2, shift=1.0, sigma=1.0)
+        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], prompt.rows(0, 4)), (x[4:], prompt.rows(4, 8))]), 2, shift=1.0, sigma=1.0)
         assert loss.dtype == per_sample.dtype == torch.float32 and loss.isfinite() and per_sample.isfinite().all()
         for optimizer in optimizers:
             optimizer.step()
@@ -352,7 +360,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
 @pytest.mark.parametrize("saved_pinned", [False, True])
 def test_a_resumed_run_takes_its_step_rule_and_pin_from_the_config_not_the_checkpoint(train, tmp_path, saved_pinned):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), depth=2, width=512).bfloat16()
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512).bfloat16()
     open_gates(model)
     fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
     saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=saved_pinned)

@@ -31,19 +31,19 @@ FD_STEP = 1e-2  # along a unit-norm v over all parameters
 
 
 def fixed_batch(cfg, device):
-    x, text = read_rows(cfg.eval_set, cfg.resolution)
-    x, text = x[:ROWS].float().to(device), text[:ROWS].float().to(device)
+    x, prompt = read_rows(cfg.eval_set, cfg.resolution)
+    x, prompt = x[:ROWS].float().to(device), prompt.rows(0, ROWS).to(device, torch.float32)
     torch.manual_seed(0)
-    return x, text, sample_t(ROWS, cfg.shift, device, cfg.t_sigma), torch.randn_like(x)
+    return x, prompt, sample_t(ROWS, cfg.shift, device, cfg.t_sigma), torch.randn_like(x)
 
 
 def accumulate_gradient(model, batch, sign):
     """Adds `sign` times the gradient of the batch's mean loss to the parameters' .grad."""
-    x, text, t, eps = batch
+    x, prompt, t, eps = batch
     for i in range(0, ROWS, CHUNK):
         s = slice(i, i + CHUNK)
         x_t = noisy(x[s], eps[s], t[s])
-        loss = per_sample_loss(model(x_t, t[s], text[s]), x[s], eps[s], x_t).sum() / ROWS
+        loss = per_sample_loss(model(x_t, t[s], prompt.rows(i, i + CHUNK)), x[s], eps[s], x_t).sum() / ROWS
         (sign * loss).backward()
 
 
@@ -91,7 +91,8 @@ if __name__ == "__main__":
     with open(sys.argv[1], "rb") as f:
         cfg = Config(**tomllib.load(f))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DiT(load_file(cfg.null_embedding)["null"], cfg.depth, cfg.width).to(device)
+    null = load_file(cfg.null_embedding)
+    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width).to(device)
     batch = fixed_batch(cfg, device)
     for path in sys.argv[2:]:
         model.load_state_dict(load_file(Path(path) / "model.safetensors"))

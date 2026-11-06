@@ -6,8 +6,9 @@ from safetensors.torch import load_file
 from tinydit.model import GATE_ROWS, N_MOD, TEXT_DIM, DiT, timestep_sinusoid
 
 torch.manual_seed(0)
-null = load_file("/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors")["null"]
-model = DiT(null, depth=12, width=512)
+null_file = load_file("/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors")
+null = null_file["null"]
+model = DiT(null, null_file["null_tokens"], depth=12, width=512)
 t = torch.linspace(0.02, 0.98, 16)
 shift_scale = [r for r in range(N_MOD) if r not in GATE_ROWS]
 with torch.no_grad():

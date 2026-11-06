@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from tinydit.model import Prompt
 from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
 
 
@@ -19,11 +20,19 @@ def test_target_matches_closed_form():
     assert torch.allclose(target(x, eps, noisy(x, eps, t)), expected, atol=1e-6)
 
 
+def stub_null(batch, length):
+    """A null prompt for networks without tokens: pooled ones, tokens of -1, only the first token real."""
+    return Prompt(torch.ones(batch, 768), -torch.ones(batch, length, 8), (torch.arange(length) < 1).expand(batch, -1))
+
+
 def test_prompt_dropout_rate():
     torch.manual_seed(0)
-    text, null = torch.randn(20000, 768), torch.randn(768)
-    dropped = (drop_prompts(text, null) == null).all(dim=-1).float().mean()
-    assert abs(dropped - PROMPT_DROPOUT) < 0.01
+    prompt = Prompt(torch.randn(20000, 768), torch.randn(20000, 4, 8), torch.ones(20000, 4, dtype=torch.bool))
+    null = stub_null(20000, 4)
+    out = drop_prompts(prompt, null)
+    dropped = (out.pooled == null.pooled).all(dim=-1)
+    assert abs(dropped.float().mean() - PROMPT_DROPOUT) < 0.01
+    assert torch.equal(dropped, (out.tokens == null.tokens).flatten(1).all(1)) and torch.equal(dropped, (out.mask == null.mask).all(1))  # a row is dropped whole
 
 
 def test_shift_moves_t_toward_noise():
@@ -49,32 +58,30 @@ def test_bucketed_loss():
 
 
 class ZeroNet(torch.nn.Module):
-    """F = 0, as at init; remembers the text rows it was given."""
+    """F = 0, as at init; remembers the prompt it was given."""
 
-    def __init__(self):
-        super().__init__()
-        self.null_embedding = torch.nn.Parameter(torch.randn(768))
+    null_prompt = staticmethod(stub_null)
 
-    def forward(self, x_t, t, text):
-        self.text = text
+    def forward(self, x_t, t, prompt):
+        self.prompt = prompt
         return torch.zeros_like(x_t)
 
 
 def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_the_null():
     # F = 0, so per element E[T²] = (2 - t)² + (1 - t)² for unit-normal x and ε.
     torch.manual_seed(0)
-    net, text = ZeroNet(), torch.randn(4000, 768)
-    loss, per_sample, t = flow_loss(net, torch.randn(4000, 2, 16, 16), text, shift=1.0)
+    net, prompt = ZeroNet(), Prompt(torch.randn(4000, 768), torch.randn(4000, 3, 8), torch.ones(4000, 3, dtype=torch.bool))
+    loss, per_sample, t = flow_loss(net, torch.randn(4000, 2, 16, 16), prompt, shift=1.0)
     expected = ((2 - t) ** 2 + (1 - t) ** 2).mean()
     assert torch.allclose(loss, expected, rtol=0.01)
     assert torch.allclose(per_sample.mean(), loss)
-    dropped = (net.text == net.null_embedding).all(dim=-1)
+    dropped = (net.prompt.pooled == 1).all(dim=-1)
     assert abs(dropped.float().mean() - PROMPT_DROPOUT) < 0.02
-    assert torch.equal(net.text[~dropped], text[~dropped])
+    assert all(torch.equal(a[~dropped], b[~dropped]) for a, b in zip(net.prompt, prompt))
 
 
-def test_flow_loss_passes_gradient_to_the_network(model, text):
-    loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), text, shift=1.0)
+def test_flow_loss_passes_gradient_to_the_network(model, prompt):
+    loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), prompt, shift=1.0)
     assert per_sample.shape == t.shape == (3,)
     loss.backward()
     assert model.patch_embed.weight.grad.abs().max() > 0
@@ -114,12 +121,6 @@ def test_explained_variance_by_bucket_reads_each_bin_and_puts_t_one_in_the_last(
 
 
 def test_flow_loss_samples_t_with_the_given_sigma():
-    class Zero(torch.nn.Module):
-        null_embedding = torch.zeros(4)
-
-        def forward(self, x_t, t, text):
-            return torch.zeros_like(x_t)
-
-    x, text = torch.randn(20000, 2, 2, 2), torch.zeros(20000, 4)
-    wide, narrow = flow_loss(Zero(), x, text, 1.0)[2], flow_loss(Zero(), x, text, 1.0, sigma=0.5)[2]
+    x, prompt = torch.randn(20000, 2, 2, 2), stub_null(20000, 2)
+    wide, narrow = flow_loss(ZeroNet(), x, prompt, 1.0)[2], flow_loss(ZeroNet(), x, prompt, 1.0, sigma=0.5)[2]
     assert narrow.std() < 0.6 * wide.std()
