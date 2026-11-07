@@ -18,3 +18,15 @@ Trunk code (62b5727) except gdn (branch `gdn-conv`); trial set `trial_128_seq512
 | 5e-4 | 1.6163 | 1.5568 | 1.5332 |
 
 Reads: cross attention with or without the pooled ada ends within 0.002 of plain ada at 6k; the pooled caption is not needed once cross attention exists, and cross adds nothing yet. The GDN-style mixer is 0.006 worse than the plain conv. Priming then continuing is 0.013 worse than the same 6000 steps straight. The loss falls monotonically with lr up to 2e-3, so the peak lies at or above it; 4e-3 and a trunk all-attention baseline are queued.
+
+## Scored at 256 px (the 128 px checkpoints on an unseen 16×16 grid, Lunara art eval, 6000 steps)
+
+| Run | 256 px caption loss |
+|---|---|
+| arch_crossonly_6k | 1.3740 |
+| arch_6k | 1.3769 |
+| arch_cross_6k | 1.3769 |
+| prime stage 2 | 1.3891 |
+| arch_gdn_6k | 1.3918 |
+
+The ordering at 256 px matches 128 px: the GDN-style mixer and priming lose, cross attention is level with ada (crossonly 0.003 ahead).
