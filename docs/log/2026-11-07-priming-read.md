@@ -39,6 +39,21 @@ Eval caption loss after the same number of normal-t steps:
 
 The parametrisation is consistent (our objective at one t, the same output head), so nothing has to be re-learned in the head; that is why the recovery is fast and the start is better than random. What it is not is a good use of compute for a multi-step model: the loss that is left after a few thousand steps sits at low and middle t (fine detail), which stage 1 never trains, and at its own t it gains nothing over spreading the steps. The paper uses the primed network as the backbone of a one-step generator that maps t = 0.8-like input to an image, where all of stage 1's learning is on the path; that is not our setting.
 
-## Next
+## The 1000-step stage 1 (`queue_prime1k_2026-11-07.sh`)
 
-`queue_prime1k_2026-11-07.sh`: stage 1 cut to 1000 steps (where it had mostly converged), then 5000 normal steps, scored at 6000 against scratch at 128 and 256 px. If even that loses, priming at a single t is out for the multi-step model; a high-t-first curriculum would be the remaining idea.
+Stage 1 cut to 1000 steps, then 5000 normal-t steps, against scratch:
+
+| step (total) | scratch | prime 3000 + 3000 | prime 1000 + 5000 |
+|---|---|---|---|
+| 2000 | 1.5207 | | 1.5531 |
+| 3000 | 1.5042 | | 1.5187 |
+| 4000 | 1.4935 | 1.5273 | 1.5008 |
+| 5000 | 1.4851 | 1.5042 | 1.4903 |
+| 6000 | 1.4788 | 1.4914 | 1.4830 |
+| 6000 at 256 px | 1.3769 | 1.3891 | 1.3814 |
+
+At equal normal-t steps it starts 0.010 ahead (1.5531 after 1000 against scratch at 1000, 1.5633) and ends 0.002 ahead (1.4830 after 5000 against 1.4851): the primed start is worth less than the steps it took, and its lead fades. At equal total steps it is 0.004 behind at 128 px and 0.0045 at 256 px. Shorter priming loses less only because it spends less.
+
+## Verdict
+
+Priming at one noise level does not help a multi-step flow model at our scale: every step spent there buys less than an ordinary step. Its lesson for us is the per-t one above: high-noise structure is learned fast from the ordinary t distribution anyway, and what is left to learn sits at low and middle t. A high-t-first curriculum would be the remaining form of the idea; I would not spend GPU on it before the long runs.
