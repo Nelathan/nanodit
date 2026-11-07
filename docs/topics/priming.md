@@ -79,17 +79,26 @@ to the reference only once priming has ended; the eval score is never primed.
   A clean token has no usable target under T = x_t − v (at t = 0 the x̂ is x_t whatever the output, and T = 2x − ε
   needs the unseen ε), so B and C take the loss on the other tokens only.
 - Random scattered masks let a conv block fill a token from its visible neighbours; contiguous spans push the work to
-  the attention blocks.
+  the attention blocks. Daniel's reasoning, unmeasured: a conv is most held back by large masked blocks, not by a masked row or column, which still
+  leaves 6 of a token's 8 neighbours. Once the masked share is low, the attention blocks reach clean tokens anywhere
+  and learn normally, so the share may want a saturating curve rather than a linear ramp.
 - Representation alignment, as Lodestone did with DINO for Chroma; EmbeddingGemma 2's vision tower is on disk. It is
   a Gemma 4 vision ViT: 16 layers, width 768, 16 px patches with axial RoPE at any resolution, pooled 3×3 into soft
   tokens for the language model. Its 16 px patch is our token (8 latent px of Primal 2×2), so the per-patch features
   before pooling land one 768-d vector per token on our grid. REPA aligns a trainable MLP projection of an early
   block's tokens to the frozen encoder's patch features of the clean image (cosine, weight 0.5); the best depth in
   REPA was block 8 of 28 in SiT-XL, about a third, which at d768x12 is the output of the first attention block.
-  Unbuilt; features at 128 px are 98 KB per row if stored, or computed online from decoded latents.
-- Caption alignment: the vision tower's embedding of the generated image against the pooled caption, by cosine;
-  first as an eval of prompt following, whether its image and text embeddings share a space being unchecked. Daniel's
-  reading: prompt following was poor for want of cross attention, and now waits on a long run on good captions.
+  To be built with the features computed online from decoded latents, not stored. The processor resizes every image to
+  a budget of 280 soft tokens (about 2,500 patches, near 800 px), so an 8×8 patch grid at 128 px is far below what the
+  tower sees in use. Its smallest budget, 70, takes a square image to 384 px, whose 24×24 patches pool 3×3 onto our
+  8×8 tokens (280 gives 768 px and our 16×16 at 256 px); at 384 px it matches decoded images to their captions as well
+  as at 768 (FACTS), so 384 px is the REPA input at 128 px. The probe decoded 256 px latents; a 128 px decode
+  upsampled 3×, and the per-patch features (not the probed final embedding), are unchecked.
+- Caption alignment: the image embedding of the generated image against the pooled caption, by cosine, as an eval of
+  prompt following. EmbeddingGemma 2 maps text, images, video and audio into one 768-d space; that is its core feature
+  (model card). Against the real image's cosine to the same caption, it also marks captions that miss their image.
+  Daniel's reading: prompt following was poor for want of cross attention, and now waits on a long run on good
+  captions.
 - A 64 px first stage needs latents encoded again; noted, not planned: in Daniel's samples 128 px learns the mood within
   500 steps.
 
@@ -107,9 +116,8 @@ to the reference only once priming has ended; the eval score is never primed.
 - How their s maps onto our x_t = (1 − t) x₀ + t ε is unchecked.
 - Stage 2 feature space, cheapest first: the Primal latent itself with Euclidean distances (the action-chunk result
   works on raw data); EmbeddingGemma 2's own vision tower on decoded samples (the cached checkpoint carries
-  `vision_tower` and `embed_vision`; our text path loads it with `vision_config=None`), a frozen image space that may
-  share the embedding space our captions come from, at the cost of a VAE decode per sample. Whether its image and text
-  embeddings are aligned is unchecked.
+  `vision_tower` and `embed_vision`; our text path loads it with `vision_config=None`), a frozen image space shared
+  with our captions' embeddings, at the cost of a VAE decode per sample.
 - One reference per prompt is our data's shape: each caption has one image.
 - Eval: the score grid measures a flow model at 10 t and does not apply to a one-step generator. Samples on the eval
   prompts, and FID once it exists (PLAN D5).
@@ -129,6 +137,8 @@ to the reference only once priming has ended; the eval score is never primed.
 - Masking or fixed-level noise for stage 1. The first test (`log/2026-11-07-priming-read.md`, which lists how it
   differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Masked
   priming in mode A, 90% falling to 0 over 3000 and over 6000 of 6000 steps, loses to the trunk from scratch by 0.009
-  and 0.017 (`log/2026-11-07-masked-priming.md`). Open: which of per-token t, C and D runs next.
+  and 0.017 (`log/2026-11-07-masked-priming.md`). Per-token t, the spread falling from 0.5 or 1.0 to 0 over 3000 of
+  6000 steps, ends level with scratch and 0.002 behind (`log/2026-11-07-per-token-t-priming.md`). Open: which of
+  C, D and spans runs next, and the shape of the ramp.
 - The stage-2 feature space.
 - Read the paper itself (the ablations are known only through a summary).
