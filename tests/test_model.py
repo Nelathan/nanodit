@@ -240,9 +240,11 @@ def test_a_gdn_block_writes_the_meta_channels_only_unless_told_to_write_all(prom
     assert first[..., :TOKEN_DIM].abs().max() > 0
 
 
-def test_a_gdn_scan_carries_a_token_along_its_scan_but_never_backwards_in_one_direction(prompt):
+def test_a_gdn_block_mixes_only_neighbouring_tokens(prompt):
     def poke(x):
-        x[0, :, 24:32, 0:8] += 1  # token (3, 0) of the 8 x 8 grid
+        x[0, :, 0:8, 0:8] += 1  # token (0, 0)
     first, second = gdn_change("meta", prompt, poke)
     moved = (second - first).abs().amax(-1).view(8, 8) > 0
-    assert moved[3, 0] and moved[7, 7] and moved[0, 0]  # the scans run both ways, so tokens before and after it feel it
+    expected = torch.zeros(8, 8, dtype=torch.bool)
+    expected[:2, :2] = True
+    assert torch.equal(moved, expected)
