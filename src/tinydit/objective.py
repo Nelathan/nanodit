@@ -27,13 +27,12 @@ def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
     return (1 - t) * x + t * eps
 
 
-def token_t(x: Tensor, t: Tensor, spread: float, mask_ratio: float) -> Tensor:
-    """[B, 1, H, W] each token's t, constant on its PATCH x PATCH block: the sample's t moved in logit by spread·N(0, 1),
-    and 1 (pure noise, so the target is the clean latent) on each token with probability `mask_ratio`. Both draws are
-    taken at 0 too, so primed and unprimed runs of one seed take the same random stream."""
+def token_t(x: Tensor, t: Tensor, mask_ratio: float) -> Tensor:
+    """[B, 1, H, W] each token's t, constant on its PATCH x PATCH block: the sample's t, and 1 (pure noise, so the
+    target is the clean latent) on each token with probability `mask_ratio`. The draw is taken at 0 too, so primed
+    and unprimed runs of one seed take the same random stream."""
     grid = (x.shape[0], 1, x.shape[2] // PATCH, x.shape[3] // PATCH)
-    own = torch.sigmoid(torch.logit(t).view(-1, 1, 1, 1) + spread * torch.randn(grid, device=x.device))
-    own = torch.where(torch.rand(grid, device=x.device) < mask_ratio, 1.0, own)
+    own = torch.where(torch.rand(grid, device=x.device) < mask_ratio, 1.0, t.view(-1, 1, 1, 1).expand(grid))
     return own.repeat_interleave(PATCH, 2).repeat_interleave(PATCH, 3)
 
 
@@ -52,14 +51,14 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, spread: float = 0.0, mask_ratio: float = 0.0,
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, mask_ratio: float = 0.0,
               features: Tensor | None = None) -> tuple[Tensor, Tensor, Tensor, Tensor | None]:
     """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`, and with `features`
     (REPA's target, align.py) the mean cosine of the model's projected tokens to them, else None. Each token is noised
-    at its own `token_t` around the sample's t (priming, topics/priming.md); the model is told the sample's t."""
+    at its own `token_t` (masked priming, topics/priming.md); the model is told the sample's t."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
-    x_t = noisy(x, eps, token_t(x, t, spread, mask_ratio))
+    x_t = noisy(x, eps, token_t(x, t, mask_ratio))
     prompt = drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2]))
     if features is None:
         out, alignment = model(x_t, t, prompt), None

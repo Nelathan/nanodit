@@ -60,10 +60,9 @@ The method as the writeup gives it:
 - The masked share falls smoothly to 0 (from about 90%), ending in ordinary flow training; the source's objective is
   not taken as given, the aim is our own.
 
-As built (`objective.token_t`, Config `prime_steps`, `spread_start`, `mask_start`): every 8×8 latent token is noised at
-its own t. Its logit is the sample's plus `spread` times a normal draw, and with probability `mask_ratio` it is 1 instead
-(pure ε, so under T = x_t − v its target is exactly the clean latent). `spread` and `mask_ratio` fall linearly from
-their start values to 0 over `prime_steps` steps of the run (and restart with a run that resumes from `init_from`),
+As built (`objective.token_t`, Config `prime_steps`, `mask_start`): every 8×8 latent token is noised at the sample's t,
+or with probability `mask_ratio` at 1 instead (pure ε, so under T = x_t − v its target is exactly the clean latent).
+`mask_ratio` falls linearly from `mask_start` to 0 over `prime_steps` steps of the run (and restart with a run that resumes from `init_from`),
 ending in ordinary flow training. The network is told the sample's t. There is no mask indicator: the network tells
 masked tokens by their statistics. The loss covers all tokens. While priming is on, the train loss, R² and loss by t
 mix tokens at other t than the sample's (R² assumes every token at the sample's t), so the train curves are comparable
@@ -72,7 +71,8 @@ to the reference only once priming has ended; the eval score is never primed.
 ## Ideas ledger (Daniel's answers, 2026-11-07)
 
 - Per-token t: each token its own t around the sample's, annealed to one t per image, either by narrowing the spread or
-  by shrinking the share of tokens that draw their own t. More signal per step, still leaning on attention. Wanted.
+  by shrinking the share of tokens that draw their own t. More signal per step, still leaning on attention. Run by
+  narrowing the spread (`log/2026-11-07-per-token-t-priming.md`): no real benefit, dropped from the code (Daniel).
 - The masked modes, pairing what the two groups of tokens see: (A) one group at the sampled t, the other pure noise,
   run (`log/2026-11-07-masked-priming.md`); (B) one group clean, the other pure noise, MAE-like; (C) one group clean, the other at the
   sampled t, denoising with clean context; (D) both at sampled t, the masked ones strictly noisier, which contains A.

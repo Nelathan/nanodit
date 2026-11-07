@@ -301,7 +301,7 @@ class FixedBatches:
         return self.chunks[(self.i - 1) % len(self.chunks)]
 
 
-def fixed_flow_loss(model, x, prompt, shift, sigma, spread, mask_ratio, features):
+def fixed_flow_loss(model, x, prompt, shift, sigma, mask_ratio, features):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
@@ -323,7 +323,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], prompt.rows(i, i + size)) for i in range(0, 8, size)]
-        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
+        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0, mask_ratio=0.0)
         results.append((loss, per_sample, t, [model.patch_embed.bias.grad, model.blocks[0].table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
@@ -346,7 +346,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     x = torch.randn(8, 2, 16, 16, generator=g)
     prompt = random_prompt(8, g)
     for _ in range(3):
-        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], prompt.rows(0, 4)), (x[4:], prompt.rows(4, 8))]), 2, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
+        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], prompt.rows(0, 4)), (x[4:], prompt.rows(4, 8))]), 2, shift=1.0, sigma=1.0, mask_ratio=0.0)
         assert loss.dtype == per_sample.dtype == torch.float32 and loss.isfinite() and per_sample.isfinite().all()
         for optimizer in optimizers:
             optimizer.step()
@@ -406,14 +406,14 @@ def test_both_lrs_decay_linearly_to_the_final_fraction_over_the_run_after_warmup
     assert [r["lr_fallback"] for r in log] == pytest.approx([1e-3 * f for f in factors])
 
 
-def test_the_spread_and_the_masked_share_fall_linearly_to_zero_over_prime_steps(train, tmp_path, monkeypatch):
+def test_the_masked_share_falls_linearly_to_zero_over_prime_steps(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
     config = write_config(tmp_path, steps=4, eval_every=100)
-    config.write_text(config.read_text() + "prime_steps = 2\nspread_start = 0.5\nmask_start = 0.8\n")
+    config.write_text(config.read_text() + "prime_steps = 2\nmask_start = 0.8\n")
     seen, real_accumulate = [], train.accumulate_gradients
-    monkeypatch.setattr(train, "accumulate_gradients", lambda *args: seen.append(args[5:7]) or real_accumulate(*args))
+    monkeypatch.setattr(train, "accumulate_gradients", lambda *args: seen.append(args[5]) or real_accumulate(*args))
     train.main(str(config))
-    assert [s for s, _ in seen] == pytest.approx([0.5, 0.25, 0.0, 0.0]) and [m for _, m in seen] == pytest.approx([0.8, 0.4, 0.0, 0.0])
+    assert seen == pytest.approx([0.8, 0.4, 0.0, 0.0])
 
 
 class StubVision:
@@ -432,7 +432,7 @@ def test_the_alignment_term_trains_the_projector_at_its_weight_and_the_flow_loss
         model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True, repa_block=0)
         open_gates(model)
         torch.manual_seed(2)
-        loss, _, _, _, alignment = train.accumulate_gradients(model, FixedBatches([(x, prompt)]), 1, 1.0, 1.0, 0.0, 0.0, StubVision(), weight)
+        loss, _, _, _, alignment = train.accumulate_gradients(model, FixedBatches([(x, prompt)]), 1, 1.0, 1.0, 0.0, StubVision(), weight)
         grads.append((loss, alignment, model.repa_proj[0].weight.grad))
     (loss0, alignment0, grad0), (loss5, alignment5, grad5) = grads
     assert grad0 is None or not grad0.any()  # at weight 0 the projector learns nothing

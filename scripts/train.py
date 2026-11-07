@@ -66,8 +66,7 @@ class Config:
     gdn: bool = True  # conv blocks mix by the gated state update writing every channel (SPEC §3); false: a plain depthwise conv writing the meta channels
     pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
-    prime_steps: int = 1  # priming (topics/priming.md): the two settings below fall linearly to 0 over this many steps of the run
-    spread_start: float = 0.0  # std, in logit, of each token's t about the sample's t at the first step
+    prime_steps: int = 1  # masked priming (topics/priming.md): the share below falls linearly to 0 over this many steps of the run
     mask_start: float = 0.0  # share of tokens that are pure noise at the first step
     repa_block: int | None = None  # REPA (topics/priming.md): this block's output, projected, is aligned to the vision tower's features of the clean image
     repa_weight: float = 0.5  # the alignment term's weight, (1 - cosine), beside the flow loss
@@ -230,7 +229,7 @@ class Interval:
         )
 
 
-def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float, spread: float, mask_ratio: float,
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float, mask_ratio: float,
                          vision: VisionTarget | None = None, repa_weight: float = 0.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean flow loss and the
@@ -239,7 +238,7 @@ def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float
     losses, per_samples, ts, energies, alignments = [], [], [], [], []
     for _ in range(micro_batches):
         x, prompt = stream.next()
-        loss, per_sample, t, alignment = flow_loss(model, x, prompt, shift, sigma, spread, mask_ratio, vision(x) if vision is not None else None)
+        loss, per_sample, t, alignment = flow_loss(model, x, prompt, shift, sigma, mask_ratio, vision(x) if vision is not None else None)
         total = loss if alignment is None else loss + repa_weight * (1 - alignment)
         (total / micro_batches).backward()
         losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
@@ -294,7 +293,7 @@ def main(config_path: str) -> None:
     last = start + cfg.steps
     for step in range(start + 1, last + 1):
         priming = max(0.0, 1 - (step - start - 1) / cfg.prime_steps)
-        loss, per_sample, t, energy, alignment = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma, cfg.spread_start * priming, cfg.mask_start * priming, vision if step - start <= cfg.repa_steps else None, cfg.repa_weight)
+        loss, per_sample, t, energy, alignment = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma, cfg.mask_start * priming, vision if step - start <= cfg.repa_steps else None, cfg.repa_weight)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]  # the null tokens have none without cross attention
         interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads), alignment)
