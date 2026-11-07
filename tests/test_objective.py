@@ -3,7 +3,7 @@ import torch
 from conftest import open_gates
 
 from tinydit.model import Prompt, patchify
-from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, masked_tokens, noisy, per_sample_loss, sample_t, t_quantiles, target
+from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target, token_t
 
 
 def test_loss_equals_velocity_error():
@@ -128,13 +128,22 @@ def test_flow_loss_samples_t_with_the_given_sigma():
     assert narrow.std() < 0.6 * wide.std()
 
 
-def test_masked_tokens_cover_whole_tokens_at_the_given_share():
+def test_token_t_is_constant_on_each_token_and_centred_on_the_samples_t():
     torch.manual_seed(0)
-    x = torch.randn(2000, 2, 16, 24)
-    tokens = patchify(masked_tokens(x, 0.3).expand_as(x).float())[0]  # [B, N, TOKEN_DIM], as the model reads x_t
-    assert ((tokens == 0) | (tokens == 1)).all() and (tokens.amin(-1) == tokens.amax(-1)).all()  # whole tokens
-    assert abs(tokens[..., 0].mean() - 0.3) < 0.01
-    assert not masked_tokens(x, 0.0).any() and masked_tokens(x, 1.0).all()
+    x, t = torch.randn(2000, 2, 16, 24), torch.rand(2000) * 0.8 + 0.1
+    tokens = patchify(token_t(x, t, 0.5, 0.0).expand_as(x))[0]  # [B, N, TOKEN_DIM], as the model reads x_t
+    assert (tokens.amin(-1) == tokens.amax(-1)).all()  # one t per whole token
+    offsets = torch.logit(tokens[..., 0]) - torch.logit(t)[:, None]
+    assert abs(offsets.mean()) < 0.01 and abs(offsets.std() - 0.5) < 0.01
+    assert torch.allclose(token_t(x, t, 0.0, 0.0), t.view(-1, 1, 1, 1).expand(-1, 1, 16, 24))
+
+
+def test_token_t_masks_whole_tokens_at_the_given_share_to_pure_noise():
+    torch.manual_seed(0)
+    x, t = torch.randn(2000, 2, 16, 24), torch.full((2000,), 0.3)
+    tokens = patchify(token_t(x, t, 0.0, 0.4).expand_as(x))[0][..., 0]
+    assert ((tokens == 1) | (tokens == 0.3)).all() and abs((tokens == 1).float().mean() - 0.4) < 0.01
+    assert (token_t(x, t, 0.5, 1.0) == 1).all()
 
 
 class SeeingNet(ZeroNet):

@@ -60,14 +60,14 @@ The method as the writeup gives it:
 - The masked share falls smoothly to 0 (from about 90%), ending in ordinary flow training; the source's objective is
   not taken as given, the aim is our own.
 
-As built (`objective.masked_tokens`, Config `mask_start`, `mask_steps`): each 8×8 latent token is masked with
-probability equal to the current share, which falls linearly from `mask_start` to 0 over `mask_steps` steps of the run
-(and restarts with a run that resumes from `init_from`). A masked token is pure ε, its own t = 1, so under T = x_t − v
-its target is exactly the clean latent; the other tokens are noised at the sample's t, which is the t the network is
-told. There is no mask indicator: the network tells masked tokens by their statistics. The loss covers all tokens.
-While the mask is on, the train loss, R² and loss by t mix tokens at t = 1 with tokens at the sample's t (R² assumes
-every token at the sample's t), so the train curves are comparable to the reference only once the share is 0; the
-eval score never masks.
+As built (`objective.token_t`, Config `prime_steps`, `spread_start`, `mask_start`): every 8×8 latent token is noised at
+its own t. Its logit is the sample's plus `spread` times a normal draw, and with probability `mask_ratio` it is 1 instead
+(pure ε, so under T = x_t − v its target is exactly the clean latent). `spread` and `mask_ratio` fall linearly from
+their start values to 0 over `prime_steps` steps of the run (and restart with a run that resumes from `init_from`),
+ending in ordinary flow training. The network is told the sample's t. There is no mask indicator: the network tells
+masked tokens by their statistics. The loss covers all tokens. While priming is on, the train loss, R² and loss by t
+mix tokens at other t than the sample's (R² assumes every token at the sample's t), so the train curves are comparable
+to the reference only once priming has ended; the eval score is never primed.
 
 ## Ideas ledger (Daniel's answers, 2026-11-07)
 

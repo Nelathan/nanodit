@@ -28,4 +28,4 @@ sampler_steps = 30
 eval_set = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_128_seq512.parquet"
 wandb_project = "tiny-dit"
 mask_start = 0.9
-mask_steps = 6000
+prime_steps = 6000
