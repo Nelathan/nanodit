@@ -6,8 +6,8 @@ For every STAGED/<subset>/<tar>.parquet writes ENCODED/<subset>/<tar>.parquet wi
   key              string
   source           string                   the image's generator (`unsplash_lite` for the curated photographs)
   bucket           int8                     index into stage_fine.BUCKETS
-  caption          string                   the caption encoded below (`caption_field`)
-  prompt           string                   both captions of the dataset, so the other one can be encoded later
+  caption          string                   the caption encoded below: the dataset's `prompt`, whole (no token limit)
+  prompt           string                   both captions of the dataset, so the enhanced one can be encoded later
   enhanced_prompt  string
   aesthetic        float32
   embedding        fixed_size_binary(1536)  768 bf16, the normalized pooled embedding, as precompute.py
@@ -43,12 +43,6 @@ SCHEMA = pa.schema([
 ])
 
 
-def caption_field(subset: str) -> str:
-    """The caption the image was made from: the enhanced prompt for the subsets rendered from it, else the prompt
-    (for the curated photographs, the shorter of their two descriptions)."""
-    return "enhanced_prompt" if subset.startswith("synthetic_enhanced_prompt") else "prompt"
-
-
 def pixels(jpg: bytes, half: bool) -> torch.Tensor:
     """[3, h, w] in [-1, 1]; `half` makes it a Lanczos resize to half the size."""
     image = Image.open(io.BytesIO(jpg)).convert("RGB")
@@ -73,12 +67,11 @@ def latents(vae, jpgs: list[bytes], buckets: list[int], half: bool) -> list[byte
 def encode(src: Path, out: Path, subset: str, vae, st) -> int:
     table = pq.read_table(src)
     projection = st[0].auto_model.language_model.embedding_projection
-    field = caption_field(subset)
     tmp, t0 = out.with_name(out.name + ".tmp"), time.time()
     with torch.inference_mode(), pq.ParquetWriter(tmp, SCHEMA, compression="none") as writer:
         for start in range(0, len(table), ROW_GROUP):
             chunk = table.slice(start, ROW_GROUP)
-            jpgs, buckets, captions = chunk["jpg"].to_pylist(), chunk["bucket"].to_pylist(), chunk[field].to_pylist()
+            jpgs, buckets, captions = chunk["jpg"].to_pylist(), chunk["bucket"].to_pylist(), chunk["prompt"].to_pylist()
             embedding, _ = encode_text(st, captions)
             hook = projection.register_forward_hook(lambda module, args, output: args[0])  # token states at 512, as reencode_sequence.py
             try:
