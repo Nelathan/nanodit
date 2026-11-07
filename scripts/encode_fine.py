@@ -36,6 +36,7 @@ from stage_fine import BUCKETS, STAGED
 ENCODED = Path("/mnt/luna/tiny-dit/fine/encoded")
 ROW_GROUP = 1024
 VAE_BATCH = 32
+TEXT_TOKENS = 8192  # padded tokens per text batch: a few captions run to thousands of tokens, and 32 of them overflow the GPU
 SCHEMA = pa.schema([
     ("key", pa.string()), ("source", pa.string()), ("bucket", pa.int8()), ("caption", pa.string()),
     ("prompt", pa.string()), ("enhanced_prompt", pa.string()), ("aesthetic", pa.float32()),
@@ -64,6 +65,24 @@ def latents(vae, jpgs: list[bytes], buckets: list[int], half: bool) -> list[byte
     return out
 
 
+def encode_captions(st, captions: list[str]):
+    """encode_text on batches of similar length holding at most TEXT_TOKENS padded tokens, returned in caption order."""
+    lengths = [len(ids) for ids in st.tokenizer(captions)["input_ids"]]
+    batches, batch = [], []
+    for i in sorted(range(len(captions)), key=lengths.__getitem__):
+        if batch and (len(batch) + 1) * lengths[i] > TEXT_TOKENS:
+            batches.append(batch)
+            batch = []
+        batch.append(i)
+    batches.append(batch)
+    pooled, sequences = [None] * len(captions), [None] * len(captions)
+    for batch in batches:
+        embedding, tokens = encode_text(st, [captions[i] for i in batch])
+        for i, e, s in zip(batch, embedding, tokens):
+            pooled[i], sequences[i] = e, s
+    return torch.stack(pooled), sequences
+
+
 def encode(src: Path, out: Path, subset: str, vae, st) -> int:
     table = pq.read_table(src)
     projection = st[0].auto_model.language_model.embedding_projection
@@ -72,10 +91,10 @@ def encode(src: Path, out: Path, subset: str, vae, st) -> int:
         for start in range(0, len(table), ROW_GROUP):
             chunk = table.slice(start, ROW_GROUP)
             jpgs, buckets, captions = chunk["jpg"].to_pylist(), chunk["bucket"].to_pylist(), chunk["prompt"].to_pylist()
-            embedding, _ = encode_text(st, captions)
+            embedding, _ = encode_captions(st, captions)
             hook = projection.register_forward_hook(lambda module, args, output: args[0])  # token states at 512, as reencode_sequence.py
             try:
-                _, sequences = encode_text(st, captions)
+                _, sequences = encode_captions(st, captions)
             finally:
                 hook.remove()
             writer.write_table(pa.table({
