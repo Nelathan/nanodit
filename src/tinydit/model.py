@@ -75,22 +75,27 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 
 class Block(nn.Module):
-    """A conv block mixes tokens with a depthwise 3x3 conv over the token grid and writes only the meta
-    channels (the ones past TOKEN_DIM); its MLP then decides what reaches the image channels. An attention
+    """A conv block mixes tokens over their 3x3 neighbourhood on the token grid. With `gdn` it replaces each token's
+    state by a gated update (GDN2's decoupled forget and write gates, diagonal) and writes every channel; without, a
+    depthwise 3x3 conv writes only the meta channels (the ones past TOKEN_DIM), and its MLP then decides what reaches
+    the image channels. An attention
     block mixes with gated grouped-query attention and, with `cross`, then reads the caption's token states
     through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
 
-    def __init__(self, width: int, conv: bool, cross: bool):
+    def __init__(self, width: int, conv: bool, cross: bool, gdn: bool):
         super().__init__()
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
-        self.is_conv, self.cross = conv, cross and not conv
+        self.is_conv, self.cross, self.gdn = conv, cross and not conv, gdn and conv
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         if conv:
-            self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
-            self.out = nn.Linear(width, width - TOKEN_DIM, bias=False)
-            self.conv_norm = nn.RMSNorm(width - TOKEN_DIM)
+            if self.gdn:
+                self.gdn_proj = nn.Linear(width, 4 * width, bias=False)  # value, current state, forget gate, write gate
+            self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)  # on the value with gdn, else on the input
+            self.written = width if self.gdn else width - TOKEN_DIM  # the last `written` channels
+            self.out = nn.Linear(width, self.written, bias=False)
+            self.conv_norm = nn.RMSNorm(self.written)
         else:
             self.qkv = nn.Linear(width, width + 2 * self.kv_heads * HEAD_DIM, bias=False)
             self.gate = nn.Linear(width, width, bias=False)
@@ -111,14 +116,24 @@ class Block(nn.Module):
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
 
+    def grid_conv(self, y: Tensor, h: int, w: int) -> Tensor:
+        B, N, _ = y.shape
+        return self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
+
+    def gdn_mix(self, y: Tensor, h: int, w: int) -> Tensor:
+        """The update d = wr r - f s of the token's own state s, with r the depthwise 3x3 read of the value over the
+        neighbourhood and the forget gate f and write gate wr separate per channel."""
+        value, state, forget, write = self.gdn_proj(y).chunk(4, dim=-1)
+        return torch.sigmoid(write) * F.silu(self.grid_conv(value, h, w)) - torch.sigmoid(forget) * state
+
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], text: Tensor, mask: Tensor, h: int, w: int) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
         if self.is_conv:
-            mixed = self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
-            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zeros on the image channels
+            mixed = self.gdn_mix(y, h, w) if self.gdn else self.grid_conv(y, h, w)
+            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (self.width - self.written, 0))  # zeros on the channels not written
         else:
             kv = self.kv_heads * HEAD_DIM
             q, k, v = self.qkv(y).split([self.width, kv, kv], dim=-1)
@@ -140,7 +155,7 @@ class Block(nn.Module):
 
 class DiT(nn.Module):
     def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, conv_period: int = CONV_PERIOD,
-                 cross: bool = False, pooled_ada: bool = True):
+                 cross: bool = False, pooled_ada: bool = True, gdn: bool = True):
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert cross or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
@@ -152,7 +167,7 @@ class DiT(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width) if pooled_ada else None
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
-        self.blocks = nn.ModuleList(Block(width, i % conv_period != conv_period - 1, cross) for i in range(depth))  # conv first, attention next
+        self.blocks = nn.ModuleList(Block(width, i % conv_period != conv_period - 1, cross, gdn) for i in range(depth))  # conv first, attention next
         self.init_weights()
 
     @torch.no_grad()

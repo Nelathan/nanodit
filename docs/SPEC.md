@@ -35,13 +35,13 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix by a depthwise 3×3 convolution over the token grid (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; blocks with cross attention (an experiment switch, off by default) also read the 512-d token states.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; blocks with cross attention (an experiment switch, off by default) also read the 512-d token states.
 
 | Component | Decision |
 |---|---|
 | Width | 1024 |
 | Depth | 16 layers |
-| Mixer | Every 4th block (the 4th, 8th, …) is self-attention, the others a conv block: depthwise 3×3 over all channels after modulation, an output Linear of width → width − 128 that writes the meta channels only, a branch norm and the gate |
+| Mixer | Every 4th block (the 4th, 8th, …) is self-attention, the others a conv block. After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
 | Attention | GQA: 16 query heads × head dim 64, a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
@@ -51,7 +51,7 @@ Plain DiT: no text tokens in the sequence, bidirectional mixing over image token
 | MLP | SwiGLU, hidden 4 × width |
 | Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's six shift/scale/gate vectors (mixer, MLP), plus a learned 6×width table per block; per image, not per token |
 | Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |
-| Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to the meta channels |
+| Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to it |
 | Size | Parameter counts by width and depth in FACTS |
 
 Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), DeepSeek sparse attention (no long context).
@@ -75,7 +75,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Text projection 768→1024 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
-| Conv block depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linear on Usui |
+| Conv block projection, depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |

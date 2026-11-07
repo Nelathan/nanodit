@@ -6,6 +6,7 @@ dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parque
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
 depth = 16
 width = 768
+gdn = false
 batch = 256
 micro_batch = 64
 steps = 3000

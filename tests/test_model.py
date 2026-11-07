@@ -194,26 +194,37 @@ def test_attention_uses_grouped_key_value_heads_and_a_quarter_of_the_rotary_freq
     assert sin[:, :4].abs().max() > 0 and sin[:, 4:16].eq(0).all() and sin[:, 16:20].abs().max() > 0 and sin[:, 20:].eq(0).all()  # 4 of 16 per axis
 
 
-def test_a_conv_block_writes_only_the_meta_channels(model, prompt):
+def conv_block_change(gdn, prompt, poke=None):
+    """The first conv block's change to the stream, with the MLP gate closed so it is the mixer's alone; after `poke`
+    edits the input, the change again."""
+    model = build(conv_period=2, cross=True, gdn=gdn)
     open_gates(model)
+    model.blocks[0].table.data[5] = 0
     seen = {}
     model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
-    model.blocks[0].table.data[5] = 0  # close the MLP gate: what changes is the conv branch alone
-    model(torch.randn(3, 2, 64, 64), torch.rand(3), prompt)
-    change = seen["stream_out"] - seen["stream_in"]
-    assert (change[..., :TOKEN_DIM] == 0).all() and change[..., TOKEN_DIM:].abs().max() > 0
-
-
-def test_a_conv_block_mixes_only_neighbouring_tokens(model, prompt):
-    open_gates(model)
-    seen = {}
-    model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream=out))
     x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
     model(x, t, prompt.rows(0, 1))
-    before = seen["stream"]
-    x[0, :, 0:8, 0:8] += 1  # token (0, 0)
+    first = seen["stream_out"] - seen["stream_in"]
+    if poke is None:
+        return first, None
+    poke(x)
     model(x, t, prompt.rows(0, 1))
-    moved = (seen["stream"] - before).abs().amax(-1).view(8, 8) > 0
+    return first, seen["stream_out"] - seen["stream_in"]
+
+
+@pytest.mark.parametrize("gdn", [True, False])
+def test_a_conv_block_writes_every_channel_with_the_gated_update_and_the_meta_channels_without(gdn, prompt):
+    change, _ = conv_block_change(gdn, prompt)
+    assert change[..., TOKEN_DIM:].abs().max() > 0
+    assert (change[..., :TOKEN_DIM] == 0).all() != gdn
+
+
+@pytest.mark.parametrize("gdn", [True, False])
+def test_a_conv_block_mixes_only_neighbouring_tokens(gdn, prompt):
+    def poke(x):
+        x[0, :, 0:8, 0:8] += 1  # token (0, 0)
+    first, second = conv_block_change(gdn, prompt, poke)
+    moved = (second - first).abs().amax(-1).view(8, 8) > 0
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
