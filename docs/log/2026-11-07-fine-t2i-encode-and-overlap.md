@@ -31,3 +31,15 @@ No caption is shared, so there is no prompt-level duplicate to drop; an image-le
 - Every subset encodes its short `prompt`, whole (the encoder has no token limit); the enhanced prompts stay as text and can be encoded later without the images. About 0.8 TB for all subsets.
 - The exact caption check being clean, the two datasets are taken to share no image; no image-level dedup.
 - If space runs short: old checkpoints can go, and more disk may come from elsewhere.
+
+## Defective prompts rewritten (2026-11-07)
+
+Of the prompts staged by 2294 of 6356 tars (curated, enhanced-prompt random resolution, part of enhanced-prompt square), 20 are longer than 1000 characters; 17 are ordinary long descriptions and stay. Three were defects and were rewritten in the staged Parquet, the encoded file deleted to be encoded again (the source text is still in the Fine-T2I dataset):
+
+| key | was | now |
+|---|---|---|
+| `synthetic_enhanced_prompt_random_resolution/371c6a0c-030c-48bd-b9a1-45829100abea` (train-000378, row 308) | 4148 chars: a sentence, then 4000 chars of ASCII-art underscores and slashes (1997 tokens; it ran the text encoder out of memory at batch 32) | the sentence alone: "A digital art piece of a fantasy world with mountains and valleys displaying long lines of ASCII art." |
+| `curated/4421493` (train-000108, row 721) | 2476 chars: one caption and near-copies joined by a leaked chat-template `assistant\n` | the first caption |
+| `curated/4421498` (train-000189, row 704) | 2372 chars: the same leak | the first caption |
+
+Text batches are now bounded by padded tokens (8192), so a long prompt no longer needs cutting to fit; nothing else is truncated.
