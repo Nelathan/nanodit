@@ -17,7 +17,7 @@ Idle. Every queued run has finished (2026-11-07). Fine-T2I staging (CPU and netw
 ## Results since the merge (full tables in `docs/log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`)
 
 - Cross attention is level in loss and better in samples; cross-only (no pooled ada) is as good as ada plus cross. Conv in 3/4 beats all attention by 0.010.
-- **GDN2-style local update** (branch `gdn-conv`, `../tiny-dit-gdn`): the diagonal arms beat plain conv, by 0.0014 (`gdn = "meta"`) and 0.0022 (`"all"`, image channels written too) at 128 px and 0.004 / 0.005 at 256 px, at 84 % of conv speed. The window arms (`"window"`, `"windowall"`, content-dependent read of the 9 neighbours) win at 128 px (0.005) and lose 0.044 at 256 px and run at 0.62x; I would drop them. Recommendation: merge `gdn = "all"` as the conv mixer if 0.002 for 16 % speed is worth it to you; the matrix-state GDN2 update (key-axis erase) is not built. The reference code is not read (only the Megatron-Core doc page).
+- **GDN2-style local update**, now the trunk's conv mixer (`gdn = true`, SPEC §3): the diagonal update writing every channel beat plain conv by 0.0022 at 128 px and 0.005 at 256 px at 84 % of its speed; writing only the meta channels was 0.0008 behind that. Plain conv stays as `gdn = false`, which the earlier trial configs set. The content-dependent window read won at 128 px (0.005) and lost 0.044 at 256 px at 0.62x speed; it stays on branch `gdn-conv` and is not ported. The matrix-state GDN2 update (key-axis erase) is not built; the reference code is not read (only the Megatron-Core doc page).
 - **lr** at d768x16, 3000 steps: 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950. The best is near 4e-3; 1e-3 is far off.
 - Samples for the GDN arms were not looked at (loss is blind to prompt following).
 
@@ -31,7 +31,7 @@ Idle. Every queued run has finished (2026-11-07). Fine-T2I staging (CPU and netw
 
 ## Branches
 
-Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) is the trunk, with the conv-meta merge committed. `conv-meta` (`../tiny-dit-conv`) holds the old pooled-only model with the experiment knobs and the 6k configs; the queue above still runs from it, so leave it alone until the queue ends, then it can be deleted. `gdn-conv` (`../tiny-dit-gdn`) is the GDN-style mixer arm. `g2-patch16` (`../tiny-dit-g2`) is the closed 16 px patch arm. The `.venv` of `../tiny-dit-decay` is the one used by all worktrees (`PYTHONPATH=<worktree>/src` selects the code).
+Daniel merges and pushes. `lr-decay` (worktree `../tiny-dit-decay`) is the trunk, with the conv-meta merge committed. `conv-meta` (`../tiny-dit-conv`) holds the old pooled-only model with the experiment knobs and the 6k configs; its queue is finished, so it can be deleted. `gdn-conv` (`../tiny-dit-gdn`) holds the GDN-style mixer arms; its diagonal form is merged by hand into the trunk; the window form lives only there. `g2-patch16` (`../tiny-dit-g2`) is the closed 16 px patch arm. The `.venv` of `../tiny-dit-decay` is the one used by all worktrees (`PYTHONPATH=<worktree>/src` selects the code).
 
 The older configs (`128_d1024x16_*`, `128_d768x12_ep*`, sweeps) are unchanged but now build the new architecture, so they no longer reproduce their old runs; their checkpoints do not load.
 
