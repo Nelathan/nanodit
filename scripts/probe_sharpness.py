@@ -92,7 +92,7 @@ if __name__ == "__main__":
         cfg = Config(**tomllib.load(f))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     null = load_file(cfg.null_embedding)
-    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width).to(device)
+    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn).to(device)
     batch = fixed_batch(cfg, device)
     for path in sys.argv[2:]:
         model.load_state_dict(load_file(Path(path) / "model.safetensors"))

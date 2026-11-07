@@ -78,9 +78,8 @@ class Block(nn.Module):
     """A conv block mixes tokens over their 3x3 neighbourhood on the token grid. With `gdn` it replaces each token's
     state by a gated update (GDN2's decoupled forget and write gates, diagonal) and writes every channel; without, a
     depthwise 3x3 conv writes only the meta channels (the ones past TOKEN_DIM), and its MLP then decides what reaches
-    the image channels. An attention
-    block mixes with gated grouped-query attention and, with `cross`, then reads the caption's token states
-    through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
+    the image channels. An attention block mixes with gated grouped-query attention and, with `cross`, then reads
+    the caption's token states through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
 
     def __init__(self, width: int, conv: bool, cross: bool, gdn: bool):
         super().__init__()
