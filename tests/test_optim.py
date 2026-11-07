@@ -157,3 +157,10 @@ def test_pinned_matrices_keep_their_init_norm_under_the_trust_step():
     # a relative step of 5e-2 grows an unpinned norm by about 2.5 % in 20 steps; the pin leaves bf16 rounding noise
     for p, norm in zip(tracked, start, strict=True):
         assert abs(p.detach().float().norm().item() / norm - 1) < 2e-3
+
+
+def test_the_window_offset_table_trains_on_the_fallback():
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, gdn="window")
+    matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3, pin_weights=False)
+    names = {id(p): n for n, p in model.named_parameters()}
+    assert "blocks.0.offset_table" in {names[id(p)] for g in fallback.param_groups for p in g["params"]}

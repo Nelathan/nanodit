@@ -89,11 +89,15 @@ class Block(nn.Module):
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         if conv:
             if self.gdn:  # a gated update of the token's state from its 3x3 neighbourhood (GDN2's decoupled forget and write gates)
-                self.gdn_proj = nn.Linear(width, 4 * width, bias=False)  # value, current state, forget gate, write gate
-                self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)  # on the value
+                self.window = self.gdn.startswith("window")
+                self.gdn_proj = nn.Linear(width, (6 if self.window else 4) * width, bias=False)  # [query, key,] value, current state, forget gate, write gate
+                if self.window:
+                    self.offset_table = nn.Parameter(torch.zeros(self.heads, 9))  # which of the 9 neighbours a head favours
+                else:
+                    self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)  # on the value
             else:
                 self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
-            self.written = width if self.gdn == "all" else width - TOKEN_DIM  # channels the mixer writes: all, or the meta channels
+            self.written = width if self.gdn.endswith("all") else width - TOKEN_DIM  # channels the mixer writes: all, or the meta channels
             self.out = nn.Linear(width, self.written, bias=False)
             self.conv_norm = nn.RMSNorm(self.written)
         else:
@@ -117,13 +121,27 @@ class Block(nn.Module):
         self.w_down = nn.Linear(hidden, width, bias=False)
 
     def gdn_mix(self, y: Tensor, h: int, w: int) -> Tensor:
-        """The token's state s is replaced by what its 3x3 neighbourhood writes: s' = (1 - f) s + wr u, with the forget
-        gate f and the write gate wr separate per channel, so the update is d = wr u - f s. u is the depthwise 3x3 of the
-        value projection, so the neighbours are read and the old state is erased in one parallel step."""
+        """The token's state s is replaced by what its 3x3 neighbourhood writes: d = wr r - f s, with the forget gate f
+        and the write gate wr separate per channel. The diagonal form reads r as the depthwise 3x3 of the value
+        projection; the window form reads r = sum_j softmax_j(q.k_j) v_j over the neighbours j, per head, with a
+        learned bias per head and offset, so what it reads from each direction depends on the content."""
         B, N, _ = y.shape
-        value, state, forget, write = self.gdn_proj(y).chunk(4, dim=-1)
-        u = F.silu(self.conv(value.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2))
-        return torch.sigmoid(write) * u - torch.sigmoid(forget) * state
+        if not self.window:
+            value, state, forget, write = self.gdn_proj(y).chunk(4, dim=-1)
+            r = F.silu(self.conv(value.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2))
+            return torch.sigmoid(write) * r - torch.sigmoid(forget) * state
+        q, k, v, state, forget, write = self.gdn_proj(y).chunk(6, dim=-1)
+
+        def neighbours(a: Tensor) -> Tensor:  # [B, N, heads, 9, D]; the grid's edge has fewer neighbours, the missing ones are masked below
+            a = F.unfold(a.transpose(1, 2).reshape(B, self.width, h, w), 3, padding=1)  # [B, width * 9, N]
+            return a.view(B, self.heads, HEAD_DIM, 9, N).permute(0, 4, 1, 3, 2)
+
+        q = F.normalize(q.view(B, N, self.heads, HEAD_DIM), dim=-1)
+        k_n, v_n = neighbours(F.normalize(k.view(B, N, self.heads, HEAD_DIM), dim=-1).reshape(B, N, self.width)), neighbours(v)
+        logits = torch.einsum("bnhd,bnhjd->bnhj", q, k_n) * math.sqrt(HEAD_DIM) + self.offset_table  # unit q and k: scale the dot product back up
+        inside = F.unfold(torch.ones(1, 1, h, w, device=y.device, dtype=y.dtype), 3, padding=1).view(9, N).t()  # [N, 9]
+        r = torch.einsum("bnhj,bnhjd->bnhd", logits.masked_fill(inside[None, :, None] == 0, -torch.inf).softmax(-1), v_n).reshape(B, N, self.width)
+        return torch.sigmoid(write) * r - torch.sigmoid(forget) * state
 
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], text: Tensor, mask: Tensor, h: int, w: int) -> Tensor:
         B, N, _ = x.shape

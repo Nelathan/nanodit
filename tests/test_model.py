@@ -248,3 +248,15 @@ def test_a_gdn_block_mixes_only_neighbouring_tokens(prompt):
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
+
+
+@pytest.mark.parametrize("mode", ["window", "windowall"])
+def test_a_gdn_window_block_reads_only_the_3x3_neighbourhood_and_writes_what_it_is_told_to(mode, prompt):
+    def poke(x):
+        x[0, :, 0:8, 0:8] += 1  # token (0, 0)
+    first, second = gdn_change(mode, prompt, poke)
+    moved = (second - first).abs().amax(-1).view(8, 8) > 0
+    expected = torch.zeros(8, 8, dtype=torch.bool)
+    expected[:2, :2] = True
+    assert torch.equal(moved, expected)
+    assert (first[..., :TOKEN_DIM] == 0).all() == (mode == "window")
