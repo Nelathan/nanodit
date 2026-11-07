@@ -65,6 +65,8 @@ class Config:
     gdn: bool = True  # conv blocks mix by the gated state update writing every channel (SPEC §3); false: a plain depthwise conv writing the meta channels
     pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
+    mask_start: float = 0.0  # masked priming: the share of tokens that are pure noise at the first step (topics/priming.md)
+    mask_steps: int = 1  # the share falls linearly to 0 over this many steps of the run
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
@@ -220,14 +222,14 @@ class Interval:
         )
 
 
-def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float, mask_ratio: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean loss and the
     per-sample losses, t and clean-latent energy (mean square) of every sample."""
     losses, per_samples, ts, energies = [], [], [], []
     for _ in range(micro_batches):
         x, prompt = stream.next()
-        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma)
+        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma, mask_ratio)
         (loss / micro_batches).backward()
         losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
     return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
@@ -276,7 +278,8 @@ def main(config_path: str) -> None:
     interval = Interval()
     last = start + cfg.steps
     for step in range(start + 1, last + 1):
-        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
+        mask_ratio = cfg.mask_start * max(0.0, 1 - (step - start - 1) / cfg.mask_steps)
+        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma, mask_ratio)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]  # the null tokens have none without cross attention
         interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))

@@ -2,8 +2,8 @@ import pytest
 import torch
 from conftest import open_gates
 
-from tinydit.model import Prompt
-from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
+from tinydit.model import Prompt, patchify
+from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, masked_tokens, noisy, per_sample_loss, sample_t, t_quantiles, target
 
 
 def test_loss_equals_velocity_error():
@@ -123,6 +123,30 @@ def test_explained_variance_by_bucket_reads_each_bin_and_puts_t_one_in_the_last(
 
 
 def test_flow_loss_samples_t_with_the_given_sigma():
-    x, prompt = torch.randn(20000, 2, 2, 2), stub_null(20000, 2)
+    x, prompt = torch.randn(20000, 2, 8, 8), stub_null(20000, 2)
     wide, narrow = flow_loss(ZeroNet(), x, prompt, 1.0)[2], flow_loss(ZeroNet(), x, prompt, 1.0, sigma=0.5)[2]
     assert narrow.std() < 0.6 * wide.std()
+
+
+def test_masked_tokens_cover_whole_tokens_at_the_given_share():
+    torch.manual_seed(0)
+    x = torch.randn(2000, 2, 16, 24)
+    tokens = patchify(masked_tokens(x, 0.3).expand_as(x).float())[0]  # [B, N, TOKEN_DIM], as the model reads x_t
+    assert ((tokens == 0) | (tokens == 1)).all() and (tokens.amin(-1) == tokens.amax(-1)).all()  # whole tokens
+    assert abs(tokens[..., 0].mean() - 0.3) < 0.01
+    assert not masked_tokens(x, 0.0).any() and masked_tokens(x, 1.0).all()
+
+
+class SeeingNet(ZeroNet):
+    def forward(self, x_t, t, prompt):
+        self.x_t = x_t
+        return super().forward(x_t, t, prompt)
+
+
+def test_a_fully_masked_sample_sees_pure_noise_and_its_target_is_the_clean_latent():
+    # F = 0, so the loss is E[T²]: 1 per element when T = x, against (2 - t)² + (1 - t)² unmasked
+    torch.manual_seed(0)
+    net, x = SeeingNet(), torch.randn(4000, 2, 16, 16)
+    loss, _, t = flow_loss(net, x, stub_null(4000, 2), shift=1.0, mask_ratio=1.0)
+    assert (net.x_t - x).std() > 1.3  # x_t = ε, uncorrelated with x: the difference has variance 2
+    assert abs(loss - 1) < 0.01 and ((2 - t) ** 2 + (1 - t) ** 2).mean() > 2

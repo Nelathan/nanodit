@@ -5,7 +5,7 @@ import math
 import torch
 from torch import Tensor
 
-from .model import Prompt
+from .model import PATCH, Prompt
 
 PROMPT_DROPOUT = 0.1
 
@@ -26,6 +26,13 @@ def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
     return (1 - t) * x + t * eps
 
 
+def masked_tokens(x: Tensor, ratio: float) -> Tensor:
+    """[B, 1, H, W] bool, constant on each token's PATCH x PATCH block: each token is masked with probability `ratio`.
+    Drawn at ratio 0 too, so masked and unmasked runs of one seed take the same random stream."""
+    mask = torch.rand(x.shape[0], 1, x.shape[2] // PATCH, x.shape[3] // PATCH, device=x.device) < ratio
+    return mask.repeat_interleave(PATCH, 2).repeat_interleave(PATCH, 3)
+
+
 def target(x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
     """T = x_t - v with v = ε - x."""
     return x_t - (eps - x)
@@ -41,11 +48,13 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
-    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`."""
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, mask_ratio: float = 0.0) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`. A share `mask_ratio`
+    of the tokens is pure noise, its own t = 1, so its target is the clean latent (masked priming, topics/priming.md);
+    the model is told the sample's t, the one of the other tokens."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
-    x_t = noisy(x, eps, t)
+    x_t = torch.where(masked_tokens(x, mask_ratio), eps, noisy(x, eps, t))
     out = model(x_t, t, drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2])))
     per_sample = per_sample_loss(out, x, eps, x_t)
     return per_sample.mean(), per_sample, t

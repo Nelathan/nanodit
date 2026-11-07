@@ -53,6 +53,22 @@ The method as the writeup gives it:
   image-shaped at every t, so a reconstruction objective on corrupted latents fits it without a new head.
 - Its own topic doc (this file) and branch.
 
+## Masked priming (Daniel, 2026-11-07)
+
+- No pinned t: the training t stays our logit-normal (sigma 1, centred on 0.5).
+- Only part of the tokens are denoised, so the network must complete the rest from context, through attention.
+- The masked share falls smoothly to 0 (from about 90%), ending in ordinary flow training; the source's objective is
+  not taken as given, the aim is our own.
+
+As built (`objective.masked_tokens`, Config `mask_start`, `mask_steps`): each 8×8 latent token is masked with
+probability equal to the current share, which falls linearly from `mask_start` to 0 over `mask_steps` steps of the run
+(and restarts with a run that resumes from `init_from`). A masked token is pure ε, its own t = 1, so under T = x_t − v
+its target is exactly the clean latent; the other tokens are noised at the sample's t, which is the t the network is
+told. There is no mask indicator: the network tells masked tokens by their statistics. The loss covers all tokens.
+While the mask is on, the train loss, R² and loss by t mix tokens at t = 1 with tokens at the sample's t (R² assumes
+every token at the sample's t), so the train curves are comparable to the reference only once the share is 0; the
+eval score never masks.
+
 ## How it would map onto tiny-dit (my reading, untested)
 
 - The current model is a stage-1 network at every t at once, conditioned on t. Priming's stage 1 fixes one corruption
@@ -87,9 +103,8 @@ The method as the writeup gives it:
 
 - Which start: from scratch at one corruption, or from the hero checkpoint.
 - Masking or fixed-level noise for stage 1. The first test (`log/2026-11-07-priming-read.md`, which lists how it
-  differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Proposed next,
-  each followed by ordinary flow training and judged at equal normal-t steps and equal total steps, at 128 and 256 px:
-  masked reconstruction of the latent with no time input (time embedding frozen); a faithful denoising stage 1 (time
-  embedding frozen, adaptive loss normalisation, about 5 epochs of the trial set) at s = 0.8 against 0.5.
+  differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Running: masked
+  priming as built above, 90% falling to 0 over 3000 and over 6000 of 6000 steps, against the trunk model from scratch
+  (`configs/128_d768x12_mask90_over{3,6}k_6k.toml`, `128_d768x12_gdn_6k.toml`), scored at 128 and 256 px.
 - The stage-2 feature space.
 - Read the paper itself (the ablations are known only through a summary).
