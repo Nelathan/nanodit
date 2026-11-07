@@ -9,7 +9,22 @@ gets its own branch when it starts.
 Kim, Park et al., "Are We Overthinking One-Step Generation?" (Priming Models), arXiv 2610.20331; repo
 https://github.com/JaeyeonKim01/priming; Moritz Piening's blog on Stage-1 choices,
 https://moepien.github.io/blog/better-priming/. Known here only through Daniel's writeup of two X threads, kept verbatim
-in `references/priming-threads.md`. Nothing below is checked against the paper or the code yet.
+in `references/priming-threads.md`. The repo's code is read (next section); the paper only through a summary.
+
+## What the code does (repo read 2026-11-07: `pretrain.py`, `models/priming.py`, `losses/`, the configs)
+
+- Stage 1 input `(1 − s) x + s ε` at s = 0.8, enforced in `pretrain.py`; target the clean image (x-prediction).
+- No time input: the network has no timestep path at all. Class conditioning with 8 class tokens, no label dropout.
+- Loss: per-sample pixel MSE divided by its own detached value plus eps (adaptive normalisation, in the code only),
+  plus LPIPS (0.4) and a ConvNeXt feature loss (0.1) on random resized crops at 224.
+- A masking corruption exists: a share s of the patches replaced by noise, the loss on all pixels. It is not the
+  production recipe; the summary gives it FID 1.87, conditions unstated (single-level denoising at s = 0.8 is 1.65 in
+  the s sweep below).
+- 160 epochs of ImageNet (200,160 updates at batch 1024), Muon at lr 1e-3 constant, no warmup, weight decay 0, EMA
+  0.9999; pixel space at 256 px, patch 16; OST-B is d768×16, OST-L d1024×32.
+- Nothing in stage 1 is cheaper per step than flow training (the perceptual nets add cost); the "10×" is total compute
+  to a one-step FID against Drifting. No experiment starts multi-step diffusion from a primed network.
+- s = 0.8 is tuned for one-step generation, whose input is pure noise: close to it, with signal left to reconstruct.
 
 The method as the writeup gives it:
 - Stage 1, reconstruction pretraining: one network learns to reconstruct clean images from corrupted inputs. The
@@ -71,6 +86,10 @@ The method as the writeup gives it:
 ## Open
 
 - Which start: from scratch at one corruption, or from the hero checkpoint.
-- Masking or fixed-level noise for stage 1.
+- Masking or fixed-level noise for stage 1. The first test (`log/2026-11-07-priming-read.md`, which lists how it
+  differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Proposed next,
+  each followed by ordinary flow training and judged at equal normal-t steps and equal total steps, at 128 and 256 px:
+  masked reconstruction of the latent with no time input (time embedding frozen); a faithful denoising stage 1 (time
+  embedding frozen, adaptive loss normalisation, about 5 epochs of the trial set) at s = 0.8 against 0.5.
 - The stage-2 feature space.
-- Read the paper and the repo before any code.
+- Read the paper itself (the ablations are known only through a summary).

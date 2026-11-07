@@ -1,10 +1,12 @@
 # Priming read (2026-11-07)
 
-What the 3000 + 3000 priming arms (`128_d768x12_arch_prime_s80_3k`, then `..._cont_3k`) show, against `128_d768x12_arch_6k` from scratch. Same model (plain conv in 3/4, d768x12), data, batch 256 and seed. Stage 1 is our own objective (F = x_t − v) at a single noise level, t = 0.8, with the time embedding kept; stage 2 is ordinary flow training from its checkpoint with no warmup. At t = 0.8 the target is F = 1.2 x − 0.2 ε, so stage 1 is nearly a clean-latent prediction from a heavily noised input, the same family as the paper's stage 1 (denoising regression at t = 0.8).
+What the 3000 + 3000 priming arms (`128_d768x12_arch_prime_s80_3k`, then `..._cont_3k`) show, against `128_d768x12_arch_6k` from scratch. Same model (plain conv in 3/4, d768x12), data, batch 256 and seed. Stage 1 is our own objective (F = x_t − v) at a single noise level, t = 0.8, with the time embedding kept; stage 2 is ordinary flow training from its checkpoint with no warmup. At t = 0.8 the target is F = 1.2 x − 0.2 ε, so stage 1 is nearly a clean-latent prediction from a heavily noised input (x̂ = (1 − t) x_t + t F, so x-MSE is t² times F-MSE: at fixed t our loss is x-prediction up to a constant).
+
+The arms were set up from the threads before the repo was read, and are not a faithful stage 1 (`topics/priming.md`, What the code does): the repo's network has no time input, ours fed a constant t to a trained time embedding that stage 2 then had to adapt; the repo normalises each sample's loss by its own detached value and adds perceptual losses, ours is plain MSE; it trains 160 epochs, our 3000-step stage 1 0.96 of an epoch of the 798k-row trial set (768k rows seen), the 1000-step one 0.32; its s = 0.8 is tuned for one-step generation from pure noise, which we do not do. Nor is it the masked reconstruction Daniel directed on 2026-11-05.
 
 ## Speed
 
-Median training throughput: scratch 881 img/s, stage 1 877, stage 2 877. Priming is not faster per image: same network, same batch, and the dropped time embedding of the paper would cost nothing here either. The paper's "10x" is compute to a one-step FID, not throughput.
+Median training throughput: scratch 881 img/s, stage 1 877, stage 2 877. Priming is not faster per image: same network, same batch, and the source's dropped time embedding would cost nothing here either. The paper's "10x" is compute to a one-step FID, not throughput.
 
 ## Stage 1 saturates by step 2000
 
@@ -54,6 +56,6 @@ Stage 1 cut to 1000 steps, then 5000 normal-t steps, against scratch:
 
 At equal normal-t steps it starts 0.010 ahead (1.5531 after 1000 against scratch at 1000, 1.5633) and ends 0.002 ahead (1.4830 after 5000 against 1.4851): the primed start is worth less than the steps it took, and its lead fades. At equal total steps it is 0.004 behind at 128 px and 0.0045 at 256 px. Shorter priming loses less only because it spends less.
 
-## Verdict
+## Verdict on single-level denoising
 
-Priming at one noise level does not help a multi-step flow model at our scale: every step spent there buys less than an ordinary step. Its lesson for us is the per-t one above: high-noise structure is learned fast from the ordinary t distribution anyway, and what is left to learn sits at low and middle t. A high-t-first curriculum would be the remaining form of the idea; I would not spend GPU on it before the long runs.
+Single-level denoising at t = 0.8 with a trained time embedding does not help a multi-step flow model at our scale: every step spent there buys less than an ordinary step. That says nothing yet about priming done as the source does it, nor about masked reconstruction. The per-t lesson stands: high-noise structure is learned fast from the ordinary t distribution anyway, and what is left to learn sits at low and middle t, which a single high noise level never trains. Hypothesis, untested: a corruption that teaches content from context (masking) could add something flow training does not already learn.
