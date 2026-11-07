@@ -12,7 +12,7 @@ Still open (yours): which attention types sit in which layers under the 3/4 conv
 
 ## On the GPU
 
-Idle. Every queued run has finished (2026-11-07). Fine-T2I staging (CPU and network) is the only thing running.
+The Fine-T2I curated encode (`queue_encode_curated_2026-11-07.sh`, log `/mnt/luna/tiny-dit/fine/encode_curated_2026-11-07.log`, about 25 min). Nothing else is queued.
 
 ## Results since the merge (full tables in `docs/log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`)
 
@@ -23,10 +23,10 @@ Idle. Every queued run has finished (2026-11-07). Fine-T2I staging (CPU and netw
 
 ## Not done yet from the overnight brief
 
-- **Priming**: the run tested only stage 1 + ordinary flow training. The paper's stage 2 is distributional (Sinkhorn/OT) post-training of a one-step generator, so the 10x claim is about one-step generation, not about multi-step flow training. Not a test of the paper.
+- **Priming**: done, and out for the multi-step model. 3000 + 3000 is 0.013 behind scratch, 1000 + 5000 is 0.004 behind; stage 1 plateaus by 2000 steps, gains nothing at its own t, runs at the same img/s, and the primed lead at equal normal-t steps fades. `docs/log/2026-11-07-priming-read.md`. The paper's one-step setting is not tested.
 - **Fine-T2I staging** runs since 2026-11-07 (about 1270 of 6356 tars done, 27 GB staged, 481 GB free on luna; `scripts/stage_fine.py`, log `/mnt/luna/tiny-dit/fine/stage_2026-11-07.log`, output `/mnt/luna/tiny-dit/fine/staged/<subset>/train-NNNNNN.parquet`, resumable: rerun the same command).
 - **256 px training readiness**: `shuffle.py` now reads each shard in 4096-row pieces (the 256 px shuffle was killed by the memory reaper on 3.3 GB shards); tests cover it. The 256 px trial shuffle is not restarted (an earlier instruction said not to without being asked); command was `scripts/shuffle.py OUT 256 SHARD…` on shards 0-15. Memory use of a 256 px training step is untested.
-- **Second dataset (Fine-T2I) and cross-dedup**: not started. Plan: per-tar download → resize to cover and crop overflow into the 7 aspect buckets → small staged images, then a GPU stage for latents and caption embeddings; per-bucket files and a stream drawing one bucket per batch; dedup against dataset 1 by exact latent bytes and a pooled-latent signature. The raw tars (2.3 TB) do not fit on `/mnt/luna`, hence per tar. Download is about 16 h.
+- **Fine-T2I encoding**: `scripts/encode_fine.py` (latents at 128 and 256 px per bucket, pooled embedding, 512-d sequence of one caption) is built, reviewed and smoke-tested; curated is encoding. Undecided: which caption and where it fits (`docs/log/2026-11-07-fine-t2i-encode-and-overlap.md`): own caption everywhere about 1.3 TB, short prompt everywhere about 0.8 TB, against about 1 TB free over luna and vel-ssd. No caption is shared with dataset 1, so dedup needs an image signature; not built. The per-bucket shuffle and stream (data.py reads fixed-size latents) are not built.
 - **One-epoch readiness for d768×16, both datasets**: the lr sweep points to 2e-3 to 4e-3 (the 1-epoch check sweeps 2e-3, 1e-3, 5e-4 as briefed, so it would not reach the best); waits on the two items above.
 
 ## Branches
