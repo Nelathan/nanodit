@@ -61,7 +61,7 @@ class Config:
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     conv_period: int = 4  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
     cross: bool = False  # the attention blocks also read the caption's token states by cross attention
-    gdn: bool = False  # conv blocks mix by a short conv on q, k, v and a global linear attention
+    gdn: str = ""  # conv blocks mix by Gated DeltaNet-2 scans, writing "meta" or "all" channels; empty is the depthwise conv
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
     pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it

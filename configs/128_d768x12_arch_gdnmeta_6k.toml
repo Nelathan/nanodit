@@ -1,5 +1,5 @@
 # The merged model (conv in 3/4 of the blocks, 3 KV heads, a quarter of the RoPE frequencies, meta-only patch embed) at d768x12 on the 16-shard trial set, 6000 steps, pooled caption only. Fields: scripts/train.py Config.
-name = "128_d768x12_arch_gdn_6k"
+name = "128_d768x12_arch_gdnmeta_6k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parquet"
@@ -27,4 +27,4 @@ guidance = 4.0
 sampler_steps = 30
 eval_set = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_128_seq512.parquet"
 wandb_project = "tiny-dit"
-gdn = true
+gdn = "meta"

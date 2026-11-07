@@ -5,6 +5,7 @@ from typing import NamedTuple
 
 import torch
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from torch import Tensor, nn
 
 PATCH = 8
@@ -74,28 +75,41 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
     return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
 
 
+SCANS = ("rows", "rows reversed", "columns", "columns reversed")
+
+
+def scan_orders(h: int, w: int, device) -> list[Tensor]:
+    """Token indices in each scan's order."""
+    rows = torch.arange(h * w, device=device)
+    columns = rows.view(h, w).t().reshape(-1)
+    return [rows, rows.flip(0), columns, columns.flip(0)]
+
+
 class Block(nn.Module):
     """A conv block mixes tokens with a depthwise 3x3 conv over the token grid and writes only the meta
     channels (the ones past TOKEN_DIM); its MLP then decides what reaches the image channels. An attention
     block mixes with gated grouped-query attention and, with `cross`, then reads the caption's token states
     through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
 
-    def __init__(self, width: int, conv: bool, cross: bool, gdn: bool = False):
+    def __init__(self, width: int, conv: bool, cross: bool, gdn: str = ""):
         super().__init__()
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
-        self.is_conv, self.cross, self.gdn = conv, cross and not conv, gdn and conv
+        self.is_conv, self.cross, self.gdn = conv, cross and not conv, gdn if conv else ""
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         if conv:
-            if self.gdn:  # q, k, v each through a depthwise 3x3, then a global linear attention (GDN2's front-end, without its causal recurrence)
-                self.qkv = nn.Linear(width, 3 * width, bias=False)
-                self.conv = nn.Conv2d(3 * width, 3 * width, 3, padding=1, groups=3 * width, bias=False)
-                self.gate = nn.Linear(width, width, bias=False)
+            if self.gdn:  # GDN2 (decay, erase and write gates, delta rule) scanned over the grid in four directions
+                assert self.heads % len(SCANS) == 0
+                self.gdn_proj = nn.Linear(width, 6 * width, bias=False)  # q, k, v, decay, erase (key axis), write (value axis)
+                self.conv = nn.Conv2d(3 * width, 3 * width, 3, padding=1, groups=3 * width, bias=False)  # on q, k, v
+                self.gdn_gate = nn.Linear(width, width, bias=False)
+                self.gdn_norm = nn.RMSNorm(HEAD_DIM)
             else:
                 self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
-            self.out = nn.Linear(width, width - TOKEN_DIM, bias=False)
-            self.conv_norm = nn.RMSNorm(width - TOKEN_DIM)
+            self.written = width if self.gdn == "all" else width - TOKEN_DIM  # channels the mixer writes: all, or the meta channels
+            self.out = nn.Linear(width, self.written, bias=False)
+            self.conv_norm = nn.RMSNorm(self.written)
         else:
             self.qkv = nn.Linear(width, width + 2 * self.kv_heads * HEAD_DIM, bias=False)
             self.gate = nn.Linear(width, width, bias=False)
@@ -116,6 +130,33 @@ class Block(nn.Module):
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
 
+    def gdn_mix(self, y: Tensor, h: int, w: int) -> Tensor:
+        """Gated DeltaNet-2 over the token grid: per head and token the state S [K, V] is decayed per key channel,
+        erased along the key axis and written along the value axis, S = (I - k (b*k)^T) diag(exp g) S + k (w*v)^T,
+        read as o = S^T q. The grid has no order, so a quarter of the heads scan it row by row, a quarter backwards,
+        and the others the same by columns."""
+        B, N, _ = y.shape
+        qkv, g, erase, write = self.gdn_proj(y).split([3 * self.width] * 1 + [self.width] * 3, dim=-1)
+        qkv = F.silu(self.conv(qkv.transpose(1, 2).reshape(B, 3 * self.width, h, w)).flatten(2).transpose(1, 2))
+        q, k, v = (a.reshape(B, N, len(SCANS), -1, HEAD_DIM).float() for a in qkv.chunk(3, dim=-1))  # [B, N, scan, heads per scan, D]
+        q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
+        g = F.logsigmoid(g.float() + 3).reshape(q.shape)  # decay starts near 1: exp(logsigmoid(3)) = 0.95
+        erase, write = (torch.sigmoid(a.float()).reshape(q.shape) for a in (erase, write))
+        order = scan_orders(h, w, y.device)
+        out = torch.zeros_like(q)
+        for s, index in enumerate(order):
+            q_s, k_s, v_s, g_s, e_s, w_s = (a[:, index, s] for a in (q, k, v, g, erase, write))  # [B, N, heads, D] in scan order
+            S = q.new_zeros(B, q.shape[3], HEAD_DIM, HEAD_DIM)
+            o = []
+            for t in range(N):
+                S = S * g_s[:, t].exp()[..., None]
+                S = S - k_s[:, t, ..., None] * torch.einsum("bhk,bhkv->bhv", e_s[:, t] * k_s[:, t], S)[..., None, :]
+                S = S + k_s[:, t, ..., None] * (w_s[:, t] * v_s[:, t])[..., None, :]
+                o.append(torch.einsum("bhk,bhkv->bhv", q_s[:, t], S))
+            out[:, index, s] = torch.stack(o, 1)
+        out = self.gdn_norm(out.to(y.dtype)).reshape(B, N, self.width)
+        return out * F.silu(self.gdn_gate(y))
+
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], text: Tensor, mask: Tensor, h: int, w: int) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
@@ -123,14 +164,10 @@ class Block(nn.Module):
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
         if self.is_conv:
             if self.gdn:
-                z = F.silu(self.conv(self.qkv(y).transpose(1, 2).reshape(B, 3 * self.width, h, w)).flatten(2).transpose(1, 2))
-                q, k, v = (a.view(B, N, self.heads, HEAD_DIM).transpose(1, 2) for a in z.chunk(3, dim=-1))
-                q, k = F.normalize(q, dim=-1), F.normalize(k, dim=-1)
-                state = k.transpose(-1, -2) @ v  # [B, heads, HEAD_DIM, HEAD_DIM]: every token writes, every token reads
-                mixed = ((q @ state) / N).transpose(1, 2).reshape(B, N, self.width) * torch.sigmoid(self.gate(y))
+                mixed = checkpoint(self.gdn_mix, y, h, w, use_reentrant=False)  # the scan keeps a state per token for the backward pass: recompute it
             else:
                 mixed = self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
-            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zeros on the image channels
+            x = x + gate_a[:, None] * F.pad(self.conv_norm(self.out(mixed)), (self.width - self.written, 0))  # zeros on the image channels if not written
         else:
             kv = self.kv_heads * HEAD_DIM
             q, k, v = self.qkv(y).split([self.width, kv, kv], dim=-1)
@@ -152,7 +189,7 @@ class Block(nn.Module):
 
 class DiT(nn.Module):
     def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, conv_period: int = CONV_PERIOD,
-                 cross: bool = False, pooled_ada: bool = True, gdn: bool = False):
+                 cross: bool = False, pooled_ada: bool = True, gdn: str = ""):
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert cross or pooled_ada, "the caption must reach the network by cross attention or the adaLN"

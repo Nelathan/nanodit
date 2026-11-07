@@ -219,8 +219,8 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(model, prompt):
     assert torch.equal(moved, expected)
 
 
-def test_a_gdn_conv_block_mixes_every_token_and_still_writes_only_the_meta_channels(prompt):
-    model = build(conv_period=2, gdn=True)
+def gdn_change(mode, prompt, perturb):
+    model = build(conv_period=2, gdn=mode)
     open_gates(model)
     model.blocks[0].table.data[5] = 0  # close the MLP gate: what changes is the mixer alone
     seen = {}
@@ -228,8 +228,21 @@ def test_a_gdn_conv_block_mixes_every_token_and_still_writes_only_the_meta_chann
     x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
     model(x, t, prompt.rows(0, 1))
     first = seen["stream_out"] - seen["stream_in"]
-    x[0, :, 0:8, 0:8] += 1
+    perturb(x)
     model(x, t, prompt.rows(0, 1))
-    second = seen["stream_out"] - seen["stream_in"]
-    assert (first[..., :TOKEN_DIM] == 0).all() and (second[..., :TOKEN_DIM] == 0).all()
-    assert (second - first)[0, -1].abs().max() > 0  # the far corner token feels token (0, 0) through the global state
+    return first, seen["stream_out"] - seen["stream_in"]
+
+
+def test_a_gdn_block_writes_the_meta_channels_only_unless_told_to_write_all(prompt):
+    first, _ = gdn_change("meta", prompt, lambda x: None)
+    assert (first[..., :TOKEN_DIM] == 0).all() and first[..., TOKEN_DIM:].abs().max() > 0
+    first, _ = gdn_change("all", prompt, lambda x: None)
+    assert first[..., :TOKEN_DIM].abs().max() > 0
+
+
+def test_a_gdn_scan_carries_a_token_along_its_scan_but_never_backwards_in_one_direction(prompt):
+    def poke(x):
+        x[0, :, 24:32, 0:8] += 1  # token (3, 0) of the 8 x 8 grid
+    first, second = gdn_change("meta", prompt, poke)
+    moved = (second - first).abs().amax(-1).view(8, 8) > 0
+    assert moved[3, 0] and moved[7, 7] and moved[0, 0]  # the scans run both ways, so tokens before and after it feel it
