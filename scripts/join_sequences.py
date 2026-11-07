@@ -4,13 +4,14 @@ usage: join_sequences.py OUT RESOLUTION SHARD
 """
 import sys
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from shuffle import read_shard
 
 
 def join(shard: str, resolution: int, out: str) -> None:
-    table = read_shard(shard, resolution, ["key", "source", "caption", "embedding", f"latent_{resolution}"])
+    table = pa.concat_tables(read_shard(shard, ["key", "source", "caption", "embedding", f"latent_{resolution}"]))
     pq.write_table(table, out, compression="none")
     print(f"{out}: {len(table)} rows", flush=True)
 
