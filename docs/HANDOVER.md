@@ -1,6 +1,6 @@
 # Handover
 
-Morning report, 2026-11-06 (night run). Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` how to run things.
+Morning report, 2026-11-07. Orientation only; `PLAN.md` carries the questions, `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` how to run things.
 
 ## Where it stands
 
@@ -10,23 +10,24 @@ SPEC still says width 1024 in the §3 table; the trial and planned long run are 
 
 Still open (yours): which attention types sit in which layers under the 3/4 conv pattern, and whether self and cross attention are sequential or parallel into one meta-only out projection. I proposed a pattern-string layer layout (`conv conv conv self+cross`, `|` for parallel); unanswered. Cross attention versus pooled ada is to be tested with and without ada at a length where tokens can matter; the 3k arm decides nothing.
 
-## Running on the GPU (one job at a time)
+## On the GPU
 
-1. `queue_6k_2026-11-06.sh` (branch `conv-meta`, old pooled-only model): 6000-step references `conv4_gqa3_rope25_meta`, `conv4`, `attn`, each scored at 256 px into `score_256.jsonl` and `queue_6k_2026-11-06.log`. The first is done (256 px caption loss 1.3804).
-2. `queue_trunk_2026-11-06.sh` waits for (1), then runs on the trunk: `arch_6k` (the reference; scored at 256 px), the d768×16 lr sweep 2e-3 / 1e-3 / 5e-4 (3000 steps each, constant lr, fallback 1.25×), `arch_cross_6k`, `arch_crossonly_6k`, then priming stage 1 (`arch_prime_s80_3k`: shift 4, t sigma 0.0001) and stage 2 (`arch_prime_s80_cont_3k`, from its checkpoint, normal t), the latter scored at 256 px. Log: `runs/queue_trunk_2026-11-06.log`. It ends with the line `queue done`.
+Idle. Every queued run has finished (2026-11-07). Fine-T2I staging (CPU and network) is the only thing running.
 
-Priming needs no new code: the first stage is the existing `shift` / `t_sigma` knobs, the second `init_from` with `warmup = 0`. Its verdict is the continuation against `arch_6k` at equal total steps.
+## Results since the merge (full tables in `docs/log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`)
 
-Runs live under `/mnt/mars/ai/tiny-dit/runs/`; each finished run gets a dated note in `docs/log/` and a one-line insight in FACTS.
+- Cross attention is level in loss and better in samples; cross-only (no pooled ada) is as good as ada plus cross. Conv in 3/4 beats all attention by 0.010.
+- **GDN2-style local update** (branch `gdn-conv`, `../tiny-dit-gdn`): the diagonal arms beat plain conv, by 0.0014 (`gdn = "meta"`) and 0.0022 (`"all"`, image channels written too) at 128 px and 0.004 / 0.005 at 256 px, at 84 % of conv speed. The window arms (`"window"`, `"windowall"`, content-dependent read of the 9 neighbours) win at 128 px (0.005) and lose 0.044 at 256 px and run at 0.62x; I would drop them. Recommendation: merge `gdn = "all"` as the conv mixer if 0.002 for 16 % speed is worth it to you; the matrix-state GDN2 update (key-axis erase) is not built. The reference code is not read (only the Megatron-Core doc page).
+- **lr** at d768x16, 3000 steps: 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950. The best is near 4e-3; 1e-3 is far off.
+- Samples for the GDN arms were not looked at (loss is blind to prompt following).
 
 ## Not done yet from the overnight brief
 
-- **GDN2's state update as a 3×3 conv mixer**: branch `gdn-conv` (`../tiny-dit-gdn`). Per token the update is `d = write ⊙ silu(dwconv3×3(value)) − forget ⊙ state`, with decoupled per-channel forget and write gates and the token's own projected state; parallel over tokens, no scan, no global state. `gdn = "meta"` writes the meta channels, `"all"` the image channels too (outer gate zero-init). In the diagonal form decay and erase collapse into one forget gate; GDN2's key-axis erase needs a K×V matrix state, which a 3×3 window version would pay for (about 9 steps of [tokens, heads, K, V]); not built. The reference code is not read (only the Megatron-Core doc page). The content-dependent variant is built too (`gdn = "window"` / `"windowall"`: per head, softmax over the 9 neighbours of q·k plus a learned per-offset bias reads the value; same gated update; 39 tests pass). `queue_window_2026-11-07.sh` benchmarks it after the diagonal arms and runs `arch_window_6k` and `arch_windowall_6k` only if it holds 680 img/s or more at 128 px (half the conv's 1376); otherwise it logs why not. `queue_gdn3_2026-11-07.sh`: speed bench (`bench_gdn_2026-11-07.log`), then `arch_gdnmeta_6k` and `arch_gdnall_6k` with 256 px scores, after the lr 8e-3 run. The earlier simplified arm (global linear attention, 1.4849) and the four-direction scan (66.7 img/s against 1376, abandoned) are history; numbers for the first are in `docs/log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`.
 - **Priming**: the run tested only stage 1 + ordinary flow training. The paper's stage 2 is distributional (Sinkhorn/OT) post-training of a one-step generator, so the 10x claim is about one-step generation, not about multi-step flow training. Not a test of the paper.
-- **Fine-T2I staging** runs since 2026-11-07 (`scripts/stage_fine.py`, log `/mnt/luna/tiny-dit/fine/stage_2026-11-07.log`, output `/mnt/luna/tiny-dit/fine/staged/<subset>/train-NNNNNN.parquet`, resumable: rerun the same command).
+- **Fine-T2I staging** runs since 2026-11-07 (about 1270 of 6356 tars done, 27 GB staged, 481 GB free on luna; `scripts/stage_fine.py`, log `/mnt/luna/tiny-dit/fine/stage_2026-11-07.log`, output `/mnt/luna/tiny-dit/fine/staged/<subset>/train-NNNNNN.parquet`, resumable: rerun the same command).
 - **256 px training readiness**: `shuffle.py` now reads each shard in 4096-row pieces (the 256 px shuffle was killed by the memory reaper on 3.3 GB shards); tests cover it. The 256 px trial shuffle is not restarted (an earlier instruction said not to without being asked); command was `scripts/shuffle.py OUT 256 SHARD…` on shards 0-15. Memory use of a 256 px training step is untested.
 - **Second dataset (Fine-T2I) and cross-dedup**: not started. Plan: per-tar download → resize to cover and crop overflow into the 7 aspect buckets → small staged images, then a GPU stage for latents and caption embeddings; per-bucket files and a stream drawing one bucket per batch; dedup against dataset 1 by exact latent bytes and a pooled-latent signature. The raw tars (2.3 TB) do not fit on `/mnt/luna`, hence per tar. Download is about 16 h.
-- **One-epoch readiness for d768×16, both datasets**: waits on the lr sweep (constant 1e-3 is the working guess) and on the two items above.
+- **One-epoch readiness for d768×16, both datasets**: the lr sweep points to 2e-3 to 4e-3 (the 1-epoch check sweeps 2e-3, 1e-3, 5e-4 as briefed, so it would not reach the best); waits on the two items above.
 
 ## Branches
 

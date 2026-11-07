@@ -42,4 +42,21 @@ The ordering at 256 px matches 128 px: the GDN-style mixer and priming lose, cro
 | arch_attn_6k (trunk all-attention baseline) | 1.4884 |
 | d768x16, lr 4e-3, 3000 steps | 1.4868 (2e-3: 1.4933; 1000: 1.5423, 2000: 1.5023) |
 
-Conv in 3/4 of the blocks beats all-attention by 0.010 on the trunk data. The lr loss still falls at 4e-3, so the peak is not found; 8e-3 is next.
+Conv in 3/4 of the blocks beats all-attention by 0.010 on the trunk data.
+
+## Local GDN2-style mixers, lr 8e-3 (finished 2026-11-07)
+
+Conv blocks mix by a gated update on the token's own state (`d = write * silu(value-read) - forget * state`); the diagonal arms read the value through the depthwise 3x3, the window arms read all 9 neighbours by a per-head softmax over q.k plus a learned per-offset bias. `meta` / `window` write the meta channels, `all` / `windowall` the image channels too. Branch `gdn-conv`, d768x12, 6000 steps, caption loss, plain conv (arch_6k) as reference.
+
+| Run | 128 px | 256 px | img/s at 128 px / 256 px |
+|---|---|---|---|
+| arch_6k (plain conv) | 1.4788 | 1.3769 | 1395 / not measured |
+| gdnmeta | 1.4774 | 1.3730 | 1169 |
+| gdnall | 1.4766 | 1.3722 | 1164 |
+| window | 1.4741 | 1.4211 | 873 / 202 |
+| windowall | 1.4787 | 1.4245 | 794 / 200 |
+
+- The diagonal arms beat plain conv by 0.0014 and 0.0022 at 128 px and by 0.0039 and 0.0047 at 256 px, at 84 % of its speed. Writing the image channels helps a little (0.0008 / 0.0008).
+- The window arms are the best at 128 px (window, 0.0047) and lose 0.044 at 256 px: reading by content-dependent weights does not transfer to the grid it was not trained on, where the diagonal read does. Window is also 0.62x as fast.
+- The d768x16 lr sweep at 3000 steps: 5e-4 1.5332, 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950. The peak lies between 2e-3 and 8e-3, near 4e-3.
+
