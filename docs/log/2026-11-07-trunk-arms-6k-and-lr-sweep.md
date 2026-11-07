@@ -30,3 +30,16 @@ Reads: cross attention with or without the pooled ada ends within 0.002 of plain
 | arch_gdn_6k | 1.3918 |
 
 The ordering at 256 px matches 128 px: the GDN-style mixer and priming lose, cross attention is level with ada (crossonly 0.003 ahead).
+
+## Samples at 6000 steps (prompt following, which the loss does not show)
+
+`2026-11-07-samples/{arch_6k,arch_cross_6k,arch_crossonly_6k}.png`: the 16 fixed prompts, same noise per cell. Both cross arms bind more of the prompt than ada alone: the red-haired woman of prompt 6 shows red hair in both cross grids and a generic figure in the ada grid; the snow-mountain bear prompt and the club-lights horse DJ prompt show snow and stage lights in the cross grids; the white-backdrop photo prompt keeps a white background with a figure. Cross-only (no pooled ada) is as good as ada plus cross. The loss differences between the three are under 0.002, so the loss was blind to this. Verdict: cross attention helps prompt following at 6k; whether it needs ada alongside is not visible, and cross-only is the simpler model.
+
+## Later arms
+
+| Run | 6000 (or 3000) |
+|---|---|
+| arch_attn_6k (trunk all-attention baseline) | 1.4884 |
+| d768x16, lr 4e-3, 3000 steps | 1.4868 (2e-3: 1.4933; 1000: 1.5423, 2000: 1.5023) |
+
+Conv in 3/4 of the blocks beats all-attention by 0.010 on the trunk data. The lr loss still falls at 4e-3, so the peak is not found; 8e-3 is next.
