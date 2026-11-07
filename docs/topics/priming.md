@@ -69,6 +69,30 @@ While the mask is on, the train loss, R² and loss by t mix tokens at t = 1 with
 every token at the sample's t), so the train curves are comparable to the reference only once the share is 0; the
 eval score never masks.
 
+## Ideas ledger (Daniel's answers, 2026-11-07)
+
+- Per-token t: each token its own t around the sample's, annealed to one t per image, either by narrowing the spread or
+  by shrinking the share of tokens that draw their own t. More signal per step, still leaning on attention. Wanted.
+- The masked modes, pairing what the two groups of tokens see: (A) one group at the sampled t, the other pure noise,
+  run (`log/2026-11-07-masked-priming.md`); (B) one group clean, the other pure noise, MAE-like; (C) one group clean, the other at the
+  sampled t, denoising with clean context; (D) both at sampled t, the masked ones strictly noisier, which contains A.
+  A clean token has no usable target under T = x_t − v (at t = 0 the x̂ is x_t whatever the output, and T = 2x − ε
+  needs the unseen ε), so B and C take the loss on the other tokens only.
+- Random scattered masks let a conv block fill a token from its visible neighbours; contiguous spans push the work to
+  the attention blocks.
+- Representation alignment, as Lodestone did with DINO for Chroma; EmbeddingGemma 2's vision tower is on disk. It is
+  a Gemma 4 vision ViT: 16 layers, width 768, 16 px patches with axial RoPE at any resolution, pooled 3×3 into soft
+  tokens for the language model. Its 16 px patch is our token (8 latent px of Primal 2×2), so the per-patch features
+  before pooling land one 768-d vector per token on our grid. REPA aligns a trainable MLP projection of an early
+  block's tokens to the frozen encoder's patch features of the clean image (cosine, weight 0.5); the best depth in
+  REPA was block 8 of 28 in SiT-XL, about a third, which at d768x12 is the output of the first attention block.
+  Unbuilt; features at 128 px are 98 KB per row if stored, or computed online from decoded latents.
+- Caption alignment: the vision tower's embedding of the generated image against the pooled caption, by cosine;
+  first as an eval of prompt following, whether its image and text embeddings share a space being unchecked. Daniel's
+  reading: prompt following was poor for want of cross attention, and now waits on a long run on good captions.
+- A 64 px first stage needs latents encoded again; noted, not planned: in Daniel's samples 128 px learns the mood within
+  500 steps.
+
 ## How it would map onto tiny-dit (my reading, untested)
 
 - The current model is a stage-1 network at every t at once, conditioned on t. Priming's stage 1 fixes one corruption
@@ -103,8 +127,8 @@ eval score never masks.
 
 - Which start: from scratch at one corruption, or from the hero checkpoint.
 - Masking or fixed-level noise for stage 1. The first test (`log/2026-11-07-priming-read.md`, which lists how it
-  differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Running: masked
-  priming as built above, 90% falling to 0 over 3000 and over 6000 of 6000 steps, against the trunk model from scratch
-  (`configs/128_d768x12_mask90_over{3,6}k_6k.toml`, `128_d768x12_gdn_6k.toml`), scored at 128 and 256 px.
+  differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Masked
+  priming in mode A, 90% falling to 0 over 3000 and over 6000 of 6000 steps, loses to the trunk from scratch by 0.009
+  and 0.017 (`log/2026-11-07-masked-priming.md`). Open: which of per-token t, C and D runs next.
 - The stage-2 feature space.
 - Read the paper itself (the ablations are known only through a summary).
