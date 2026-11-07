@@ -73,7 +73,7 @@ def batch(seed):
 
 def train_step(model, optimizers, x, prompt, micro_batch=8):
     for i in range(0, len(x), micro_batch):
-        loss, _, _ = flow_loss(model, x[i : i + micro_batch], prompt.rows(i, i + micro_batch), shift=1.0)
+        loss, *_ = flow_loss(model, x[i : i + micro_batch], prompt.rows(i, i + micro_batch), shift=1.0)
         (loss * micro_batch / len(x)).backward()
     for optimizer in optimizers:
         optimizer.step()

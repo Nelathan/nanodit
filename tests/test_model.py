@@ -228,3 +228,14 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(gdn, prompt):
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
+
+
+def test_aligned_projects_the_repa_blocks_output_tokens_and_forward_is_its_flow_output(prompt):
+    model = build(conv_period=2, cross=True, repa_block=1)
+    open_gates(model)
+    x, t = torch.randn(3, 2, 32, 32), torch.rand(3)
+    kept = []
+    model.blocks[1].register_forward_hook(lambda module, args, out: kept.append(out))
+    out, projected = model.aligned(x, t, prompt)
+    assert projected.shape == (3, 16, 768) and torch.allclose(projected, model.repa_proj(kept[0]))
+    assert torch.equal(model(x, t, prompt), out)

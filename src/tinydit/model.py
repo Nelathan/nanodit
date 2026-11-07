@@ -23,6 +23,8 @@ MLP_RATIO = 4  # SwiGLU hidden over the stream width
 KV_RATIO = 4  # query heads per key/value head
 ROPE_FRACTION = 0.25  # of each axis' frequencies rotate: the fast ones; the slow ones barely turn on the grid and carry no position
 CONV_PERIOD = 4  # every CONV_PERIOD-th block is attention, the rest are conv blocks
+REPA_DIM = 768  # the vision tower's width (align.py)
+REPA_HIDDEN = 2048  # REPA's projector: two hidden layers this wide, SiLU
 
 
 class Prompt(NamedTuple):
@@ -154,7 +156,7 @@ class Block(nn.Module):
 
 class DiT(nn.Module):
     def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, conv_period: int = CONV_PERIOD,
-                 cross: bool = False, pooled_ada: bool = True, gdn: bool = True):
+                 cross: bool = False, pooled_ada: bool = True, gdn: bool = True, repa_block: int | None = None):
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert cross or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
@@ -167,6 +169,9 @@ class DiT(nn.Module):
         self.text_proj = nn.Linear(TEXT_DIM, width) if pooled_ada else None
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width, i % conv_period != conv_period - 1, cross, gdn) for i in range(depth))  # conv first, attention next
+        self.repa_block = repa_block  # the block whose output tokens `aligned` projects onto the vision features
+        if repa_block is not None:
+            self.repa_proj = nn.Sequential(nn.Linear(width, REPA_HIDDEN), nn.SiLU(), nn.Linear(REPA_HIDDEN, REPA_HIDDEN), nn.SiLU(), nn.Linear(REPA_HIDDEN, REPA_DIM))
         self.init_weights()
 
     @torch.no_grad()
@@ -196,6 +201,16 @@ class DiT(nn.Module):
         The network runs in the parameters' dtype (bf16 in training); x and the prompt are cast on the way in
         and F comes back fp32, so the objective and the sampler never see the network's dtype. t stays
         fp32 up to the sinusoid, whose phases need the precision."""
+        tokens, _, h, w = self.trunk(x, t, prompt)
+        return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()
+
+    def aligned(self, x: Tensor, t: Tensor, prompt: Prompt) -> tuple[Tensor, Tensor]:
+        """`forward`'s F, and the `repa_block` output projected to [B, N, REPA_DIM]."""
+        tokens, kept, h, w = self.trunk(x, t, prompt)
+        return unpatchify(tokens[..., :TOKEN_DIM], h, w).float(), self.repa_proj(kept)
+
+    def trunk(self, x: Tensor, t: Tensor, prompt: Prompt) -> tuple[Tensor, Tensor | None, int, int]:
+        """The last block's tokens, the `repa_block`'s (None without one), and the token grid."""
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype))
@@ -206,6 +221,9 @@ class DiT(nn.Module):
         rope = rope_angles(h, w, x.device)
 
         tokens = torch.cat([tokens, self.patch_embed(tokens)], dim=-1)
-        for block in self.blocks:
+        kept = None
+        for i, block in enumerate(self.blocks):
             tokens = block(tokens, mod, rope, text_tokens, prompt.mask, h, w)
-        return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()
+            if i == self.repa_block:
+                kept = tokens
+        return tokens, kept, h, w

@@ -3,6 +3,7 @@
 import math
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from .model import PATCH, Prompt
@@ -51,15 +52,22 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, spread: float = 0.0, mask_ratio: float = 0.0) -> tuple[Tensor, Tensor, Tensor]:
-    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`. Each token is noised at
-    its own `token_t` around the sample's t (priming, topics/priming.md); the model is told the sample's t."""
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, spread: float = 0.0, mask_ratio: float = 0.0,
+              features: Tensor | None = None) -> tuple[Tensor, Tensor, Tensor, Tensor | None]:
+    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`, and with `features`
+    (REPA's target, align.py) the mean cosine of the model's projected tokens to them, else None. Each token is noised
+    at its own `token_t` around the sample's t (priming, topics/priming.md); the model is told the sample's t."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, token_t(x, t, spread, mask_ratio))
-    out = model(x_t, t, drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2])))
+    prompt = drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2]))
+    if features is None:
+        out, alignment = model(x_t, t, prompt), None
+    else:
+        out, projected = model.aligned(x_t, t, prompt)
+        alignment = F.cosine_similarity(projected.float(), features.float(), dim=-1).mean()
     per_sample = per_sample_loss(out, x, eps, x_t)
-    return per_sample.mean(), per_sample, t
+    return per_sample.mean(), per_sample, t, alignment
 
 
 def loss_by_t_bucket(per_sample: Tensor, t: Tensor, buckets: int) -> Tensor:

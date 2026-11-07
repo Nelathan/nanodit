@@ -72,7 +72,8 @@ def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_th
     # F = 0, so per element E[T²] = (2 - t)² + (1 - t)² for unit-normal x and ε.
     torch.manual_seed(0)
     net, prompt = ZeroNet(), Prompt(torch.randn(4000, 768), torch.randn(4000, 3, 8), torch.ones(4000, 3, dtype=torch.bool))
-    loss, per_sample, t = flow_loss(net, torch.randn(4000, 2, 16, 16), prompt, shift=1.0)
+    loss, per_sample, t, alignment = flow_loss(net, torch.randn(4000, 2, 16, 16), prompt, shift=1.0)
+    assert alignment is None
     expected = ((2 - t) ** 2 + (1 - t) ** 2).mean()
     assert torch.allclose(loss, expected, rtol=0.01)
     assert torch.allclose(per_sample.mean(), loss)
@@ -83,7 +84,7 @@ def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_th
 
 def test_flow_loss_passes_gradient_to_the_network(model, prompt):
     open_gates(model)  # closed, F = x_t and the meta channels the patch embed fills are not read
-    loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), prompt, shift=1.0)
+    loss, per_sample, t, _ = flow_loss(model, torch.randn(3, 2, 64, 64), prompt, shift=1.0)
     assert per_sample.shape == t.shape == (3,)
     loss.backward()
     assert model.patch_embed.weight.grad.abs().max() > 0
@@ -156,6 +157,27 @@ def test_a_fully_masked_sample_sees_pure_noise_and_its_target_is_the_clean_laten
     # F = 0, so the loss is E[T²]: 1 per element when T = x, against (2 - t)² + (1 - t)² unmasked
     torch.manual_seed(0)
     net, x = SeeingNet(), torch.randn(4000, 2, 16, 16)
-    loss, _, t = flow_loss(net, x, stub_null(4000, 2), shift=1.0, mask_ratio=1.0)
+    loss, _, t, _ = flow_loss(net, x, stub_null(4000, 2), shift=1.0, mask_ratio=1.0)
     assert (net.x_t - x).std() > 1.3  # x_t = ε, uncorrelated with x: the difference has variance 2
     assert abs(loss - 1) < 0.01 and ((2 - t) ** 2 + (1 - t) ** 2).mean() > 2
+
+
+class AligningNet(ZeroNet):
+    """F = 0, and the given tokens as its projection."""
+
+    def __init__(self, projected):
+        super().__init__()
+        self.projected = projected
+
+    def aligned(self, x_t, t, prompt):
+        return self.forward(x_t, t, prompt), self.projected
+
+
+def test_flow_loss_returns_the_mean_cosine_of_the_projection_to_the_features():
+    torch.manual_seed(0)
+    features, x = torch.randn(4, 16, 768), torch.randn(4, 2, 32, 32)
+    assert flow_loss(AligningNet(3 * features), x, stub_null(4, 2), 1.0, features=features)[3] == pytest.approx(1.0)
+    assert flow_loss(AligningNet(-features), x, stub_null(4, 2), 1.0, features=features)[3] == pytest.approx(-1.0)
+    other = torch.randn(4, 16, 768)
+    expected = torch.nn.functional.cosine_similarity(other, features, dim=-1).mean()
+    assert flow_loss(AligningNet(other), x, stub_null(4, 2), 1.0, features=features)[3] == pytest.approx(expected.item())

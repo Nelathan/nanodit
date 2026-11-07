@@ -92,8 +92,18 @@ to the reference only once priming has ended; the eval score is never primed.
   a budget of 280 soft tokens (about 2,500 patches, near 800 px), so an 8×8 patch grid at 128 px is far below what the
   tower sees in use. Its smallest budget, 70, takes a square image to 384 px, whose 24×24 patches pool 3×3 onto our
   8×8 tokens (280 gives 768 px and our 16×16 at 256 px); at 384 px it matches decoded images to their captions as well
-  as at 768 (FACTS), so 384 px is the REPA input at 128 px. The probe decoded 256 px latents; a 128 px decode
-  upsampled 3×, and the per-patch features (not the probed final embedding), are unchecked.
+  as at 768 (FACTS), so 384 px is the REPA input at 128 px. That probe decoded 256 px latents and scored the final
+  embedding. On 128 px decodes upsampled 3×, the pooled per-token features follow their token's content under a
+  horizontal flip (FACTS, `scripts/probe_repa_target.py`).
+  As built (`align.VisionTarget`, `DiT(repa_block=…)`, Config `repa_block`, `repa_weight`): the clean latent is
+  decoded by Primal, upsampled bicubic 3×, cut into the processor's 16 px patches and positions, and passed through
+  the frozen tower (bf16), whose own 3×3 pooling hands back one 768-d feature per token in our row-major order. The
+  output of block `repa_block` goes through REPA's projector (two hidden layers of 2048, SiLU, to 768); the loss adds
+  `repa_weight`·(1 − mean cosine) to the flow loss for the first `repa_steps` steps of the run, then none (Daniel: a
+  fixed span, so the removal shows). The train log carries the flow loss alone and the cosine as `repa_cosine`. A
+  REPA checkpoint carries the projector, so it loads only into a config with `repa_block`. First arm
+  `configs/128_d768x12_repa_6k.toml`: block 3 (the first attention block), weight 0.5, on for 3000 of 6000 steps.
+  Its GPU cost per step is unmeasured.
 - Caption alignment: the image embedding of the generated image against the pooled caption, by cosine, as an eval of
   prompt following. EmbeddingGemma 2 maps text, images, video and audio into one 768-d space; that is its core feature
   (model card). Against the real image's cosine to the same caption, it also marks captions that miss their image.

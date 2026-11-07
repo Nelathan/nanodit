@@ -95,9 +95,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     step_losses = []
 
     def accumulate_gradients(*args):
-        loss, per_sample, t, energy = real_accumulate(*args)
+        loss, per_sample, t, energy, alignment = real_accumulate(*args)
         step_losses.append(loss.item())
-        return loss, per_sample, t, energy
+        return loss, per_sample, t, energy, alignment
 
     real_accumulate = train.accumulate_gradients
     monkeypatch.setattr(train, "accumulate_gradients", accumulate_gradients)
@@ -218,9 +218,9 @@ def test_non_finite_loss_stops_the_run_at_the_next_record_and_names_its_step(tra
     calls = []
 
     def flow_loss(*args):
-        loss, per_sample, t = real_flow_loss(*args)
+        loss, per_sample, t, alignment = real_flow_loss(*args)
         calls.append(None)
-        return (loss * float("nan") if len(calls) == 2 else loss), per_sample, t
+        return (loss * float("nan") if len(calls) == 2 else loss), per_sample, t, alignment
 
     monkeypatch.setattr(train, "flow_loss", flow_loss)
     with pytest.raises(RuntimeError, match="non-finite .* at step 2"):
@@ -250,10 +250,10 @@ def test_a_run_from_a_checkpoint_starts_from_its_weights_and_optimizer_state_at_
     seen = []
     real_accumulate = train.accumulate_gradients
 
-    def accumulate_gradients(model, stream, micro_batches, shift, sigma, spread, mask_ratio):
+    def accumulate_gradients(model, stream, micro_batches, *rest):
         if not seen:  # before the first step
             seen.append(({k: v.clone() for k, v in model.state_dict().items()}, [copy.deepcopy(o.state_dict()) for o in optimizers]))  # state_dict holds the live tensors
-        return real_accumulate(model, stream, micro_batches, shift, sigma, spread, mask_ratio)
+        return real_accumulate(model, stream, micro_batches, *rest)
 
     optimizers = []
     real_build = train.build_optimizers
@@ -301,13 +301,13 @@ class FixedBatches:
         return self.chunks[(self.i - 1) % len(self.chunks)]
 
 
-def fixed_flow_loss(model, x, prompt, shift, sigma, spread, mask_ratio):
+def fixed_flow_loss(model, x, prompt, shift, sigma, spread, mask_ratio, features):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
     x_t = noisy(x, eps, t)
     per_sample = (model(x_t, t, prompt) - target(x, eps, x_t)).square().flatten(1).mean(1)
-    return per_sample.mean(), per_sample, t
+    return per_sample.mean(), per_sample, t, None
 
 
 def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train, monkeypatch):
@@ -323,7 +323,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3, pin_weights=False)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], prompt.rows(i, i + size)) for i in range(0, 8, size)]
-        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
+        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
         results.append((loss, per_sample, t, [model.patch_embed.bias.grad, model.blocks[0].table.grad]))
     (loss1, per1, t1, grads1), (loss4, per4, t4, grads4) = results
     assert per4.shape == t4.shape == (8,)
@@ -346,7 +346,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     x = torch.randn(8, 2, 16, 16, generator=g)
     prompt = random_prompt(8, g)
     for _ in range(3):
-        loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], prompt.rows(0, 4)), (x[4:], prompt.rows(4, 8))]), 2, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
+        loss, per_sample, t, _, _ = train.accumulate_gradients(model, FixedBatches([(x[:4], prompt.rows(0, 4)), (x[4:], prompt.rows(4, 8))]), 2, shift=1.0, sigma=1.0, spread=0.0, mask_ratio=0.0)
         assert loss.dtype == per_sample.dtype == torch.float32 and loss.isfinite() and per_sample.isfinite().all()
         for optimizer in optimizers:
             optimizer.step()
@@ -388,7 +388,7 @@ def test_wandb_buckets_pool_the_interval_rather_than_averaging_the_train_buckets
     interval = train.Interval()
     t = torch.tensor([0.05, 0.15, 0.15, 0.15, 0.15, 0.15, 0.9, 1.0])  # 1 sample in [0, 0.1), 5 in [0.1, 0.2), 2 at the top
     per_sample, energy = torch.tensor([10.0, 1, 1, 1, 1, 1, 2, 4]), torch.ones(8)
-    interval.add(per_sample.mean(), per_sample, t, energy, torch.tensor(0.0))
+    interval.add(per_sample.mean(), per_sample, t, energy, torch.tensor(0.0), None)
     by_t = interval.by_t(5)
     assert by_t["loss_by_t"][0] == pytest.approx(15 / 6) and by_t["loss_by_t"][1:4] == [None] * 3 and by_t["loss_by_t"][4] == pytest.approx(3.0)  # t = 1.0 lands in the last bucket
     error = per_sample * t.square()
@@ -411,6 +411,40 @@ def test_the_spread_and_the_masked_share_fall_linearly_to_zero_over_prime_steps(
     config = write_config(tmp_path, steps=4, eval_every=100)
     config.write_text(config.read_text() + "prime_steps = 2\nspread_start = 0.5\nmask_start = 0.8\n")
     seen, real_accumulate = [], train.accumulate_gradients
-    monkeypatch.setattr(train, "accumulate_gradients", lambda *args: seen.append(args[-2:]) or real_accumulate(*args))
+    monkeypatch.setattr(train, "accumulate_gradients", lambda *args: seen.append(args[5:7]) or real_accumulate(*args))
     train.main(str(config))
     assert [s for s, _ in seen] == pytest.approx([0.5, 0.25, 0.0, 0.0]) and [m for _, m in seen] == pytest.approx([0.8, 0.4, 0.0, 0.0])
+
+
+class StubVision:
+    """REPA features fixed by the clean latent, one per 8 x 8 token."""
+
+    def __call__(self, x):
+        return torch.nn.functional.pixel_unshuffle(x, 8).flatten(2).transpose(1, 2).repeat(1, 1, 6)  # [B, N, 768]
+
+
+def test_the_alignment_term_trains_the_projector_at_its_weight_and_the_flow_loss_stays_apart(train):
+    g = torch.Generator().manual_seed(0)
+    x, prompt = torch.randn(4, 2, 16, 16, generator=g), random_prompt(4, g)
+    grads = []
+    for weight in (0.0, 0.5):
+        torch.manual_seed(1)
+        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True, repa_block=0)
+        open_gates(model)
+        torch.manual_seed(2)
+        loss, _, _, _, alignment = train.accumulate_gradients(model, FixedBatches([(x, prompt)]), 1, 1.0, 1.0, 0.0, 0.0, StubVision(), weight)
+        grads.append((loss, alignment, model.repa_proj[0].weight.grad))
+    (loss0, alignment0, grad0), (loss5, alignment5, grad5) = grads
+    assert grad0 is None or not grad0.any()  # at weight 0 the projector learns nothing
+    assert grad5.abs().max() > 0 and -1 < alignment5 < 1
+    assert torch.equal(loss0, loss5) and torch.equal(alignment0, alignment5)  # same draws: the flow loss reported is the flow term alone
+
+
+def test_a_repa_run_logs_the_alignment_for_repa_steps_then_stops_it(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    monkeypatch.setattr(train, "VisionTarget", lambda decoder, device: StubVision())
+    config = write_config(tmp_path, steps=2, eval_every=2, checkpoint_every=2)
+    config.write_text(config.read_text().replace("steps = 2", "steps = 3") + "repa_block = 1\nrepa_steps = 2\n")
+    train.main(str(config))
+    log = [json.loads(line) for line in (tmp_path / "runs" / "smoke" / "train.jsonl").read_text().splitlines()]
+    assert all(-1 < r["repa_cosine"] < 1 for r in log[:2]) and "repa_cosine" not in log[2]  # off after repa_steps
