@@ -103,7 +103,8 @@ to the reference only once priming has ended; the eval score is never primed.
   fixed span, so the removal shows). The train log carries the flow loss alone and the cosine as `repa_cosine`. A
   REPA checkpoint carries the projector, so it loads only into a config with `repa_block`. First arm
   `configs/128_d768x12_repa_6k.toml`: block 3 (the first attention block), weight 0.5, on for 3000 of 6000 steps.
-  Its GPU cost per step is unmeasured.
+  It ends 0.0023 ahead of scratch (0.0013 at 256 px) after trailing while on, at 8.4× the time per aligned step
+  (`log/2026-11-08-repa-first-arm.md`); longer use needs the features stored with the latents.
 - Caption alignment: the image embedding of the generated image against the pooled caption, by cosine, as an eval of
   prompt following. EmbeddingGemma 2 maps text, images, video and audio into one 768-d space; that is its core feature
   (model card). Against the real image's cosine to the same caption, it also marks captions that miss their image.
@@ -149,7 +150,8 @@ to the reference only once priming has ended; the eval score is never primed.
   differs from the code) is neither the masked reconstruction directed above nor a faithful stage 1. Masked
   priming in mode A, 90% falling to 0 over 3000 and over 6000 of 6000 steps, loses to the trunk from scratch by 0.009
   and 0.017 (`log/2026-11-07-masked-priming.md`). Per-token t, the spread falling from 0.5 or 1.0 to 0 over 3000 of
-  6000 steps, ends level with scratch and 0.002 behind (`log/2026-11-07-per-token-t-priming.md`). Open: which of
+  6000 steps, ends level with scratch and 0.002 behind (`log/2026-11-07-per-token-t-priming.md`). REPA for 3000 of
+  6000 steps ends 0.0023 ahead (`log/2026-11-08-repa-first-arm.md`). Open: which of
   C, D and spans runs next, and the shape of the ramp.
 - The stage-2 feature space.
 - Read the paper itself (the ablations are known only through a summary).
