@@ -7,7 +7,7 @@ from usuitrack import Molegrad, StochasticAdamW, UsuiTrack
 # have no stream side, and follow Usui's shape rule. Same convention as ai-toolkit's usuitrack.py.
 LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")
 # Tables are not shared linear maps.
-USUI_EXCLUDED = ("table",)
+USUI_EXCLUDED = ("table", "final")
 
 
 def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float, pin_weights: bool = False) -> tuple[UsuiTrack, StochasticAdamW]:

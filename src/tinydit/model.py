@@ -92,6 +92,7 @@ class DiT(nn.Module):
         self.text_proj = nn.Linear(TEXT_DIM, width)
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width) for _ in range(depth))
+        self.final = nn.Linear(width, TOKEN_DIM)
         self.init_weights()
 
     @torch.no_grad()
@@ -108,6 +109,8 @@ class DiT(nn.Module):
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
         self.patch_embed.weight[:TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the first 128 channels of the stream start as the input patch
+        self.final.weight.zero_()
+        self.final.weight[:, :TOKEN_DIM] = torch.eye(TOKEN_DIM)  # the readout starts as the slice
 
     def forward(self, x: Tensor, t: Tensor, text: Tensor) -> Tensor:
         """x [B, 2, H, W] latent at noise level t [B], text [B, 768] -> F [B, 2, H, W].
@@ -123,4 +126,4 @@ class DiT(nn.Module):
         tokens = self.patch_embed(tokens)
         for block in self.blocks:
             tokens = block(tokens, mod, rope)
-        return unpatchify(tokens[..., :TOKEN_DIM], h, w).float()
+        return unpatchify(self.final(tokens), h, w).float()

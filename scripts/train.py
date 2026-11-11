@@ -247,11 +247,11 @@ def main(config_path: str) -> None:
         paused = time.perf_counter()
         if step % cfg.eval_every == 0 or step == last:
             evaluate(model, decoder, eval_text, cfg, step, run_dir, device)
-        if step % cfg.checkpoint_every == 0 or step == last:
-            save_checkpoint(model, optimizers, step, run_dir)
             scores = score(model, score_x, score_text, score_noise, score_ts, cfg.micro_batch, device)
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)
             wandb.log({f"eval/{key}": scores[key] for key in ("loss_caption", "loss_null")}, step=step)
+        if step % cfg.checkpoint_every == 0 or step == last:
+            save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only
     wandb.finish()
 
