@@ -17,12 +17,9 @@ from pathlib import Path
 import torch
 from safetensors.torch import load_file
 
-sys.path.insert(0, str(Path(__file__).parent))
-from train import Config  # noqa: E402
-
-from nanodit.data import read_rows  # noqa: E402
-from nanodit.model import DiT  # noqa: E402
-from nanodit.objective import noisy, per_sample_loss, sample_t  # noqa: E402
+from nanodit.data import read_rows
+from nanodit.objective import noisy, per_sample_loss, sample_t
+from train import Config, build_model
 
 ROWS = 128
 CHUNK = 16  # rows per forward/backward
@@ -91,8 +88,7 @@ if __name__ == "__main__":
     with open(sys.argv[1], "rb") as f:
         cfg = Config(**tomllib.load(f))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    null = load_file(cfg.null_embedding)
-    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn).to(device)
+    model = build_model(cfg, device, torch.float32)
     batch = fixed_batch(cfg, device)
     for path in sys.argv[2:]:
         model.load_state_dict(load_file(Path(path) / "model.safetensors"))

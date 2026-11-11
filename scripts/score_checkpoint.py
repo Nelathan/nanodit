@@ -12,9 +12,8 @@ import torch
 from safetensors.torch import load_file
 
 from nanodit.data import read_rows
-from nanodit.model import DiT
 from nanodit.objective import t_quantiles
-from train import SCORE_SHIFT, SCORE_TS, Config, append_jsonl, score
+from train import SCORE_SHIFT, SCORE_TS, Config, append_jsonl, build_model, score
 
 BATCH = 16
 
@@ -24,8 +23,7 @@ def main(run_dir: str, step: int, eval_set: str, resolution: int) -> None:
     with open(run / "config.toml", "rb") as f:
         cfg = Config(**tomllib.load(f))
     device = torch.device("cuda")
-    null = load_file(cfg.null_embedding)
-    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn, cfg.repa_block).to(device, torch.bfloat16)
+    model = build_model(cfg, device, torch.bfloat16)
     model.load_state_dict(load_file(run / "checkpoints" / f"step_{step:07d}" / "model.safetensors"))
     x, prompt = read_rows(eval_set, resolution)
     noise = torch.randn(x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))

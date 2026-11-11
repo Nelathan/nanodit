@@ -31,7 +31,7 @@ import torch
 from PIL import Image
 
 from precompute import DEVICE, TEXT_DIM, bf16_bytes, bf16_column, encode_text, load_encoders
-from stage_fine import BUCKETS, STAGED
+from stage_fine import STAGED
 
 ENCODED = Path("/mnt/luna/tiny-dit/fine/encoded")
 ROW_GROUP = 1024

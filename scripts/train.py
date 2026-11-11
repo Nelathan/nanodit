@@ -73,6 +73,12 @@ class Config:
     repa_steps: int = 0  # the alignment is on for this many steps of the run, then off
 
 
+def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
+    """The config's DiT at its init, the null prompt from the precomputed empty caption."""
+    null = load_file(cfg.null_embedding)
+    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn, cfg.repa_block).to(device, dtype)
+
+
 def load_checkpoint(model, optimizers, path: Path) -> int:
     """Loads a `save_checkpoint` directory into a built model and its optimizers. Every optimizer setting but the lr
     comes from the checkpoint (beta, rank fraction, betas); the lr, the step rule and the norm pin are the configured
@@ -139,7 +145,7 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
             pb = prompt.rows(i, i + batch).to(device, torch.float32)
             t = torch.full((len(xb),), t_value, device=device)
             x_t = noisy(xb, eb, t)
-            total += per_sample_loss(model(x_t, t, pb).float(), xb, eb, x_t).sum()
+            total += per_sample_loss(model(x_t, t, pb), xb, eb, x_t).sum()
         per_t.append(float(total) / len(x))
     errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
     return dict(
@@ -264,8 +270,7 @@ def main(config_path: str) -> None:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
-    null = load_file(cfg.null_embedding)
-    model = DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn, cfg.repa_block).to(device, torch.bfloat16)
+    model = build_model(cfg, device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them

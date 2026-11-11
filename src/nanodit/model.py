@@ -34,10 +34,10 @@ class Prompt(NamedTuple):
     tokens: Tensor  # [B, L, 512], zero past a caption's end, L >= NULL_TOKENS
     mask: Tensor  # [B, L] bool, true on a caption's tokens
 
-    def to(self, device: torch.device, dtype: torch.dtype) -> "Prompt":
+    def to(self, device: torch.device, dtype: torch.dtype) -> Prompt:
         return Prompt(self.pooled.to(device, dtype), self.tokens.to(device, dtype), self.mask.to(device))
 
-    def rows(self, start: int, stop: int) -> "Prompt":
+    def rows(self, start: int, stop: int) -> Prompt:
         return Prompt(self.pooled[start:stop], self.tokens[start:stop], self.mask[start:stop])
 
 
@@ -57,12 +57,12 @@ def timestep_sinusoid(t: Tensor) -> Tensor:
     return torch.cat([args.cos(), args.sin()], dim=-1)
 
 
-def rope_angles(h: int, w: int, device: torch.device | None = None, fraction: float = ROPE_FRACTION) -> tuple[Tensor, Tensor]:
+def rope_angles(h: int, w: int, device: torch.device | None = None) -> tuple[Tensor, Tensor]:
     """cos, sin of shape [h*w, HEAD_DIM/2]: the first half of the angles encodes the row, the second the column.
-    Only the first `fraction` of each axis' frequencies rotate; the rest get angle 0, so those dims carry no position."""
+    Only the first ROPE_FRACTION of each axis' frequencies rotate; the rest get angle 0, so those dims carry no position."""
     pairs = HEAD_DIM // 4
     freqs = ROPE_BASE ** (-torch.arange(pairs, device=device) / pairs)
-    freqs = freqs * (torch.arange(pairs, device=device) < fraction * pairs)
+    freqs = freqs * (torch.arange(pairs, device=device) < ROPE_FRACTION * pairs)
     rows = torch.arange(h, device=device)[:, None].expand(h, w).reshape(-1, 1)
     cols = torch.arange(w, device=device)[None, :].expand(h, w).reshape(-1, 1)
     angles = torch.cat([rows * freqs, cols * freqs], dim=-1)
