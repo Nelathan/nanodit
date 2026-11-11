@@ -59,7 +59,6 @@ class Block(nn.Module):
         super().__init__()
         self.width, self.heads, hidden = width, width // HEAD_DIM, 2 * width
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
-        self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
         self.qkv = nn.Linear(width, 3 * width, bias=False)
         self.gate = nn.Linear(width, width, bias=False)
         self.q_norm = nn.RMSNorm(HEAD_DIM)
@@ -74,8 +73,6 @@ class Block(nn.Module):
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
-        grid = y.transpose(1, 2).reshape(B, self.width, h, w)
-        y = y + self.conv(grid).flatten(2).transpose(1, 2)
         q, k, v = self.qkv(y).view(B, N, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
         q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
         attn = F.scaled_dot_product_attention(q, k, v).transpose(1, 2).reshape(B, N, self.width)
