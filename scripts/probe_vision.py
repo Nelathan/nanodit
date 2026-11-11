@@ -18,8 +18,8 @@ import torch
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 
-from tinydit.data import _bf16
-from tinydit.model import LATENT_CHANNELS, TEXT_DIM
+from nanodit.data import _bf16
+from nanodit.model import LATENT_CHANNELS, TEXT_DIM
 from train import load_decoder
 
 EVAL = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_256_seq512.parquet"

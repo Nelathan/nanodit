@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from tinydit.data import pad_sequences
-from tinydit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
+from nanodit.data import pad_sequences
+from nanodit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
 
 
 def open_gates(model):

@@ -3,7 +3,7 @@ from transformers.models.gemma4.configuration_gemma4 import Gemma4VisionConfig
 from transformers.models.gemma4.image_processing_gemma4 import convert_image_to_patches
 from transformers.models.gemma4.modeling_gemma4 import Gemma4VisionPooler
 
-from tinydit.align import UPSAMPLE, VisionTarget
+from nanodit.align import UPSAMPLE, VisionTarget
 
 
 class NearestDecoder:

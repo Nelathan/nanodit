@@ -4,8 +4,8 @@ import pytest
 import torch
 
 from conftest import open_gates
-from tinydit.data import pad_sequences
-from tinydit.model import DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
+from nanodit.data import pad_sequences
+from nanodit.model import DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])

@@ -17,12 +17,12 @@ import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
-from tinydit.align import VisionTarget
-from tinydit.data import Stream, pad_sequences, read_rows
-from tinydit.model import DiT, Prompt
-from tinydit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
-from tinydit.optim import build_optimizers
-from tinydit.sampler import euler_sample
+from nanodit.align import VisionTarget
+from nanodit.data import Stream, pad_sequences, read_rows
+from nanodit.model import DiT, Prompt
+from nanodit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
+from nanodit.optim import build_optimizers
+from nanodit.sampler import euler_sample
 
 T_BUCKETS = 10
 SCORE_TS = 10  # the score's t grid: equal-probability bins of the shift-1 logit-normal, whatever t the run trains on (SPEC §8)

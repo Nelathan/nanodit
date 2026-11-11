@@ -11,9 +11,9 @@ from pathlib import Path
 import torch
 from safetensors.torch import load_file
 
-from tinydit.data import read_rows
-from tinydit.model import DiT
-from tinydit.objective import t_quantiles
+from nanodit.data import read_rows
+from nanodit.model import DiT
+from nanodit.objective import t_quantiles
 from train import SCORE_SHIFT, SCORE_TS, Config, append_jsonl, score
 
 BATCH = 16

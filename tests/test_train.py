@@ -9,11 +9,11 @@ from safetensors.torch import load_file, save_file
 
 from conftest import open_gates
 from test_data import shuffle_module, write_shard
-from tinydit.data import pad_sequences
-from tinydit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
-from tinydit.objective import flow_loss as real_flow_loss
-from tinydit.objective import noisy, t_quantiles, target
-from tinydit.optim import build_optimizers
+from nanodit.data import pad_sequences
+from nanodit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
+from nanodit.objective import flow_loss as real_flow_loss
+from nanodit.objective import noisy, t_quantiles, target
+from nanodit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
 

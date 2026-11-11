@@ -12,9 +12,9 @@ import pyarrow.parquet as pq
 import torch
 import torch.nn.functional as F
 
-from tinydit.align import VisionTarget
-from tinydit.data import _bf16
-from tinydit.model import LATENT_CHANNELS
+from nanodit.align import VisionTarget
+from nanodit.data import _bf16
+from nanodit.model import LATENT_CHANNELS
 from train import load_decoder
 
 EVAL = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_128_seq512.parquet"

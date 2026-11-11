@@ -7,8 +7,8 @@ import time
 
 import torch
 
-from tinydit.data import pad_sequences
-from tinydit.model import NULL_TOKENS, SEQ_DIM, DiT, Prompt
+from nanodit.data import pad_sequences
+from nanodit.model import NULL_TOKENS, SEQ_DIM, DiT, Prompt
 
 TOKENS_PER_BATCH = 4096  # 64 images at 128 px
 RESOLUTIONS = (128, 256, 512, 1024)

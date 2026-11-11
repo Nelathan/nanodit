@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 
-from tinydit.model import GATE_ROWS, N_MOD, TEXT_DIM, DiT, timestep_sinusoid
+from nanodit.model import GATE_ROWS, N_MOD, TEXT_DIM, DiT, timestep_sinusoid
 
 torch.manual_seed(0)
 null_file = load_file("/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors")

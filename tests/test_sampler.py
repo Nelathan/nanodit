@@ -2,8 +2,8 @@ import pytest
 import torch
 from conftest import open_gates
 
-from tinydit.model import Prompt
-from tinydit.sampler import euler_sample
+from nanodit.model import Prompt
+from nanodit.sampler import euler_sample
 
 
 def stub_prompt(batch, value, length=2):

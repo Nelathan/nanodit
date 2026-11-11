@@ -2,8 +2,8 @@ import pytest
 import torch
 from conftest import open_gates
 
-from tinydit.model import Prompt, patchify
-from tinydit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target, token_t
+from nanodit.model import Prompt, patchify
+from nanodit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target, token_t
 
 
 def test_loss_equals_velocity_error():

@@ -15,8 +15,8 @@ import torch
 from safetensors.torch import load_file
 from usuitrack.frame import resolve_side
 
-from tinydit.model import NULL_TOKENS, SEQ_DIM, DiT
-from tinydit.optim import build_optimizers
+from nanodit.model import NULL_TOKENS, SEQ_DIM, DiT
+from nanodit.optim import build_optimizers
 
 run, name = sys.argv[1], sys.argv[2]
 with open(f"{run}/config.toml", "rb") as f:

@@ -20,9 +20,9 @@ from safetensors.torch import load_file
 sys.path.insert(0, str(Path(__file__).parent))
 from train import Config  # noqa: E402
 
-from tinydit.data import read_rows  # noqa: E402
-from tinydit.model import DiT  # noqa: E402
-from tinydit.objective import noisy, per_sample_loss, sample_t  # noqa: E402
+from nanodit.data import read_rows  # noqa: E402
+from nanodit.model import DiT  # noqa: E402
+from nanodit.objective import noisy, per_sample_loss, sample_t  # noqa: E402
 
 ROWS = 128
 CHUNK = 16  # rows per forward/backward

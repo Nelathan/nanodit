@@ -6,9 +6,9 @@ import pyarrow.parquet as pq
 import pytest
 import torch
 
-from tinydit import data
-from tinydit.data import Stream, pad_sequences
-from tinydit.model import NULL_TOKENS, SEQ_DIM, Prompt
+from nanodit import data
+from nanodit.data import Stream, pad_sequences
+from nanodit.model import NULL_TOKENS, SEQ_DIM, Prompt
 
 ROOT = Path(__file__).parent.parent
 

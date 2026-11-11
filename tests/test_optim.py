@@ -3,10 +3,10 @@ import copy
 import torch
 from conftest import open_gates
 
-from tinydit.data import pad_sequences
-from tinydit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
-from tinydit.objective import flow_loss, noisy, target
-from tinydit.optim import build_optimizers
+from nanodit.data import pad_sequences
+from nanodit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
+from nanodit.objective import flow_loss, noisy, target
+from nanodit.optim import build_optimizers
 
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
