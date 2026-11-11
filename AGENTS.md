@@ -1,12 +1,12 @@
 # AGENTS.md
 
-Operating contract for agents in the tiny-dit repo.
+Operating contract for agents in the nanodit repo.
 
 ## What this repo is
 
-A from-scratch toy text-to-image DiT on one consumer GPU. The design is agreed
-(`docs/SPEC.md`); `docs/HANDOVER.md` says what is built and measured. `README.md`
-has the stages and layout.
+A from-scratch text-to-image DiT on one consumer GPU. The design is agreed
+(`docs/SPEC.md`); `docs/HANDOVER.md` says where things stand. `README.md` has
+the layout and how to run it.
 
 ## Documentation map
 
@@ -23,10 +23,14 @@ has the stages and layout.
   FACTS and PLAN point to them where helpful.
 - `docs/archive/` — closed questions and decisions, one note per session or
   closure, named `YYYY-MM-DD-kebab-title.md`. Read for the reasons; never rewrite.
-- `docs/topics/` — one doc per line of work Daniel opens as its own topic (its plan, design and reads), linked
-  from its PLAN question; numbers still go to FACTS, closures to `archive/`.
-- `docs/HANDOVER.md` — session-to-session orientation: where things stand, next
-  steps, traps.
+- `docs/topics/` — one doc per side quest or line of work that would bloat the main
+  ledgers (priming, edge of stability, weight spectra, datasets and encode, block
+  design): its question, design, reads and numbers, all in the one doc. PLAN keeps
+  the question's heading, one line of state and the link; FACTS lists which numbers
+  live in which topic. Closures still go to `archive/`. When a PLAN question grows
+  past a screen, it has become a topic: move it.
+- `docs/HANDOVER.md` — session-to-session orientation: where things stand, what
+  waits on Daniel, traps. Rewritten, not appended to.
 - `docs/REFERENCES.md`, `docs/references/` — sources and what each establishes;
   verbatim source material.
 
@@ -67,6 +71,14 @@ review and commits. One commit per coherent change: a design change, a probe and
 a doc correction are separate commits. Subject says what changed; a body when
 intent or impact needs it. Pushing stays with Daniel.
 
+## Branches
+
+`main` is the trunk: what SPEC describes, and where every run that counts starts
+from. An arm that changes the model lives on its own branch (a worktree beside the
+repo if it has to run while the trunk moves) and is either merged or left as the
+record of what ran; an arm that is only a config stays on `main`. Never run an arm
+from uncommitted code: a run's commit is its only description.
+
 ## Running things
 
 From the repo root, `uv sync`. torch 2.15 comes from the PyTorch cu132 index.
@@ -74,12 +86,23 @@ usuitrack is an editable path dependency from `../usuitrack-zero-init`, the work
 of usuitrack branch `zero-init` (archive, 2026-11-01), so it runs whatever is checked
 out there.
 
+Scripts run from the repo root as `uv run python scripts/<name>.py`; they import
+each other by module name (`from train import Config`), which works because the
+script's directory is on the path.
+
+Only the configs in `configs/` that load on the current model and data are kept.
+Every run directory holds the `config.toml` it ran with; an old run is read from
+there and from its commit, not rebuilt from `configs/`.
+
 A run streams to wandb (project `wandb_project` in its config) with the entity and key
 from `$WANDB_ENTITY` and `$WANDB_API_KEY`; `WANDB_MODE=offline` runs without the network.
 A run whose `wandb.init` fails leaves its run directory behind: delete it before rerunning.
 
-Datasets, latents, embeddings and runs live under `/mnt/mars/ai/tiny-dit/`, not in
-the repo: `/home` has too little space for ~160 GB of latents.
+Datasets, latents, embeddings and runs live outside the repo, under directories
+still named `tiny-dit` (archive, 2026-11-11): runs, probes and the null embedding
+under `/mnt/mars/ai/tiny-dit/`, the fused per-shard Parquets and Fine-T2I under
+`/mnt/luna/tiny-dit/`, the trial and eval sets the configs read on the SSD at
+`/run/media/djg/vel-ssd/tiny-dit/`.
 
 The GPU (RTX 4070 Super, 12 GB) is shared with ai-toolkit jobs. Check
 `nvidia-smi` before launching. **Launch training jobs in the background, never in

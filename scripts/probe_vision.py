@@ -4,7 +4,7 @@ The first N eval latents (256 px) are decoded by Primal and embedded as images, 
 of `max_soft_tokens`, each a 3x3 pool of 16 px patches; it takes only 70, 140, 280 (the default), 560 and 1120. A square
 image goes to 384, 528 and 768 px at the first three: at 70 its soft tokens are our 8x8 grid at 128 px, at 280 the
 16x16 grid at 256 px.
-At each budget: the cosine of each image to its own caption against the others (the stored pooled caption, no prefix,
+At each budget: the cosine of each image to its own caption against the others (the stored pooled caption, which carries the document prefix,
 and the caption under the retrieval query prefix), and top-1 retrieval of the caption among the N.
 Usage: probe_vision.py [N]
 """

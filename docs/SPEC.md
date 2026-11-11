@@ -1,4 +1,4 @@
-# tiny-dit — Design Spec
+# nanodit — Design Spec
 
 Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, velocity `v = ε - x`.
 

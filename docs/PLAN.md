@@ -17,7 +17,7 @@ agreed arm.
 Norm gains (QK-RMSNorm, final norm), biases and the null embedding are not
 matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`); they
 go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
-reading, and the harness runs that split (`src/tinydit/optim.py`). Daniel to close.
+reading, and the harness runs that split (`src/nanodit/optim.py`). Daniel to close.
 
 ---
 
@@ -64,43 +64,13 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 ### B6. The data sets and the encode
 
-Two sets were missing from the original plan: Spawning/PD12M and jasperai/monet, both world-knowledge images more than
-text-to-image. Lunara is too small for pretraining but an option for fine-tuning later. Any set we pull gets 128 and
-256 px latents plus the Gemma-class embedding and its token sequence. `/mnt/luna` has about 800 GB free but is an HDD,
-so it holds the staging, and the shuffled set goes to `/mnt/mars` afterwards. The current data gets the same treatment,
-as an overnight job (2026-11-05). Candidates in REFERENCES, Data: Fine-T2I, PD12M, MONET; `moonworks/lunara-aesthetic`
-for the fine-tune set (see the FID and Lunara question in the sampling group).
+Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I is staged and encoded in part; the per-bucket shuffle and stream are not built.
 
-Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
-sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
-free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
-32 GB, 256 px latents 128 GB; the token sequence unpadded without the prompt prefix at 1,536 B per token (768-d bf16):
-the first encoded rows average 58 tokens, 90 KB, so about 170 GB per 1.9M rows (the 30-token mean estimated from 3,000
-captions was low); at the 512-d states (1,024 B per token) about 115 GB, the figure for the shuffled set.
+### B7. Which caption prefix should the pooled embedding carry?
 
-Decided 2026-11-05: a fused dataset of both sources, deduplicated later, both at 128 and 256 px with Lanczos; the
-sequence for cross attention at 512, since it is projected down to 64 anyway, kept straightforward, with the prompt
-prefix tokens dropped and unpadded. Permitted: deleting anything stale or no longer needed, and using
-`/run/media/djg/vel-ssd` for space. The HDD read may be enough, so plan the async delay. EmbeddingGemma 2's residual stream is
-512-d (24 layers); its `embedding_projection` (768x512, after the final norm, per token) lifts the token states to 768
-before the mean pooling and normalize. The encode stores the projected 768-d states, which span only 512 dimensions;
-the pooled embedding is 768-d. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
-its trailing space merges into the caption's first token. If the encoder gives 768, that is fine (2026-11-05). Running
-since 2026-11-05 23:00: text-to-image-2M shards 0–46, then the Lunara eval set (`scripts/precompute.py`,
-`scripts/precompute_lunara.py`), into `/mnt/luna/tiny-dit/precomputed/fused/`, log
-`/mnt/luna/tiny-dit/precompute_2026-11-05.log`.
-
-After the 512-d residual was re-verified (2026-11-06), the decision: redo only the sequence when the encode finishes,
-since that is cheaper than restarting the encode. `scripts/reencode_sequence.py` re-encodes the captions of every fused shard (no images) to the 512-d
-token states before the projection, into `fused/sequence512_<shard>.parquet` (key, sequence); it starts when the encode
-exits, log `/mnt/luna/tiny-dit/reencode_sequence_2026-11-06.log`. The shuffle then joins on `key` and drops the 768-d
-`sequence`. Open:
-- Fine-T2I's images are above 1K and partly not square. Decided: no square crop; the images go into aspect buckets (token grids of about
-  the same token count, the image resized to the grid's exact size), and the data is fused, deduplicated and shuffled in one
-  pass once it is encoded. The sizes are good (FACTS, Fine-T2I image sizes): nine aspect ratios, at most 5 % stretch on the
-  synthetic sets at 128 px, more on the curated photos. Revised (2026-11-06): stretch is worse than a crop, so each image is scaled to cover its bucket with its aspect kept and only the overflow is cropped; the point was not to crop everything to 1:1. Open: the bucket set (a larger token count for less stretch), how the
-  stream draws a bucket per batch, and one file per bucket (the latent width differs). The model already takes any grid.
-- Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
+Every stored pooled embedding is encoded with the document prefix `title: none | text: ` (SPEC §1; checked against a fresh encode, FACTS). On image retrieval that prefix ranks the caption's own image first for 90.5% of 1000 eval images, no prefix for 94.4% (FACTS, caption prefix). The 2026-11-07 read concluded that the stored embeddings stay because they were taken to have no prefix; that premise was wrong, so the conclusion is open again.
+- Whether retrieval of the image by the caption says anything about the embedding as conditioning: a paired arm on a subset re-encoded without the prefix would say (pooled embedding and null embedding both; the 512-d token states already drop the prefix tokens but are computed with it in context).
+- The cost of changing it: every pooled embedding encoded again (text only, no latents), and SPEC §1 and §5.
 
 ## Group C. LR sweep and step budget
 
@@ -166,55 +136,7 @@ The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or
 
 ### C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate we choose?
 
-Added 2026-11-06: https://jeffreycider.github.io/posts/bubbleforce/ (listed in REFERENCES).
-The post (Cheng and Zheng, 2026) claims that for non-adaptive optimizers, Muon included, the equilibrium is
-`lr · pathspring = bubbleforce`: pathspring is the top real eigenvalue of the optimizer step's Jacobian (the Hessian for
-SGD), and bubbleforce is set by the momentum kernel alone (2 for SGD, `2(1+β)/(1-β)` for heavy ball). It predicts that
-halving or doubling lr and lowering β move the sharpness to the predicted equilibrium, some within a few
-iterations, on a nanoGPT Muon run; raising β does not follow it (about 10% off); the baseline run falls behind it near
-the end under lr decay, for which the authors give no theory, and one scheduled-sharpness run ends at 2 to 10 times the
-prediction. Adam-type optimizers are outside it by the authors' account (dead neurons spoil the eigenvalue
-measurements). Code: https://github.com/jeffreycider/bubbleforce.
-This is optimizer work that belongs to the usuitrack repo and starts here, because it may settle cleanly why the cosine
-between the gradient and the momentum (`grad_moment_cosine`) is negative in our runs: more momentum makes it less
-negative with diminishing returns, and only a lower lr turns it up, which stops proper learning (the learning-rate
-question above). A negative cosine means the gradient points against the accumulated step, an oscillation, which is
-what the post's edge-of-stability picture describes for momentum: the largest root of the step's characteristic
-polynomial sits on the unit circle, and where it sits on it sets the oscillation (my reading of the post, untested).
-Decided 2026-11-06: the authors' code is a reference only; we implement our own for our harness.
-First read, UsuiTrack's update (`usuitrack/optimizer.py` in the usuitrack repo, branch `zero-init`): the moment is an exponential average of unit projected
-gradients, `M = beta M + (1 - beta) Z/||Z||`, which is the post's momentum kernel `c_j = (1 - beta) beta^j` (weights sum
-to 1, no Nesterov) acting on the normalised gradient; the write is `lr · ||W||` times the Newton-Schulz polar factor of
-`M` (the post's Muon case), inside a low-rank frame that itself turns each step. On a noisy quadratic with that kernel,
-bubbleforce is `2(1 + beta)/(1 - beta)` and the cosine between gradient and previous moment falls from 0 to -1 as
-the effective step times the sharpness approaches it (the effective step is not `lr`: the normalisation and the polar
-map set it). It is consistent with the beta dependence of the real runs in one pair of readings, with one fitted
-parameter (FACTS, Momentum cosine on a noisy quadratic). The lr dependence cannot be read from the runs so far, since
-the lr pair also differs in beta, warmup and rank fraction. The toy leaves out the normalisation, the polar map and the
-turning frame, which change the Jacobian the post's pathspring is defined on.
-Daniel's reading (2026-11-06): a higher lr usually does make the cosine more negative, and a tiny lr makes it positive;
-the sign is a spectrum effect, set by how many channels oscillate against how many are stable. A scratch toy with many
-directions of power-law sharpness and a descent signal goes the same way (positive at a tiny lr, negative as the lr
-rises); it is not saved. In the LLM lane a good fit read about -0.01; the DiT adds the noise of denoising and of the
-sampled t, and Daniel believes that is the difference to the -0.4 here.
-Cautious stepping (zero the entries where the moment and the projected gradient differ in sign) was tried in
-usuitrack and did not work out nicely. A linear filter on the moments instead, writing the mean of the last and the
-current moment, was never tried. In the toy it fails: the half step of extra lag moves the edge from `2(1+β)/(1-β)`
-(398 at β 0.99) down to `lr · sharpness = 2`, for every β, so it is not worth an arm. A kernel with no response at
-period 2 needs weight on the newest gradient to stay stable, which MaxEntSlop fixes by construction.
-The lr-jump test (2026-11-06, FACTS) bears on this: from a late checkpoint, a higher constant lr made the cosine more
-negative (about -0.04, -0.08 and -0.11 at 1e-4, 4e-4 and 1e-3), and the network answered by flattening: the top Hessian
-eigenvalue fell 35 % at 1e-3 within 150 steps and stayed put at the control lr, for about 2 % more loss and no spikes.
-Reading: the cosine follows lr times sharpness, not the lr, and the pinned lr is not a stability ceiling, since the
-curvature adapts to it. That favours a constant lr with a late anneal: the extra loss at a high lr looks like a higher
-noise floor, which the anneal removes; whether it recovers the 2 % is untested. The cosine at 10x the lr is still far from
-the -0.4 of the earlier runs, so the lr alone does not explain those. Next: lower the lr again after a high-lr stretch and
-see whether the curvature rebounds (then the anneal is partly progressive sharpening and should stay short).
-Open:
-- Whether the normalised gradient, the polar map and the turning frame keep the update inside the post's non-adaptive class; the momentum kernel itself does.
-- Whether pathspring (Arnoldi on Hessian-vector products) is measurable on this model at an affordable cost; the post
-  reports 16 to 33 HVPs per point on 8×H100s for a 12-layer, 768-wide model.
-- Whether it would explain what the 2026-11-02 lr sweep measured: loss kept falling as lr rose to 4e-3, and the common mode (the component every token's residual stream shares) grew with it.
+Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, the toy, the lr-jump read and what is open). State: the pinned lr is not a stability ceiling, the curvature adapts to it; that favours a constant lr with a late anneal (C2), untested at length.
 
 ---
 
@@ -247,7 +169,7 @@ weak; FD-DINOv2 is the alternative), and against which reference set.
 
 ## Group F. Model choices SPEC leaves open
 
-Taken as the standard DiT/PixArt choice in `src/tinydit/model.py`; each is Daniel's
+Taken as the standard DiT/PixArt choice in `src/nanodit/model.py`; each is Daniel's
 to confirm. Settle: by reading, or a short 128 px comparison once training runs.
 
 ### F1. RoPE frequency base
@@ -386,7 +308,7 @@ Build the full-stream SwiGLU first, as the most powerful form, which needs SwiGL
 The extras (deep supervision of the slice, an untied extra SwiGLU) are not necessary; do the main check now. `128_d768x12_idfinal_ep1` (worktree `../tiny-dit-idfinal`, `runs/queue_idfinal_2026-11-03.sh`): one change from `_slice_ep1`, a learnable `final` Linear(768, 128) on the fallback optimizer initialised as the selection matrix [I | 0] (output equals the input latent at init, checked). It separates the identity init from removing the learnable readout. A slice seed repeat (noise estimate) was offered and not queued.
 `128_d768x12_idfinal_ep1` was stopped by hand at step ~2650 (killed, no final score). Eval caption loss at 1000 / 2000 / 2500: 1.5654 / 1.5242 / 1.5146, against baseline 1.5674 / 1.5236 / 1.5134 and slice 1.5679 / 1.5210 / 1.5087: best at step 1000, level with the baseline from 1500, 0.006 behind the slice at 2500. Fallback grad norm about 0.10 against 0.04 for the slice.
 
-Decided 2026-11-03, with the aim of seeing the best model we can produce by the next day: the slice readout becomes the base model (commit `56b4515`, branch `slice-base`), with the conv dropped as useless, RoPE on every head dim, and a deeper MLP (SwiGLU hidden 4 x width; the earlier remark to increase the MLP to 8 in the model-growth question was not read as a ratio, so 4 is Claude's pick and a single constant, `MLP_RATIO`). The run is `128_d1024x16_5ep` (`configs/128_d1024x16_5ep.toml`): d1024, 16 layers, 293.8M parameters, usui lr 1e-2 constant for 5 epochs with no anneal, to decide how to go on from there, fallback 2.5e-3, rank fraction 0.1 (0.05 would be possible again since there is no bottleneck, but it is not worth it), batch 256, 37,605 steps, 5 % warmup of the first epoch, checkpoint 2 x per epoch (every 3750 steps), eval every 1000. The first 250 steps ran at 330 img/s, so about 8 hours plus evals. Not decided and left open: the final anneal; F1 (RoPE base 10000 kept; with every dim rotated, the slowest frequencies move under 0.001 rad across a 16-position axis and act as position-free dims); a seed repeat of the slice arm.
+Decided 2026-11-03, with the aim of seeing the best model we can produce by the next day: the slice readout becomes the base model (commit `56b4515`, branch `slice-base`), with the conv dropped as useless, RoPE on every head dim, and a deeper MLP (SwiGLU hidden 4 x width; the earlier remark to increase the MLP to 8 in the model-growth question was not read as a ratio, so 4 is Claude's pick and a single constant, `MLP_RATIO`). The run is `128_d1024x16_5ep` (its `config.toml`): d1024, 16 layers, 293.8M parameters, usui lr 1e-2 constant for 5 epochs with no anneal, to decide how to go on from there, fallback 2.5e-3, rank fraction 0.1 (0.05 would be possible again since there is no bottleneck, but it is not worth it), batch 256, 37,605 steps, 5 % warmup of the first epoch, checkpoint 2 x per epoch (every 3750 steps), eval every 1000. The first 250 steps ran at 330 img/s, so about 8 hours plus evals. Not decided and left open: the final anneal; F1 (RoPE base 10000 kept; with every dim rotated, the slowest frequencies move under 0.001 rad across a 16-position axis and act as position-free dims); a seed repeat of the slice arm.
 
 ### G7. Does the narrower timestep distribution hold at hero length and in the samples?
 
@@ -408,36 +330,7 @@ Open:
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
 
-The spectra (FACTS, Spectra of the pinned weights): the weights start full rank and concentrate; at the end of
-`swpin_5ep` the MLP matrices put 90 % of their energy in about a sixth of their directions, against about 0.7 in the
-pretrained LFM3 and EmbeddingGemma 2 MLPs; Usui's frame holds about the whole per-step gradient.
-
-The gradient is low rank, so even AdamW has trouble using the full space; the question is whether Usui harms full-rank
-evolution and whether it can be helped (2026-11-05). The pin is just a form of weight decay, which everyone uses to
-prevent explosive weights. Backward can only put changes where the activations sit, and they tend to cluster.
-Zero-order would help here but is inefficient. A higher-rank Usui always helps, with diminishing returns: gradient-wise
-the frame is already the optimal subspace, but even the tail contributes, being a power law.
-
-Later the same day: do not trust the capture; it is just probes, comparable but not a true fixpoint. The concentration of the
-spectrum could well be age, and the effect of age is at least more than 10%. Dropping tails did harm the initial final-layer bottleneck, but on
-most matrices it makes no difference. The lean is toward the original SubTrack paper, though how they argued that the
-subspace is good enough is unknown; our variant is arguably better, since tracking is proven better and the polar plus
-row norm is a principled higher rank. That the gradient is low rank is known, with no need to probe. Rank 0.5 will help
-the spectrum and the loss a little, but the point is that a small space is all you need.
-
-The question was whether applying the polar map to the weights would surely break them, and whether a Hadamard rotation
-could keep them intact while maximising rank. Not as stated: an orthogonal rotation on either side (W → HW, W → WH) leaves every
-singular value unchanged, so the rank and spectrum are invariant; any change to the spectrum changes the function.
-What a Hadamard rotation does change is the basis: it spreads energy evenly over coordinates (the incoherence QuaRot and
-SpinQuant use), which would matter only to the basis-dependent parts of the optimizer, such as a row norm.
-
-Open: whether the concentration is Usui's (the rank-0.1 frame drops the gradient's tail every step), the training length
-(theirs is far longer; the 3-epoch continuation shows whether it keeps falling), or this task. Not wanted: the rank 0.5
-arm and the dense-gradient probe. Remaining candidates, none agreed:
-- A full-rank optimizer arm (AdamW on every matrix) of `swpin_3k`'s length: the reference for "even AdamW". Needs code.
-- The same spectra on the continuation's checkpoints: whether the effective rank still falls with age.
-- Ways to help, if Usui is the cause: a small random component in the frame each refresh to reach the tail (zero-order
-  is the extreme of this).
+Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-epoch run against pretrained models, Daniel's reading, the candidates). State: open, no arm agreed; the rank 0.5 arm and the dense-gradient probe are not wanted.
 
 ### G10. The depthwise conv, placed differently
 
@@ -488,12 +381,4 @@ on a free GPU: FACTS, Sweep throughput.
 
 ### I1. Priming: reconstruction pretraining, then distributional post-training
 
-Its own topic doc: `topics/priming.md` (the source, Daniel's direction, the mapping onto this project, what is open).
-
----
-
-## Group E. Housekeeping
-
-### E1. Repo name
-
-`tiny-dit` is a placeholder.
+Its own topic doc: `topics/priming.md` (the source, Daniel's direction, the arms and their reads, what is open). State (2026-11-11): a side quest; probably not used at all, and if anything then REPA on precomputed targets.
