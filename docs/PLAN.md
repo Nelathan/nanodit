@@ -80,7 +80,7 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 *Decided* (2026-11-12): usui lr 4e-3, the best of the sweep at d768x16 over 3000 steps under the trust rule with each
 norm pinned at its init, before the ceiling (archive 2026-11-12-norm-ceiling;
 `log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`: 5e-4 1.5332, 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950).
-The reference config still runs 2e-3. Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at
+The reference config runs 4e-3. Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at
 4e-3. Settle: config-only arms against a 4e-3 reference.
 
 ### C3. Timestep shift values per stage

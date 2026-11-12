@@ -52,7 +52,8 @@ below about 0.003 in caption loss is within what one seed can say.
     Level in loss with cross plus adaLN at 6000 steps.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-- **usui lr 4e-3** is decided (PLAN C2); the reference config still runs 2e-3.
+- **The reference** `configs/128_d768x12_6k.toml` (cross attention, usui lr 4e-3) has not run; it waits for the
+  re-encode of the captions without the prefix.
 - **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
   default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
   PLAN. Moving `lab` also moved ai-toolkit's Anima lane, which runs the `../usuitrack` checkout: its first frame is
