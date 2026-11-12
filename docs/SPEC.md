@@ -89,7 +89,7 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 
 ## 6. Optimizer: UsuiTrack
 
-- Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at `norm_max` times the norm it has at its first step (Usui's `norm_bounds = (None, norm_max)`): a ceiling, no floor, no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
+- Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at the norm it has at its first step (Usui's `norm_bounds = (None, 1)`): each matrix lives in the ball of its init radius, set by its init (§5), with no floor and no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
 - Frame size: one rank fraction for every tracked matrix.
 - Frames drawn at random when the optimizer is built (Usui's group key `frame_init = "random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers, then a linear decay over the run to a configured fraction of the peak.

@@ -10,7 +10,7 @@ of those pieces earn their place when each is measured?
   cross attention to its 512-d token states
 - **Blocks:** three gated depthwise-conv blocks (a GDN2-style local update) for every attention block; sandwich
   norm; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
-- **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix's norm is capped at a multiple of its init norm
+- **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix stays in the ball of its init norm
 - **Framework:** pure PyTorch, bf16 parameters, single GPU, no trainer framework
 
 It is a research log as much as a codebase: every design choice is in `docs/SPEC.md`, every number behind it in

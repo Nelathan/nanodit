@@ -334,14 +334,15 @@ The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3
 
 ### G8. What the norm ceiling leaves open
 
-Every Usui matrix takes the trust step, its Frobenius norm clipped at `norm_max` times its init norm (SPEC §6, archive
-2026-11-12). The reference config sets 1.0, which differs from the former pin only where a step shrinks a norm.
+Every Usui matrix takes the trust step inside the ball of its init norm (SPEC §6, archive 2026-11-12); this differs
+from the former pin only where a step shrinks a norm.
 The sandwich norm was necessary against the loss spikes (2026-11-06); no arm checks it again.
 Open:
-- The ceiling's height. Free norms grew 3–5× by step 3750 and the function came to depend on them (FACTS, Spikes);
-  a ceiling above 1 lets that growth happen up to a bound. The trust step stays `lr` relative at any norm, so the
-  height changes the function's scale, not the step. Settle: config-only arms at `norm_max` 2 and 4 against the reference,
-  read with the logged norm ratio and stable ranks (SPEC §8).
+- Whether the trust rule is still needed inside the ball. With the norm at most its init radius, the trust step and
+  Usui's shape-sized `fixed` step differ by a per-matrix factor `‖W‖ / √(max(1, m/n) r)`. *Hypothesis:* the norms
+  stay near the radius, so the factor is fixed by the init and the rules differ only in how the lr scales across
+  shapes. Settle: a per-matrix norm ratio read on a reference run (SPEC §8 logs only the global one); if it holds, an
+  arm of `fixed` against `trust` at matched lr.
 - Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).

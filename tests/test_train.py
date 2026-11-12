@@ -56,7 +56,6 @@ seed = 0
 usui_lr = 3e-3
 beta = 0.95
 rank_fraction = 0.1
-norm_max = 1.0
 fallback_lr = 1e-3
 warmup = 2
 shift = 1.5
@@ -174,7 +173,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
-    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1.0, 1e-3)
+    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     matrix.load_state_dict(usui_state)
     fallback.load_state_dict(adam_state)
 
@@ -327,7 +326,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         torch.manual_seed(1)
         model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
         open_gates(model)
-        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1.0, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], prompt.rows(i, i + size)) for i in range(0, 8, size)]
         loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0)
@@ -347,7 +346,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
     open_gates(model)
     model.bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1.0, 1e-3)
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
     start = {n: p.detach().clone() for n, p in model.named_parameters()}
     g = torch.Generator().manual_seed(0)
     x = torch.randn(8, 2, 16, 16, generator=g)
@@ -366,17 +365,17 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     assert all(fraction > 0.02 for fraction in changed.values()), changed
 
 
-def test_a_resumed_run_takes_its_lr_and_norm_ceiling_from_the_config_not_the_checkpoint(train, tmp_path):
+def test_a_resumed_run_takes_its_lr_from_the_config_not_the_checkpoint(train, tmp_path):
     torch.manual_seed(0)
     model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR).bfloat16()
     open_gates(model)
     fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
-    saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1.0, 1e-3)
+    saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     train.save_checkpoint(model, saved, 7, tmp_path)
     model = fresh
-    resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 2.0, 1e-3)
+    resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 1e-3)
     assert train.load_checkpoint(model, resumed, tmp_path / "checkpoints" / "step_0000007") == 7
-    assert {(g["lr"], g["norm_bounds"]) for g in resumed[0].param_groups} == {(2e-3, (None, 2.0))}
+    assert {g["lr"] for g in resumed[0].param_groups} == {2e-3}
 
 
 def test_scores_follow_eval_every_and_checkpoints_follow_checkpoint_every(train, tmp_path, monkeypatch):

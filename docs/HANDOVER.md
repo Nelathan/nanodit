@@ -10,8 +10,8 @@ pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
 depthwise-conv block (GDN2-style); sandwich norm; adaLN-single from the pooled caption; concatenating patch embed and
-slice read-out; every Usui matrix's norm clipped at `norm_max` times its init norm (1.0 in the reference config). The baseline for trials is width 768 × depth 12 (122.8M
-parameters) on the 16-shard trial set at 128 px. The size of a long run is open (PLAN G1).
+slice read-out; every Usui matrix inside the ball of its init norm (a ceiling, no floor). The baseline for trials is
+width 768 × depth 12 (122.8M parameters) on the 16-shard trial set at 128 px. The size of a long run is open (PLAN G1).
 
 No long run of this model exists. The longest run, `128_d1024x16_swpin_5ep` (2026-11-05, 37,605 steps), is of the
 model before the conv blocks; its last checkpoint is kept and does not load into the current `DiT`.
@@ -54,8 +54,6 @@ below about 0.003 in caption loss is within what one seed can say.
     Level in loss with cross plus adaLN at 6000 steps, and the simpler model if cross attention is adopted.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-  - `norm_max` (G8): the ceiling's height; 1.0 keeps the reference comparable with the pinned arms, so no weight
-    growth shows under it. Arms at 2 and 4 are the next read, with `weights/norm_ratio` and `stable_rank/*` (SPEC §8).
 - **PLAN is still part diary** in C2, G5 and F3.
 - **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
   default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
