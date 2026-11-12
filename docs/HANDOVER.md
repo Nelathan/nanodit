@@ -5,12 +5,12 @@ measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 77 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 78 tests
 pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
 depthwise-conv block (GDN2-style); sandwich norm; adaLN-single from the pooled caption; concatenating patch embed and
-slice read-out; every Usui matrix pinned to its init norm. The baseline for trials is width 768 × depth 12 (122.8M
+slice read-out; every Usui matrix's norm clipped at `norm_max` times its init norm (1.0 in the reference config). The baseline for trials is width 768 × depth 12 (122.8M
 parameters) on the 16-shard trial set at 128 px. The size of a long run is open (PLAN G1).
 
 No long run of this model exists. The longest run, `128_d1024x16_swpin_5ep` (2026-11-05, 37,605 steps), is of the
@@ -49,15 +49,18 @@ below about 0.003 in caption loss is within what one seed can say.
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
 - **PLAN A2, B1, B2** are measured and ready to close.
 - **Switches on the trunk**, each for an open question:
-  - `cross` (F3): cross attention to the token states in the attention blocks.
+  - A block type's `cross` (F3): cross attention to the token states in the attention blocks of that type.
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
     Level in loss with cross plus adaLN at 6000 steps, and the simpler model if cross attention is adopted.
-  - `conv_period` (F4): every n-th block is attention, the rest conv. To be replaced by a layout pattern of block
-    types repeated to the depth, which also places the attention block within the period.
+  - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
+    period is a config-only arm.
+  - `norm_max` (G8): the ceiling's height; 1.0 keeps the reference comparable with the pinned arms, so no weight
+    growth shows under it. Arms at 2 and 4 are the next read, with `weights/norm_ratio` and `stable_rank/*` (SPEC §8).
 - **PLAN is still part diary** in C2, G5 and F3.
-- **usuitrack**: the optimizer runs from the unpushed branch `zero-init`. The `lab` candidate is agreed in outline:
-  the range finder stays, `frame_init` random as an opt-in, norm bounds in place of the pin flag (PLAN G8); whether
-  Usui needs `eigh` at all is PLAN A3. Not built yet.
+- **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
+  default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
+  PLAN. Moving `lab` also moved ai-toolkit's Anima lane, which runs the `../usuitrack` checkout: its first frame is
+  now the range finder, not eigh (usuitrack PLAN R1). `lab` was `be3f298` before.
 
 ## Branches
 
