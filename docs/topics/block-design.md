@@ -1,6 +1,6 @@
 # Block design: mixers, layout, rope, heads
 
-Topic doc for PLAN F3, F4 and G10, opened 2026-11-06 from Daniel's list. It holds every suggestion with its status, the
+Topic doc for PLAN F3, F4 and G10, opened 2026-11-06 from a list of suggestions. It holds every suggestion with its status, the
 experiment ledger and the lessons drawn. Measured numbers go to FACTS, closures to `archive/`.
 
 ## Current design (2026-11-06)
@@ -34,13 +34,13 @@ only (a zero pad stands in for the 128 image channels), then the same post-norm 
 
 ## Suggestions, in the order given
 
-Each is Daniel's unless noted. Status: open, queued, running, read.
+Each comes from that list unless noted. Status: open, queued, running, read.
 
 1. **Meta-only patch embed at one primal block per token** (2026-11-06). The patch is concatenated unchanged into the first 128 channels,
    `Linear(128 → width − 128)` fills the rest. The 16 px arm changed this and the token size together; the token size was the bad
    part ("4 blocks per latent"). Token size stays one block. Variants: the same with a small MLP in the embed. Queued → `conv4_metaembed_3k`.
 2. **Cross attention gets no adaLN**: no shift, scale or gate rows from the pooled embedding or the timestep; it keeps
-   a static learned gate per channel (my choice, to keep the zero-init identity). Open.
+   a static learned gate per channel (a default, not decided, to keep the zero-init identity). Open.
 3. **The 3k cross-attention trial decides nothing**: following a sequence is much harder and cannot be learned in 3000 steps;
    after five epochs the pooled-only model followed prompts oddly, which is either a young model or the pooled vector
    conflating concepts. The pair needs a longer budget, or a prompt-following read rather than caption loss. Recorded.
@@ -66,7 +66,7 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
     Queued behind the 128 px arms; `scripts/score_checkpoint.py` (branch `conv-meta`) does the first.
 12. **Fine-T2I: crop when it must be, never stretch** (not all to 1:1). Recorded in PLAN B6.
 
-## Decided (Daniel, 2026-11-06)
+## Decided (2026-11-06)
 
 - Patch embed: concat. The raw 128-d patch stays in the first 128 channels and `Linear(128 → width − 128)` fills the rest. It keeps the image
   channels pure, so the final read has no bottleneck, and each step then improves the image rather than only altering it, which seems to help
@@ -82,9 +82,9 @@ Each is Daniel's unless noted. Status: open, queued, running, read.
 - Size generalisation is read from the 128 px checkpoints on 256 px; a 3000-step checkpoint does not yet hold proper positional readings,
   which is why conv dominated there. Speed is read by regression: step time at 128, 256, 512 and 1024 px per layout, projected to larger grids
   (`scripts/bench_speed.py`, FACTS).
-- Branches are mine to manage, kept tidy.
+- Branches are kept tidy.
 
-## Open (Daniel, 2026-11-06)
+## Open (2026-11-06)
 
 Which attention types go in which layers once the 3/4 conv pattern stays, and whether sequentially or in parallel: the attention slot (every 4th
 block) as self only, self then cross, self and cross in parallel into one meta-only `out`, or cross in a different slot than self.
@@ -104,7 +104,7 @@ attention ablations only mean something where attention is. Cross attention rejo
 | `conv2_3k` | conv in 1/2 of the blocks | read | 1.4852 | level, 1.20× |
 | `conv3_3k` | conv in 2/3 | read | 1.4859 | level, 1.28× |
 | `conv4_3k` | conv in 3/4 | read | 1.4884 | level within 0.003, 1.32×; the new base |
-| `conv4_gqa3_rope25_meta_6k`, `conv4_6k`, `attn_6k` | the decided combination, the conv base, the all-attention baseline at the 6000-step eval length; each also scored at 256 px | running (`queue_6k_2026-11-06.sh`) | | the new references; later arms compare to these |
+| `conv4_gqa3_rope25_meta_6k`, `conv4_6k`, `attn_6k` | the decided combination, the conv base, the all-attention baseline at the 6000-step eval length; each also scored at 256 px | running | | the new references; later arms compare to these |
 | `conv4_metaembed_3k` | meta-only patch embed, 8 px token (1.) | read | 1.4869 | level (−0.0015), same speed; the 16 px loss was the 4-blocks-per-token packing, not the meta-only write |
 | `conv4_pmlp_3k` | PaLM block (8.) | read | 1.4908 | +0.0024 and no speed gain: dropped |
 | `conv4_nope_3k` | no rotary position (10.) | read | 1.4895 | +0.0011 at 128 px, +0.0034 on the unseen 256 px grid |
@@ -118,7 +118,7 @@ attention ablations only mean something where attention is. Cross attention rejo
   more to learn at this length; a longer run is what shows whether attention's global mixing pays later.
 - Caption loss at 3000 steps cannot judge token conditioning. It measures the class-level signal the pooled embedding already carries.
 
-Queue: `/mnt/mars/ai/tiny-dit/runs/queue_blocks_2026-11-06.sh` runs metaembed, pmlp, nope, gqa3 in that order (`queue_rope25_2026-11-06.sh` adds rope25 after it), about 15 minutes each; code on branch `conv-meta`. Arms compare against `conv4_3k` (1.4884 at 3000, 1.5474 at 1000, 1.5037 at 2000).
+Arms run in the order metaembed, pmlp, nope, gqa3, rope25, about 15 minutes each; code on branch `conv-meta`. Arms compare against `conv4_3k` (1.4884 at 3000, 1.5474 at 1000, 1.5037 at 2000).
 - Rotary frequencies at 8×8 tokens: only the fastest 4 of 16 per axis turn more than 0.5 rad across the grid; partial RoPE contrasts must cut below half to differ from full RoPE. At 1 megapixel the grid is far larger and the slow frequencies matter, so a 64-token RoPE read does not carry over.
 - Conv carries across resolution far better than attention: trained at 128 px, the 3/4-conv model scores 0.031 better than the all-attention one on the 256 px grid, though it is 0.003 worse at 128 px. Local mixing does not depend on how many tokens there are; global attention at 256 tokens meets position offsets it never saw.
 - At 64 tokens none of NoPE, quarter RoPE or GQA costs anything, and the 256 px read keeps that order: full or partial RoPE best, NoPE worst by 0.003. Position helps a little when the grid grows, and a quarter of the frequencies carries all of it.

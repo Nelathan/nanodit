@@ -41,6 +41,7 @@ docs/HANDOVER.md      where things stand, what is undecided, traps
 docs/REFERENCES.md    sources (papers, model cards, datasets) and what each one establishes
 docs/references/      source material kept verbatim
 AGENTS.md             working rules for the agents that write this code (CLAUDE.md imports it)
+LICENSE               MIT
 src/nanodit/          model, objective, sampler, data stream, optimizer split, REPA target
 scripts/              precompute, shuffle, train, score, probes
 configs/              run configs that load on the current model, eval prompts
@@ -61,11 +62,16 @@ a sibling checkout (`AGENTS.md`, "Running things"). Primal VAE loads via `diffus
 
 Training reads precomputed rows, not images. The pipeline, each step a script with its usage in its docstring:
 
-1. `precompute.py`: text-to-image-2M shards to one Parquet per shard (Primal latents at 128 and 256 px, pooled
-   embedding, token states); `reencode_sequence.py` rewrites the token states at the encoder's 512-d width.
-2. `shuffle.py`: the shards of a resolution into one Parquet in uniformly random row order, each image once.
-3. `precompute_lunara.py`, `join_sequences.py`: the eval set every run is scored on, never trained on.
+1. `precompute.py`: text-to-image-2M shards to one Parquet per shard (Primal latents at 128 and 256 px, the pooled
+   embedding, the 512-d token states).
+2. `shuffle.py`: the shards into one Parquet per resolution in uniformly random row order, each image once.
+3. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
 4. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
-The paths in the scripts and configs are this machine's; the data is about 160 GB and is not part of the repo.
+Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is
+about 160 GB and is not part of the repo.
+
+## License
+
+MIT.

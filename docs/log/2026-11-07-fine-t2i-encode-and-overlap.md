@@ -26,7 +26,7 @@ Exact match after lower-casing and collapsing whitespace, against all 2,290,793 
 
 No caption is shared, so there is no prompt-level duplicate to drop; an image-level duplicate (the same photograph in both) can only be found from the images. Dataset 1 itself repeats captions: 297k of its rows share a caption with another row.
 
-## Decisions (Daniel, 2026-11-07)
+## Decisions (2026-11-07)
 
 - Every subset encodes its short `prompt`, whole (the encoder has no token limit); the enhanced prompts stay as text and can be encoded later without the images. About 0.8 TB for all subsets.
 - The exact caption check being clean, the two datasets are taken to share no image; no image-level dedup.

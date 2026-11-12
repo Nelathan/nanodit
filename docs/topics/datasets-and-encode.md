@@ -7,7 +7,7 @@ The question and its reads, moved here whole from `PLAN.md` and `FACTS.md` on 20
 **B6. The data sets and the encode**
 
 Two sets were missing from the original plan: Spawning/PD12M and jasperai/monet, both world-knowledge images more than
-text-to-image. Lunara is too small for pretraining but an option for fine-tuning later. Any set we pull gets 128 and
+text-to-image. Lunara is too small for pretraining but an option for fine-tuning later. Any set pulled gets 128 and
 256 px latents plus the Gemma-class embedding and its token sequence. `/mnt/luna` has about 800 GB free but is an HDD,
 so it holds the staging, and the shuffled set goes to `/mnt/mars` afterwards. The current data gets the same treatment,
 as an overnight job (2026-11-05). Candidates in REFERENCES, Data: Fine-T2I, PD12M, MONET; `moonworks/lunara-aesthetic`
@@ -21,22 +21,14 @@ the first encoded rows average 58 tokens, 90 KB, so about 170 GB per 1.9M rows (
 captions was low); at the 512-d states (1,024 B per token) about 115 GB, the figure for the shuffled set.
 
 Decided 2026-11-05: a fused dataset of both sources, deduplicated later, both at 128 and 256 px with Lanczos; the
-sequence for cross attention at 512, since it is projected down to 64 anyway, kept straightforward, with the prompt
-prefix tokens dropped and unpadded. Permitted: deleting anything stale or no longer needed, and using
-`/run/media/djg/vel-ssd` for space. The HDD read may be enough, so plan the async delay. EmbeddingGemma 2's residual stream is
-512-d (24 layers); its `embedding_projection` (768x512, after the final norm, per token) lifts the token states to 768
-before the mean pooling and normalize. The encode stores the projected 768-d states, which span only 512 dimensions;
-the pooled embedding is 768-d. The prefix `title: none | text: ` is `<bos>` and 6 tokens;
-its trailing space merges into the caption's first token. If the encoder gives 768, that is fine (2026-11-05). Running
-since 2026-11-05 23:00: text-to-image-2M shards 0–46, then the Lunara eval set (`scripts/precompute.py`,
-`scripts/precompute_lunara.py`), into `/mnt/luna/tiny-dit/precomputed/fused/`, log
-`/mnt/luna/tiny-dit/precompute_2026-11-05.log`.
+sequence for cross attention at 512-d, with the prompt prefix tokens dropped and unpadded. EmbeddingGemma 2's
+residual stream is 512-d (24 layers); its `embedding_projection` (768x512, after the final norm, per token) lifts
+the token states to 768 before the mean pooling and normalize, so the 768-d states span only 512 dimensions and the
+stored sequence is the projection's input. The pooled embedding is 768-d. The prefix `title: none | text: ` is
+`<bos>` and 6 tokens; its trailing space merges into the caption's first token. `scripts/precompute.py` writes both
+from one encoder pass, one Parquet per shard (shards 0–46 encoded 2026-11-05 to 11-06).
 
-After the 512-d residual was re-verified (2026-11-06), the decision: redo only the sequence when the encode finishes,
-since that is cheaper than restarting the encode. `scripts/reencode_sequence.py` re-encodes the captions of every fused shard (no images) to the 512-d
-token states before the projection, into `fused/sequence512_<shard>.parquet` (key, sequence); it starts when the encode
-exits, log `/mnt/luna/tiny-dit/reencode_sequence_2026-11-06.log`. The shuffle then joins on `key` and drops the 768-d
-`sequence`. Open:
+Open:
 - Fine-T2I's images are above 1K and partly not square. Decided: no square crop; the images go into aspect buckets (token grids of about
   the same token count, the image resized to the grid's exact size), and the data is fused, deduplicated and shuffled in one
   pass once it is encoded. The sizes are good (below, Fine-T2I image sizes): nine aspect ratios, at most 5 % stretch on the

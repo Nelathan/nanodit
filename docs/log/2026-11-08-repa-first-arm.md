@@ -38,7 +38,7 @@ Reading:
   6000, 0.0013 at 256 px; the reproduction gap was 0.0005 and 0.0006, so about four and two times it. The first
   priming arm to beat scratch.
 - The gain sits at the middle of t (40 % to 66 % noise, up to 0.006) and is a small loss at the noisy end (74 % and
-  84 %). My reading: the aligned block learns image content the flow loss reaches slowly at mid noise; at high noise
+  84 %). Reading: the aligned block learns image content the flow loss reaches slowly at mid noise; at high noise
   the clean-image features say little about the target the network can still use, and the alignment competes with it.
   While on, the alignment pulls block 3 toward features the flow loss does not need yet, so it lags; once free, the
   representation it left pays.

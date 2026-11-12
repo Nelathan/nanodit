@@ -12,7 +12,7 @@ The LR sweep (PLAN C2): `128_sweep_lr{1e-3,2e-3,4e-3}`, one pass over `128_shuff
 | 2e-3 | 1.3726 / 1.3752 | 1.1718 / 1.1745 |
 | 4e-3 | 1.3691 / 1.3709 | 1.1679 / 1.1712 |
 
-- Loss falls with lr, by 0.009 from 1e-3 to 2e-3 and 0.004 from 2e-3 to 4e-3; the caption gap is 0.002–0.003 in every arm. Daniel, on the samples: "2e-3 looks best even though [4e-3] has better loss".
+- Loss falls with lr, by 0.009 from 1e-3 to 2e-3 and 0.004 from 2e-3 to 4e-3; the caption gap is 0.002–0.003 in every arm. On the samples, 2e-3 looks best even though 4e-3 has better loss (a visual judgment).
 
 The same checkpoints on the checkpoint score's eval set (SPEC §8: the 1000 Lunara renders of `moonworks/lunara-art-eval`, never trained on), scored by `train.score` from scratch `heldout/score_lunara.py`: noise seed 1, t at `t_quantiles(10, 1.0)`, about 4 s per checkpoint on the 4070 Super.
 
@@ -65,7 +65,7 @@ Sweep merge (scratch `sweepmerge/`, same scoring as the Lunara table above): the
 | mean of 1e-3 + 2e-3 + 4e-3 | 2.4683 | 2.4436 |
 | mean of all four | 3.0589 | 3.0599 |
 
-- Daniel, before: "Merging our 4 lr sweep checkpoints may be crazy again but maybe its good too, i do have hope". Every merge is broken, like the seed merge's, though these arms share init and data order.
+- Before: merging the 4 lr sweep checkpoints might be crazy again, but there was hope it would be good. Every merge is broken, like the seed merge's, though these arms share init and data order.
 
 Weight norms of `128_sweep_lr4e-3` (scratch `norms.py`; Frobenius norm over all blocks for `blocks.*`, init rebuilt at seed 0):
 
@@ -81,4 +81,4 @@ Weight norms of `128_sweep_lr4e-3` (scratch `norms.py`; Frobenius norm over all 
 
 - No norm has levelled off; the Usui matrices grow by about 2.5–3× their init, slowing (qkv +17 per 1k steps from 4k to 8k, +12 from 12k to 15042). Nothing sets a target norm: no weight decay on either optimizer, and Usui's fixed step does not depend on `‖W‖`. The same absolute step on a weight 2.8× larger is a 2.8× smaller relative step: an implicit decay with no schedule.
 
-- The merge alone is broken, worse than any child, and better with the null embedding than with the caption; 5000 steps from it end 0.009 below the single run at step 5000, after 4× its compute. Daniel: "no merges just fresh init each time".
+- The merge alone is broken, worse than any child, and better with the null embedding than with the caption; 5000 steps from it end 0.009 below the single run at step 5000, after 4× its compute. Decided: no merges, fresh init each time.

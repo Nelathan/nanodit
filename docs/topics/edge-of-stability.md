@@ -4,7 +4,7 @@ The question and its reads, moved here whole from `PLAN.md` and `FACTS.md` on 20
 
 ## The question (PLAN C4)
 
-**C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate we choose?**
+**C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate chosen?**
 
 Added 2026-11-06: https://jeffreycider.github.io/posts/bubbleforce/ (listed in REFERENCES).
 The post (Cheng and Zheng, 2026) claims that for non-adaptive optimizers, Muon included, the equilibrium is
@@ -16,12 +16,12 @@ the end under lr decay, for which the authors give no theory, and one scheduled-
 prediction. Adam-type optimizers are outside it by the authors' account (dead neurons spoil the eigenvalue
 measurements). Code: https://github.com/jeffreycider/bubbleforce.
 This is optimizer work that belongs to the usuitrack repo and starts here, because it may settle cleanly why the cosine
-between the gradient and the momentum (`grad_moment_cosine`) is negative in our runs: more momentum makes it less
+between the gradient and the momentum (`grad_moment_cosine`) is negative in the runs: more momentum makes it less
 negative with diminishing returns, and only a lower lr turns it up, which stops proper learning (the learning-rate
 question above). A negative cosine means the gradient points against the accumulated step, an oscillation, which is
 what the post's edge-of-stability picture describes for momentum: the largest root of the step's characteristic
-polynomial sits on the unit circle, and where it sits on it sets the oscillation (my reading of the post, untested).
-Decided 2026-11-06: the authors' code is a reference only; we implement our own for our harness.
+polynomial sits on the unit circle, and where it sits on it sets the oscillation (reading of the post, untested).
+Decided 2026-11-06: the authors' code is a reference only; the implementation is the repo's own, for its harness.
 First read, UsuiTrack's update (`usuitrack/optimizer.py` in the usuitrack repo, branch `zero-init`): the moment is an exponential average of unit projected
 gradients, `M = beta M + (1 - beta) Z/||Z||`, which is the post's momentum kernel `c_j = (1 - beta) beta^j` (weights sum
 to 1, no Nesterov) acting on the normalised gradient; the write is `lr · ||W||` times the Newton-Schulz polar factor of
@@ -32,11 +32,11 @@ map set it). It is consistent with the beta dependence of the real runs in one p
 parameter (below, Momentum cosine on a noisy quadratic). The lr dependence cannot be read from the runs so far, since
 the lr pair also differs in beta, warmup and rank fraction. The toy leaves out the normalisation, the polar map and the
 turning frame, which change the Jacobian the post's pathspring is defined on.
-Daniel's reading (2026-11-06): a higher lr usually does make the cosine more negative, and a tiny lr makes it positive;
+Reading (2026-11-06): a higher lr usually does make the cosine more negative, and a tiny lr makes it positive;
 the sign is a spectrum effect, set by how many channels oscillate against how many are stable. A scratch toy with many
 directions of power-law sharpness and a descent signal goes the same way (positive at a tiny lr, negative as the lr
 rises); it is not saved. In the LLM lane a good fit read about -0.01; the DiT adds the noise of denoising and of the
-sampled t, and Daniel believes that is the difference to the -0.4 here.
+sampled t, and the belief is that this is the difference to the -0.4 here.
 Cautious stepping (zero the entries where the moment and the projected gradient differ in sign) was tried in
 usuitrack and did not work out nicely. A linear filter on the moments instead, writing the mean of the last and the
 current moment, was never tried. In the toy it fails: the half step of extra lag moves the edge from `2(1+β)/(1-β)`

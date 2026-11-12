@@ -30,6 +30,6 @@ Caption loss by t at 6000 (t the noise share):
   (0.0075, while the spread is wide) and 2000 (0.0007), and 0.001 to 0.002 ahead at 3000 to 5000: level, no
   measurable gain.
 - Spread 1.0 ends 0.002 behind (0.003 at 256 px), lost at every t but 66 % noise; it starts 0.029 behind at 1000.
-- Unlike masking, per-token t costs nothing at the gentler spread, and gains nothing measurable by 6000 steps. My
-  reading: spreading t moves training signal between noise levels but adds none; at 0.5 the tokens still sit near the
+- Unlike masking, per-token t costs nothing at the gentler spread, and gains nothing measurable by 6000 steps.
+  Reading: spreading t moves training signal between noise levels but adds none; at 0.5 the tokens still sit near the
   sample's t, so the run is nearly ordinary flow training.

@@ -11,13 +11,13 @@ What each source establishes for this project.
   Pure x0 prediction with large patches; the manifold/bottleneck argument for why the target matters with fat tokens.
 - **Karras et al., EDM / EDM2.** Preconditioning (`c_skip`, `c_out`); EMA length as a major quality knob (EDM2).
   arXiv 2312.02696 ("Analyzing and Improving the Training Dynamics of Diffusion Models") is taken to be EDM2: magnitude-preserving
-  layers; Daniel's pointer for the weight pin (PLAN G8), not read beyond the abstract.
+  layers; the pointer for the weight pin (PLAN G8), not read beyond the abstract.
 - **Esser et al., SD3.** Rectified flow at scale, logit-normal timestep sampling, resolution-dependent shift.
 - **Kim et al., "Are We Overthinking One-Step Generation?" (Priming), arXiv 2610.20331.** Repo
   https://github.com/JaeyeonKim01/priming, blog https://moepien.github.io/blog/better-priming/. Stage 1: reconstruction
   pretraining at one fixed noise level; stage 2: distributional post-training (Sinkhorn / optimal transport) in a frozen
-  feature space, for one-step generation. Stage-1 noise-level ablation as Daniel's writeup quotes it (FID):
-  s 0.5 → 2.46, 0.7 → 1.76, 0.8 → 1.65, 0.9 → 1.97, 1.0 → 65.08. Known here only through Daniel's writeup, kept verbatim in
+  feature space, for one-step generation. Stage-1 noise-level ablation as the writeup quotes it (FID):
+  s 0.5 → 2.46, 0.7 → 1.76, 0.8 → 1.65, 0.9 → 1.97, 1.0 → 65.08. Known here only through the writeup, kept verbatim in
   `references/priming-threads.md`; paper, repo and numbers unverified (PLAN I1).
 
 ## Components
@@ -29,7 +29,7 @@ What each source establishes for this project.
 - **EmbeddingGemma 2** — https://huggingface.co/google/embeddinggemma-2 (released 2026-10-06, Apache 2.0)
   Text path: 24 layers, model dim 512, 130M transformer + 140M embedder, mean pooling, 512→768 projection,
   8K context, task prefixes, bf16 or fp32 only (fp16 yields NaN). Attention direction not stated on the card.
-- **UsuiTrack** — Daniel's optimizer (SubTrack++ + FlashOptim), local.
+- **UsuiTrack** — the project's optimizer (SubTrack++ + FlashOptim), local.
 
 ## Optimizer
 
@@ -56,7 +56,7 @@ What each source establishes for this project.
   ~2M pairs as 512×512 WebDataset shards; mix of Flux-dev renders of LLaVA-pretrain prompts, DALL·E 3 images,
   ~700K real LLaVA-NeXT images recaptioned with Qwen2-VL; plus a 10K 1024 px set. ~423 GB.
 - **Fine-T2I** — https://huggingface.co/datasets/ma-xu/fine-t2i
-  Daniel (2026-11-05): "i found a great resource". About 6.15M synthetic pairs (Z-Image, FLUX2; 10 task combinations,
+  About 6.15M synthetic pairs (Z-Image, FLUX2; 10 task combinations,
   32 prompt categories, 11 styles) plus 168k curated real photos (Pexels, Pixabay, Unsplash); ~2.3 TB WebDataset
   (jpg, txt with an original and an enhanced prompt, json), mostly above 1K, some subsets at random aspect ratios;
   Apache-2.0. Claims semantic dedup, safety and aesthetic filters and a VLM quality audit removing over 95 % of
@@ -66,9 +66,8 @@ What each source establishes for this project.
   COYO 18.5M, Common-Catalog-CC-BY 11.0M, Megalith-10M 8.0M, CC12M 6.2M) plus 13.8M synthetic (Z-Image, FLUX.1-schnell,
   FLUX.2-klein-4B); alt-text plus up to four synthetic captions (Florence-2 short, ShareGPT4V, InternVL3, Gemini long);
   images below 512 px and LAION aesthetic below 5 dropped, pHash/SSCD dedup, NSFW and watermark filters. Parquet
-  configs carry 384 px thumbnails, metadata, embeddings and VAE latents; WebDataset carries full resolution. Daniel
-  (2026-11-05): with PD12M "rather world knowledge images, not so much t2i".
+  configs carry 384 px thumbnails, metadata, embeddings and VAE latents; WebDataset carries full resolution. Judged (with PD12M): "rather world knowledge images, not so much t2i".
 - **PD12M** (not chosen) — https://huggingface.co/datasets/Spawning/PD12M
   12.4M public-domain/CC0 pairs, recaptioned, S3-hosted. Alternative if real-image aesthetics or licensing matter.
-  Daniel (2026-11-05): the second set of the original plan, left out of the notes; world knowledge images rather than
+  The second set of the original plan, left out of the notes; world knowledge images rather than
   text-to-image.

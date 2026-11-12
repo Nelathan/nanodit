@@ -19,7 +19,7 @@ the frame is already the optimal subspace, but even the tail contributes, being 
 Later the same day: do not trust the capture; it is just probes, comparable but not a true fixpoint. The concentration of the
 spectrum could well be age, and the effect of age is at least more than 10%. Dropping tails did harm the initial final-layer bottleneck, but on
 most matrices it makes no difference. The lean is toward the original SubTrack paper, though how they argued that the
-subspace is good enough is unknown; our variant is arguably better, since tracking is proven better and the polar plus
+subspace is good enough is unknown; this variant is arguably better, since tracking is proven better and the polar plus
 row norm is a principled higher rank. That the gradient is low rank is known, with no need to probe. Rank 0.5 will help
 the spectrum and the loss a little, but the point is that a small space is all you need.
 
