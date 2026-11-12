@@ -40,10 +40,10 @@ Plain DiT: no text tokens in the sequence, bidirectional mixing over image token
 
 | Component | Decision |
 |---|---|
-| Width | 1024 |
-| Depth | 16 layers |
+| Width | 768 |
+| Depth | 12 layers. Width and depth are the baseline for trials, not final (PLAN G1) |
 | Mixer | Every 4th block (the 4th, 8th, …) is self-attention, the others a conv block. After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
-| Attention | GQA: 16 query heads × head dim 64, a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
+| Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
@@ -73,7 +73,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 |---|---|---|
 | Patch embed 128→(width − 128) | fan-in normal, zero bias; the first 128 channels are the raw patch, no parameters | Usui |
 | Timestep MLP | fan-in normal | Usui |
-| Text projection 768→1024 | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
+| Text projection 768→width | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
 | Conv block projection, depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
