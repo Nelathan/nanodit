@@ -3,7 +3,7 @@
 The first N eval latents (256 px) are decoded by Primal and embedded as images at the 384 px budget (70 soft tokens,
 `probe_vision.py`); each caption is embedded under each prefix of the model's prompt list and without one. Per prefix:
 top-1 and top-5 retrieval of the image among the N by the caption, and the mean cosine to the own image against the
-others. Usage: probe_prefix.py [N]
+others. Usage: probe_prefix.py EVAL.parquet [N]
 """
 
 import json
@@ -18,8 +18,8 @@ from nanodit.data import _bf16
 from nanodit.model import LATENT_CHANNELS
 from train import load_decoder
 
-EVAL = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_256_seq512.parquet"
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
+EVAL = sys.argv[1]
+N = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
 PREFIXES = {
     "none": "",
     "query (search result)": "task: search result | query: ",

@@ -6,7 +6,7 @@ image goes to 384, 528 and 768 px at the first three: at 70 its soft tokens are 
 16x16 grid at 256 px.
 At each budget: the cosine of each image to its own caption against the others (the stored pooled caption, which carries the document prefix,
 and the caption under the retrieval query prefix), and top-1 retrieval of the caption among the N.
-Usage: probe_vision.py [N]
+Usage: probe_vision.py EVAL.parquet [N]
 """
 
 import json
@@ -22,8 +22,8 @@ from nanodit.data import _bf16
 from nanodit.model import LATENT_CHANNELS, TEXT_DIM
 from train import load_decoder
 
-EVAL = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_256_seq512.parquet"
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 128
+EVAL = sys.argv[1]
+N = int(sys.argv[2]) if len(sys.argv) > 2 else 128
 torch.set_grad_enabled(False)
 
 table = pq.read_table(EVAL, columns=["caption", "embedding", "latent_256"]).slice(0, N)

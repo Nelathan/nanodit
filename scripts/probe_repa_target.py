@@ -2,7 +2,7 @@
 content, on CPU. Each latent and its horizontal flip (Primal decodes flips equivariantly, FACTS) go through the target;
 the flip's token grid flipped back should match the original token for token. Reported: the cosine of each token to
 its own flipped-back counterpart, against that to the other tokens of the same image and to the same token of other
-images. Usage: probe_repa_target.py [N]
+images. Usage: probe_repa_target.py EVAL.parquet [N]
 """
 
 import json
@@ -17,8 +17,8 @@ from nanodit.data import _bf16
 from nanodit.model import LATENT_CHANNELS
 from train import load_decoder
 
-EVAL = "/run/media/djg/vel-ssd/tiny-dit/lunara_eval_128_seq512.parquet"
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 32
+EVAL = sys.argv[1]
+N = int(sys.argv[2]) if len(sys.argv) > 2 else 32
 torch.set_grad_enabled(False)
 
 x = _bf16(pq.read_table(EVAL, columns=["latent_128"]).slice(0, N)["latent_128"], LATENT_CHANNELS, 64, 64).float()

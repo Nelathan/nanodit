@@ -1,4 +1,9 @@
-"""adaLN shift/scale magnitudes at init (PLAN F2), for the null embedding and random unit texts; prints."""
+"""adaLN shift/scale magnitudes at init (PLAN F2), for the null embedding and random unit texts; prints.
+
+usage: probe_init.py NULL_EMBEDDING.safetensors
+"""
+import sys
+
 import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
@@ -6,7 +11,7 @@ from safetensors.torch import load_file
 from nanodit.model import GATE_ROWS, N_MOD, TEXT_DIM, DiT, timestep_sinusoid
 
 torch.manual_seed(0)
-null_file = load_file("/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors")
+null_file = load_file(sys.argv[1])
 null = null_file["null"]
 model = DiT(null, null_file["null_tokens"], depth=12, width=512)
 t = torch.linspace(0.02, 0.98, 16)

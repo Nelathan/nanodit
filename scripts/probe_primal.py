@@ -1,6 +1,6 @@
 """PLAN B1: Primal VAE 2x2 latent statistics, flip equivariance and reconstruction, on CPU.
 
-usage: probe_primal.py SHARD.tar
+usage: probe_primal.py SHARD.tar OUT_DIR
 """
 import io
 import json
@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from diffusers import AutoModel
 from PIL import Image
 
-OUT = "/mnt/mars/ai/tiny-dit/probes"
+OUT = sys.argv[2]
 SIZES = {128: 256, 256: 128}  # resolution -> number of images
 
 torch.manual_seed(0)

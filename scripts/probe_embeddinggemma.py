@@ -2,7 +2,7 @@
 
 The raw (pre-Normalize) vectors come from the Transformer + Pooling modules; L2 normalization is the third module.
 
-usage: probe_embeddinggemma.py SHARD.tar
+usage: probe_embeddinggemma.py SHARD.tar OUT_DIR
 """
 import json
 import sys
@@ -12,7 +12,7 @@ import time
 import torch
 from sentence_transformers import SentenceTransformer
 
-OUT = "/mnt/mars/ai/tiny-dit/probes"
+OUT = sys.argv[2]
 REPO = "google/embeddinggemma-2"
 PREFIX = "title: none | text: "
 N_CAPTIONS = 256
