@@ -265,7 +265,7 @@ def main(config_path: str) -> None:
     # a record checks for non-finite steps, so nothing is evaluated or saved past an unchecked one
     if cfg.eval_every % cfg.log_every or cfg.checkpoint_every % cfg.log_every:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
-    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
+    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=cfg.cross)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = build_model(cfg, device, torch.bfloat16)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)

@@ -110,7 +110,7 @@ def epoch(stream, micro_batches):
 def test_each_pass_streams_every_row_once_and_the_next_pass_in_another_order(shuffled, rows, monkeypatch):
     latents, embeddings, sequences = rows
     monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 2)  # blocks of up to 6 rows: batches of 4 cross blocks
-    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0)
+    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0, sequences=True)
     passes = []
     for _ in range(2):
         seen = []
@@ -127,16 +127,29 @@ def test_each_pass_streams_every_row_once_and_the_next_pass_in_another_order(shu
     assert passes[0] != passes[1]
 
 
+def test_without_sequences_every_prompt_carries_masked_out_null_length_tokens(shuffled, rows):
+    latents, embeddings, _ = rows
+    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0, sequences=False)
+    seen = []
+    for x, prompt in epoch(stream, 5):
+        assert prompt.tokens.shape == (4, NULL_TOKENS, SEQ_DIM) and not prompt.tokens.any() and not prompt.mask.any()
+        for row, emb in zip(x, prompt.pooled):
+            i = (latents.float() == row).flatten(1).all(1).nonzero().item()
+            assert torch.equal(embeddings[i].float(), emb)
+            seen.append(i)
+    assert sorted(seen) == list(range(20))
+
+
 def test_rows_are_shuffled_inside_a_block(shuffled, rows, monkeypatch):
     monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 100)  # the whole file is one block, so only rows can move
-    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0)
+    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0, sequences=True)
     first, second = (torch.cat([x for x, _ in epoch(stream, 5)]) for _ in range(2))
     assert not torch.equal(first, second) and torch.equal(first.sort(0).values, second.sort(0).values)
 
 
 def test_the_buffers_are_reused_and_the_order_follows_the_seed(shuffled):
     def first_rows(seed):
-        stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=seed)
+        stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=seed, sequences=True)
         x1, _ = stream.next()
         pointer = x1.data_ptr()
         rows = [stream.next()[0][:, 0, 0, 0].tolist() for _ in range(4)]
