@@ -5,13 +5,14 @@ measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 78 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
 pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
 depthwise-conv block (GDN2-style); sandwich norm; adaLN-single from the pooled caption; concatenating patch embed and
 slice read-out; every Usui matrix inside the ball of its init norm (a ceiling, no floor). The baseline for trials is
-width 768 × depth 12 (122.8M parameters) on the 16-shard trial set at 128 px. The size of a long run is open (PLAN G1).
+width 768 × depth 12 (122.8M parameters) on the 16-shard trial set at 128 px. Width 768 is decided; the depth of a
+long run is open (PLAN G1).
 
 No long run of this model exists. The longest run, `128_d1024x16_swpin_5ep` (2026-11-05, 37,605 steps), is of the
 model before the conv blocks; its last checkpoint is kept and does not load into the current `DiT`.
@@ -47,12 +48,13 @@ below about 0.003 in caption loss is within what one seed can say.
 
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
 - **Switches on the trunk**, each for an open question:
-  - A block type's `cross` (F3): cross attention to the token states in the attention blocks of that type.
+  - A block type's `cross`: cross attention is decided as design (archive 2026-11-12, plan history); the switch and
+    its pooled-only branch have not been removed yet.
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
     Level in loss with cross plus adaLN at 6000 steps, and the simpler model if cross attention is adopted.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-- **PLAN is still part diary** in C2, G5 and F3.
+- **usui lr 4e-3** is decided (PLAN C2); the reference config still runs 2e-3.
 - **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
   default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
   PLAN. Moving `lab` also moved ai-toolkit's Anima lane, which runs the `../usuitrack` checkout: its first frame is

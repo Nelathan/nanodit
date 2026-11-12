@@ -60,7 +60,7 @@ What each source establishes for this project.
   32 prompt categories, 11 styles) plus 168k curated real photos (Pexels, Pixabay, Unsplash); ~2.3 TB WebDataset
   (jpg, txt with an original and an enhanced prompt, json), mostly above 1K, some subsets at random aspect ratios;
   Apache-2.0. Claims semantic dedup, safety and aesthetic filters and a VLM quality audit removing over 95 % of
-  candidates (the authors' claim). A candidate for the second image dataset (PLAN G1).
+  candidates (the authors' claim). A candidate for the second image dataset (PLAN B6).
 - **MONET** — https://huggingface.co/datasets/jasperai/monet
   103.8M pairs distilled from 2.9B, 70.8 TB (Jasper Research, Apache-2.0). Mostly real web images (LAION-2B-en 46.3M,
   COYO 18.5M, Common-Catalog-CC-BY 11.0M, Megalith-10M 8.0M, CC12M 6.2M) plus 13.8M synthetic (Z-Image, FLUX.1-schnell,

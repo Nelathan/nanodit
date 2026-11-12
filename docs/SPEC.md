@@ -41,7 +41,7 @@ Plain DiT: no text tokens in the sequence, bidirectional mixing over image token
 | Component | Decision |
 |---|---|
 | Width | 768 |
-| Depth | 12 layers. Width and depth are the baseline for trials, not final (PLAN G1) |
+| Depth | 12 layers, the baseline for trials, not final: the model grows in depth (PLAN G1) |
 | Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer and whether it cross-attends |
 | Mixer | After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |

@@ -1,6 +1,6 @@
 # Block design: mixers, layout, rope, heads
 
-Topic doc for PLAN F3, F4 and G10, opened 2026-11-06 from a list of suggestions. It holds every suggestion with its status, the
+Topic doc for cross attention (archive 2026-11-12, plan history), PLAN F4 and G10, opened 2026-11-06 from a list of suggestions. It holds every suggestion with its status, the
 experiment ledger and the lessons drawn. Measured numbers go to FACTS, closures to `archive/`.
 
 ## Current design (2026-11-06)
