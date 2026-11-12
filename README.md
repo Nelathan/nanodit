@@ -42,7 +42,7 @@ docs/REFERENCES.md    sources (papers, model cards, datasets) and what each one 
 docs/references/      source material kept verbatim
 AGENTS.md             working rules for the agents that write this code (CLAUDE.md imports it)
 LICENSE               MIT
-src/nanodit/          model, objective, sampler, data stream, optimizer split, REPA target
+src/nanodit/          model, objective, sampler, data stream, optimizer split
 scripts/              precompute, shuffle, train, score, probes
 configs/              run configs that load on the current model, eval prompts
 tests/                behaviour tests for all of the above

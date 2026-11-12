@@ -194,10 +194,10 @@ def test_attention_uses_grouped_key_value_heads_and_a_quarter_of_the_rotary_freq
     assert sin[:, :4].abs().max() > 0 and sin[:, 4:16].eq(0).all() and sin[:, 16:20].abs().max() > 0 and sin[:, 20:].eq(0).all()  # 4 of 16 per axis
 
 
-def conv_block_change(gdn, prompt, poke=None):
+def conv_block_change(prompt, poke=None):
     """The first conv block's change to the stream, with the MLP gate closed so it is the mixer's alone; after `poke`
     edits the input, the change again."""
-    model = build(conv_period=2, cross=True, gdn=gdn)
+    model = build(conv_period=2, cross=True)
     open_gates(model)
     model.blocks[0].table.data[5] = 0
     seen = {}
@@ -212,30 +212,16 @@ def conv_block_change(gdn, prompt, poke=None):
     return first, seen["stream_out"] - seen["stream_in"]
 
 
-@pytest.mark.parametrize("gdn", [True, False])
-def test_a_conv_block_writes_every_channel_with_the_gated_update_and_the_meta_channels_without(gdn, prompt):
-    change, _ = conv_block_change(gdn, prompt)
-    assert change[..., TOKEN_DIM:].abs().max() > 0
-    assert (change[..., :TOKEN_DIM] == 0).all() != gdn
+def test_a_conv_block_writes_every_channel(prompt):
+    change, _ = conv_block_change(prompt)
+    assert change[..., TOKEN_DIM:].abs().max() > 0 and change[..., :TOKEN_DIM].abs().max() > 0
 
 
-@pytest.mark.parametrize("gdn", [True, False])
-def test_a_conv_block_mixes_only_neighbouring_tokens(gdn, prompt):
+def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):
     def poke(x):
         x[0, :, 0:8, 0:8] += 1  # token (0, 0)
-    first, second = conv_block_change(gdn, prompt, poke)
+    first, second = conv_block_change(prompt, poke)
     moved = (second - first).abs().amax(-1).view(8, 8) > 0
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
-
-
-def test_aligned_projects_the_repa_blocks_output_tokens_and_forward_is_its_flow_output(prompt):
-    model = build(conv_period=2, cross=True, repa_block=1)
-    open_gates(model)
-    x, t = torch.randn(3, 2, 32, 32), torch.rand(3)
-    kept = []
-    model.blocks[1].register_forward_hook(lambda module, args, out: kept.append(out))
-    out, projected = model.aligned(x, t, prompt)
-    assert projected.shape == (3, 16, 768) and torch.allclose(projected, model.repa_proj(kept[0]))
-    assert torch.equal(model(x, t, prompt), out)

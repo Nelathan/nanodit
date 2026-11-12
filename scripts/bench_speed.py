@@ -16,7 +16,6 @@ ARMS = {  # name: DiT keywords
     "attn": dict(conv_period=1),
     "conv2": dict(conv_period=2),
     "conv4": dict(conv_period=4),
-    "conv4_plain": dict(conv_period=4, gdn=False),
     "conv4_cross": dict(conv_period=4, cross=True),
 }
 WARMUP, STEPS = 3, 8

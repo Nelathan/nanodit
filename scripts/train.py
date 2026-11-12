@@ -17,7 +17,6 @@ import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
-from nanodit.align import VisionTarget
 from nanodit.data import Stream, pad_sequences, read_rows
 from nanodit.model import DiT, Prompt
 from nanodit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
@@ -63,20 +62,13 @@ class Config:
     conv_period: int = 4  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
     cross: bool = False  # the attention blocks also read the caption's token states by cross attention
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
-    gdn: bool = True  # conv blocks mix by the gated state update writing every channel (SPEC §3); false: a plain depthwise conv writing the meta channels
-    pin_weights: bool = True  # Usui matrices keep their init norm and usui_lr is a relative step (SPEC §6); false: Usui's fixed step
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
-    prime_steps: int = 1  # masked priming (topics/priming.md): the share below falls linearly to 0 over this many steps of the run
-    mask_start: float = 0.0  # share of tokens that are pure noise at the first step
-    repa_block: int | None = None  # REPA (topics/priming.md): this block's output, projected, is aligned to the vision tower's features of the clean image
-    repa_weight: float = 0.5  # the alignment term's weight, (1 - cosine), beside the flow loss
-    repa_steps: int = 0  # the alignment is on for this many steps of the run, then off
 
 
 def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     """The config's DiT at its init, the null prompt from the precomputed empty caption."""
     null = load_file(cfg.null_embedding)
-    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada, cfg.gdn, cfg.repa_block).to(device, dtype)
+    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada).to(device, dtype)
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
@@ -196,13 +188,11 @@ class Interval:
     device-to-host transfer per record."""
 
     def __init__(self):
-        self.losses, self.per_samples, self.ts, self.energies, self.grad_norms, self.alignments = [], [], [], [], [], []
+        self.losses, self.per_samples, self.ts, self.energies, self.grad_norms = [], [], [], [], []
         self.start = time.perf_counter()
 
-    def add(self, loss, per_sample, t, energy, grad_norm, alignment) -> None:
+    def add(self, loss, per_sample, t, energy, grad_norm) -> None:
         self.losses.append(loss), self.per_samples.append(per_sample), self.ts.append(t), self.energies.append(energy), self.grad_norms.append(grad_norm)
-        if alignment is not None:
-            self.alignments.append(alignment)
 
     def by_t(self, buckets: int) -> dict:
         """The interval's loss and R² in `buckets` equal-width t bins; None where a bin is empty."""
@@ -221,8 +211,7 @@ class Interval:
             if not (math.isfinite(loss) and math.isfinite(grad_norm)):
                 raise RuntimeError(f"non-finite loss {loss} or fallback gradient norm {grad_norm} at step {first + i}")
         per_sample, t, energy = torch.cat(self.per_samples), torch.cat(self.ts), torch.cat(self.energies)
-        alignment = dict(repa_cosine=torch.stack(self.alignments).mean().item()) if self.alignments else {}
-        return alignment | dict(
+        return dict(
             step=step,
             loss=sum(losses) / len(losses),
             r2=explained_variance(per_sample, t, energy).item(),
@@ -232,23 +221,17 @@ class Interval:
         )
 
 
-def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float, mask_ratio: float,
-                         vision: VisionTarget | None = None, repa_weight: float = 0.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
     mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean flow loss and the
-    per-sample losses, t and clean-latent energy (mean square) of every sample, and with `vision` the mean REPA
-    cosine, whose (1 - cosine) joins the loss at `repa_weight`."""
-    losses, per_samples, ts, energies, alignments = [], [], [], [], []
+    per-sample losses, t and clean-latent energy (mean square) of every sample."""
+    losses, per_samples, ts, energies = [], [], [], []
     for _ in range(micro_batches):
         x, prompt = stream.next()
-        loss, per_sample, t, alignment = flow_loss(model, x, prompt, shift, sigma, mask_ratio, vision(x) if vision is not None else None)
-        total = loss if alignment is None else loss + repa_weight * (1 - alignment)
-        (total / micro_batches).backward()
+        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma)
+        (loss / micro_batches).backward()
         losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
-        if alignment is not None:
-            alignments.append(alignment.detach())
-    alignment = torch.stack(alignments).mean() if alignments else None
-    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies), alignment
+    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
 
 
 def main(config_path: str) -> None:
@@ -268,7 +251,7 @@ def main(config_path: str) -> None:
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=cfg.cross)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = build_model(cfg, device, torch.bfloat16)
-    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr, cfg.pin_weights)
+    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
         block.compile()
@@ -279,7 +262,6 @@ def main(config_path: str) -> None:
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lr_factor) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_prompt, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
-    vision = VisionTarget(decoder, device) if cfg.repa_block is not None else None
     score_x, score_prompt = read_rows(cfg.eval_set, cfg.resolution)
     score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
     score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
@@ -294,11 +276,10 @@ def main(config_path: str) -> None:
     interval = Interval()
     last = start + cfg.steps
     for step in range(start + 1, last + 1):
-        priming = max(0.0, 1 - (step - start - 1) / cfg.prime_steps)
-        loss, per_sample, t, energy, alignment = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma, cfg.mask_start * priming, vision if step - start <= cfg.repa_steps else None, cfg.repa_weight)
+        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]  # the null tokens have none without cross attention
-        interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads), alignment)
+        interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))
         lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
         for optimizer, schedule in zip(optimizers, schedules):
             optimizer.step()

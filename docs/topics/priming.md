@@ -4,15 +4,17 @@ Topic doc for PLAN I1, opened as the plan had just a reference. It holds
 this line of work's plan, design and reads; measured numbers still go to FACTS, closed decisions to `archive/`. The code
 gets its own branch when it starts.
 
-## Status (2026-11-11)
+## Status (2026-11-12)
 
-A side quest, kept out of the main ledgers. Priming will probably not be used; if anything is, it is REPA with its
-targets precomputed rather than computed online (the online tower costs 8.4× per aligned step, Reads below).
+A side quest, kept out of the main ledgers. Masked priming as noise and the online REPA are removed from the code;
+both are in the tree at `a9a111a` (archive 2026-11-12). *Decided:* REPA comes back only with precomputed targets,
+every target the same size (possibly a PCA of the tower's feature), so the alignment costs no tower pass.
 
-Not run, low priority: masking as context rather than as noise. A small share of the tokens (1 to 25 %) is given
-clean (t = 0) and takes no loss, the rest train as usual. Hypothesis: it strengthens self attention; expectation: not
+The next arm, low priority: masking as context rather than as noise. A small share of the tokens (1 to 25 %) is given
+clean (t = 0) and takes no loss, the rest train as usual. *Hypothesis:* seeing parts of the solution trains the
+attention to reconstruct the whole image from them, which carries world knowledge into the model. Expected not to be
 efficient in loss per wall-clock time. The masked priming that ran (Reads below) is the opposite: masked tokens are
-pure noise and carry the loss.
+pure noise and carry the loss, which also keeps the conv blocks from mixing as intended.
 
 ## Source
 
@@ -70,7 +72,7 @@ The method as the writeup gives it:
 - The masked share falls smoothly to 0 (from about 90%), ending in ordinary flow training; the source's objective is
   not taken as given, the aim is the repo's own.
 
-As built (`objective.token_t`, Config `prime_steps`, `mask_start`): every 8×8 latent token is noised at the sample's t,
+As built at `a9a111a` (`objective.token_t`, Config `prime_steps`, `mask_start`): every 8×8 latent token is noised at the sample's t,
 or with probability `mask_ratio` at 1 instead (pure ε, so under T = x_t − v its target is exactly the clean latent).
 `mask_ratio` falls linearly from `mask_start` to 0 over `prime_steps` steps of the run (and restart with a run that resumes from `init_from`),
 ending in ordinary flow training. The network is told the sample's t. There is no mask indicator: the network tells
@@ -104,14 +106,14 @@ to the reference only once priming has ended; the eval score is never primed.
   8×8 tokens (280 gives 768 px and the 16×16 at 256 px); at 384 px it matches decoded images to their captions as well
   as at 768 (FACTS), so 384 px is the REPA input at 128 px. That probe decoded 256 px latents and scored the final
   embedding. On 128 px decodes upsampled 3×, the pooled per-token features follow their token's content under a
-  horizontal flip (FACTS, `scripts/probe_repa_target.py`).
-  As built (`align.VisionTarget`, `DiT(repa_block=…)`, Config `repa_block`, `repa_weight`): the clean latent is
+  horizontal flip (FACTS, `scripts/probe_repa_target.py` at a9a111a).
+  As built at `a9a111a` (`align.VisionTarget`, `DiT(repa_block=…)`, Config `repa_block`, `repa_weight`): the clean latent is
   decoded by Primal, upsampled bicubic 3×, cut into the processor's 16 px patches and positions, and passed through
   the frozen tower (bf16), whose own 3×3 pooling hands back one 768-d feature per token in row-major order. The
   output of block `repa_block` goes through REPA's projector (two hidden layers of 2048, SiLU, to 768); the loss adds
   `repa_weight`·(1 − mean cosine) to the flow loss for the first `repa_steps` steps of the run, then none (a
   fixed span, so the removal shows). The train log carries the flow loss alone and the cosine as `repa_cosine`. A
-  REPA checkpoint carries the projector, so it loads only into a config with `repa_block`. First arm
+  REPA checkpoint carries the projector, so it loads only into a config with `repa_block`. First arm (config at `a9a111a`)
   `configs/128_d768x12_repa_6k.toml`: block 3 (the first attention block), weight 0.5, on for 3000 of 6000 steps.
   It ends 0.0023 ahead of scratch (0.0013 at 256 px) after trailing while on, at 8.4× the time per aligned step
   (`log/2026-11-08-repa-first-arm.md`); longer use needs the features stored with the latents.
@@ -175,4 +177,4 @@ Measured numbers of this topic, moved from `FACTS.md` on 2026-11-11; full tables
 - Per-token t priming (each token's t moved in logit by spread·N(0, 1) about the sample's, the spread falling to 0 over 3000 of 6000 steps), d768x12: spread 0.5 ends level with scratch (1.4770, 1.3728 at 256 px), spread 1.0 0.002 behind (0.003 at 256 px). It costs nothing at 0.5 and gains nothing by 6000 steps. `log/2026-11-07-per-token-t-priming.md`.
 - EmbeddingGemma 2 image embeddings of 128 decoded eval images (256 px latents) against the stored pooled captions (encoded with the document prefix `title: none | text: `, as `precompute.py` writes them): the right caption ranks first among the 128 for 96.1% at the processor's 70-token budget (384 px square, 24×24 patches pooled 3×3 to 8×8), 93.8% at 140 (528 px), 94.5% at 280, the default (768 px); cosine to the own caption 0.797 against 0.669 to the others at 384 px. The retrieval query prefix on the captions gives the same 96.1%. CPU fp32, 1.37 img/s at 384 px, 0.24 at 768. The processor takes only budgets of 70, 140, 280, 560, 1120. `scripts/probe_vision.py`, 2026-11-07.
 - REPA, block 3 (the first attention block) aligned to EmbeddingGemma 2's vision features at weight 0.5 for 3000 of 6000 steps, then off, d768x12: behind scratch while on (0.005 at 1000, 0.0014 at 3000), ahead after removal, 1.4748 against 1.4771 at 6000 (1.3715 against 1.3728 at 256 px). The gain is at 40–66 % noise (up to 0.006), a small loss at 74–84 %. The first priming arm to beat scratch. Online features cost 8.4× in img/s (89 against 745, not split by part; the decode, upsample and tower run per sample, the projector is small). `log/2026-11-08-repa-first-arm.md`.
-- REPA's target (`align.VisionTarget`) on 32 eval latents at 128 px, decoded and upsampled to 384: under a horizontal flip of the latent, each token's feature has cosine 0.645 to its flipped-back counterpart, against 0.251 to the image's other tokens and 0.200 to the same token of other images; the counterpart is the best of the 64 for 40% of tokens (chance 1.6%). Feature norm about 20,400 (the tower's √768 scaling). CPU, `scripts/probe_repa_target.py`, 2026-11-07.
+- REPA's target (`align.VisionTarget`) on 32 eval latents at 128 px, decoded and upsampled to 384: under a horizontal flip of the latent, each token's feature has cosine 0.645 to its flipped-back counterpart, against 0.251 to the image's other tokens and 0.200 to the same token of other images; the counterpart is the best of the 64 for 40% of tokens (chance 1.6%). Feature norm about 20,400 (the tower's √768 scaling). CPU, `scripts/probe_repa_target.py` at a9a111a, 2026-11-07.

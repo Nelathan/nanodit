@@ -3,10 +3,9 @@
 import math
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 
-from .model import PATCH, Prompt
+from .model import Prompt
 
 PROMPT_DROPOUT = 0.1
 
@@ -23,17 +22,8 @@ def t_quantiles(n: int, shift: float) -> Tensor:
 
 
 def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
-    t = t.view(*t.shape, *[1] * (x.dim() - t.dim()))  # a t per sample, or a map of t per element already shaped like x
+    t = t.view(-1, *[1] * (x.dim() - 1))
     return (1 - t) * x + t * eps
-
-
-def token_t(x: Tensor, t: Tensor, mask_ratio: float) -> Tensor:
-    """[B, 1, H, W] each token's t, constant on its PATCH x PATCH block: the sample's t, and 1 (pure noise, so the
-    target is the clean latent) on each token with probability `mask_ratio`. The draw is taken at 0 too, so primed
-    and unprimed runs of one seed take the same random stream."""
-    grid = (x.shape[0], 1, x.shape[2] // PATCH, x.shape[3] // PATCH)
-    own = torch.where(torch.rand(grid, device=x.device) < mask_ratio, 1.0, t.view(-1, 1, 1, 1).expand(grid))
-    return own.repeat_interleave(PATCH, 2).repeat_interleave(PATCH, 3)
 
 
 def target(x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
@@ -51,22 +41,14 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, mask_ratio: float = 0.0,
-              features: Tensor | None = None) -> tuple[Tensor, Tensor, Tensor, Tensor | None]:
-    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`, and with `features`
-    (REPA's target, align.py) the mean cosine of the model's projected tokens to them, else None. Each token is noised
-    at its own `token_t` (masked priming, topics/priming.md); the model is told the sample's t."""
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
-    x_t = noisy(x, eps, token_t(x, t, mask_ratio))
+    x_t = noisy(x, eps, t)
     prompt = drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2]))
-    if features is None:
-        out, alignment = model(x_t, t, prompt), None
-    else:
-        out, projected = model.aligned(x_t, t, prompt)
-        alignment = F.cosine_similarity(projected.float(), features.float(), dim=-1).mean()
-    per_sample = per_sample_loss(out, x, eps, x_t)
-    return per_sample.mean(), per_sample, t, alignment
+    per_sample = per_sample_loss(model(x_t, t, prompt), x, eps, x_t)
+    return per_sample.mean(), per_sample, t
 
 
 def loss_by_t_bucket(per_sample: Tensor, t: Tensor, buckets: int) -> Tensor:

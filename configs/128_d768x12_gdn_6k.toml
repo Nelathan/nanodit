@@ -1,4 +1,4 @@
-# The trunk model (GDN mixer by default) at d768x12 on the 16-shard trial set, 6000 steps: the reference for the masked-priming arms. Fields: scripts/train.py Config.
+# The trunk model at d768x12 on the 16-shard trial set, 6000 steps: the reference for trunk arms. Fields: scripts/train.py Config.
 name = "128_d768x12_gdn_6k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
@@ -11,7 +11,6 @@ micro_batch = 64
 steps = 6000
 seed = 41
 usui_lr = 0.002
-pin_weights = true
 beta = 0.99
 rank_fraction = 0.1
 fallback_lr = 0.0025

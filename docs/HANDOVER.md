@@ -1,11 +1,11 @@
 # Handover
 
-State on 2026-11-11, after a cleanup pass over the whole repo. `PLAN.md` carries the questions, `FACTS.md` the
+State on 2026-11-12, after a cleanup pass over the whole repo. `PLAN.md` carries the questions, `FACTS.md` the
 measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 89 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 77 tests
 pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
@@ -36,8 +36,8 @@ below about 0.003 in caption loss is within what one seed can say.
 6. **The GDN2-style gated update in the conv blocks** (same log note): 0.0022 ahead of plain conv at 128 px, 0.005
    at 256 px, at 84% of the speed. Accepted as a step; faster forms are still to be tried. Samples of these arms
    were not looked at, and the reference implementation was not read, only a documentation page.
-7. **Priming** (`topics/priming.md`): a side quest, probably not used. Of four schemes only REPA ends ahead of
-   scratch (0.0023), at 8.4× the cost per aligned step with online targets.
+7. **Priming** (`topics/priming.md`): a side quest. Of four schemes only REPA ends ahead of scratch (0.0023), at 8.4×
+   the cost per aligned step with online targets. No priming code is on the trunk (archive 2026-11-12).
 8. **Fine-T2I** (`topics/datasets-and-encode.md`, `log/2026-11-07-fine-t2i-encode-and-overlap.md`):
    `stage_fine.py` and `encode_fine.py`. Curated and both enhanced-prompt subsets were reported encoded; the staging
    of the original-prompt subsets stopped on a nearly full disk. The state on disk was not re-checked. The per-bucket
@@ -48,16 +48,16 @@ below about 0.003 in caption loss is within what one seed can say.
 - **SPEC §6 lr schedule** says linear decay to a fraction; PLAN C2 aims at a constant lr with a late anneal.
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
 - **PLAN A2, B1, B2** are measured and ready to close.
-- **Switches on the trunk** whose question is settled or dormant, kept until confirmed for removal:
-  - `conv_period`: every n-th block is attention, the rest conv. 4 is the design; 1 (all attention) lost by 0.010.
-  - `pooled_ada = false`: the pooled caption leaves the adaLN conditioning, so the caption enters by cross attention
-    only. Level with keeping it.
-  - `gdn = false`: the plain depthwise-conv block the gated update replaced. Lost by 0.0022.
-  - `pin_weights = false`: Usui's fixed step with free weight norms, the rule before the pin.
-  - masked priming (`mask_start`, `prime_steps`): lost by 0.009.
-  - REPA (`repa_block`, `repa_weight`, `repa_steps`, `align.VisionTarget`): kept; its targets are computed online.
+- **Switches on the trunk**, each for an open question:
+  - `cross` (F3): cross attention to the token states in the attention blocks.
+  - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
+    Level in loss with cross plus adaLN at 6000 steps, and the simpler model if cross attention is adopted.
+  - `conv_period` (F4): every n-th block is attention, the rest conv. To be replaced by a layout pattern of block
+    types repeated to the depth, which also places the attention block within the period.
 - **PLAN is still part diary** in C2, G5 and F3.
-- **usuitrack**: the optimizer runs from the unpushed branch `zero-init`; what goes to `lab` is undecided.
+- **usuitrack**: the optimizer runs from the unpushed branch `zero-init`. The `lab` candidate is agreed in outline:
+  the range finder stays, `frame_init` random as an opt-in, norm bounds in place of the pin flag (PLAN G8); whether
+  Usui needs `eigh` at all is PLAN A3. Not built yet.
 
 ## Branches
 

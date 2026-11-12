@@ -382,4 +382,4 @@ on a free GPU: FACTS, Sweep throughput.
 
 ### I1. Priming: reconstruction pretraining, then distributional post-training
 
-Its own topic doc: `topics/priming.md` (the source, the direction, the arms and their reads, what is open). State (2026-11-11): a side quest; probably not used at all, and if anything then REPA on precomputed targets.
+Its own topic doc: `topics/priming.md` (the source, the direction, the arms and their reads, what is open). State (2026-11-12): a side quest; no priming code on the trunk. Next arm: clean context tokens (t = 0, no loss) at a 1 to 25 % share. REPA only on precomputed targets of one size.
