@@ -19,6 +19,15 @@ matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`);
 go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
 reading, and the harness runs that split (`src/nanodit/optim.py`). Ready to close.
 
+### A3. Does Usui need `eigh` at all?
+
+A first frame fitted to a low-rank first gradient is not worth an `eigh`: the trunk draws its frames at random, and
+usuitrack's random range finder fits without one. The aim (Molegrad's too) is closed-form, a Rayleigh-quotient
+projection. `eigh` remains once per step in the frame turn: the spectra of the [r, r] tangent Grams that `turn` rotates
+by (usuitrack `frame.tangent_spectra`), one stacked, launch-bound call that syncs with the host (H1). Settle: on a
+usuitrack branch, the turn without `eigh` against the current one, by loss and `tangent_live_fraction`; merged only
+if it holds.
+
 ---
 
 ## Group B. Data and conditioning
@@ -211,6 +220,10 @@ mixers with one meta-only output projection, a sparse layout of conv layers with
 MLP, RoPE against partial RoPE against NoPE, MHA against GQA for self-attention (MHA is not cheap in runtime and a 1-megapixel image
 costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the blocks.
 
+Open: where the attention block sits in the period. The trunk puts it fourth of four, as Qwen does; an earlier ablation
+on another model found the third position best of the 3/4 layouts. Settle: one arm per position, once the layout is a
+config pattern of block types repeated to the depth.
+
 ---
 
 ## Group G. Scale and signal propagation
@@ -328,6 +341,9 @@ Open:
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
 - A pin per output row instead of per matrix.
+- Norm bounds instead of a pin: each matrix's norm clipped into [min, max] after the step, the pin being min = max =
+  the init norm and the default; roles override the bounds, which a zero-initialized matrix needs, having no init
+  norm. Settle: built in usuitrack `lab`; an arm only once a role wants bounds other than the pin.
 - Reading: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
