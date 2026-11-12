@@ -6,6 +6,8 @@ dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parque
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
 depth = 12
 width = 768
+layout = ["conv", "conv", "conv", "attn"]
+block_types = { conv = { mixer = "conv" }, attn = { mixer = "attn" } }
 batch = 256
 micro_batch = 64
 steps = 6000

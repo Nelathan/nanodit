@@ -2,7 +2,9 @@ import pytest
 import torch
 
 from nanodit.data import pad_sequences
-from nanodit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
+from nanodit.model import BlockType, DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
+
+CROSS_PAIR = (BlockType("conv"), BlockType("attn", cross=True))  # the smallest layout with every kind of matrix
 
 
 def open_gates(model):
@@ -17,7 +19,7 @@ def open_gates(model):
 def model():
     torch.manual_seed(0)
     null = torch.nn.functional.normalize(torch.randn(TEXT_DIM), dim=0)
-    return DiT(null, torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True)
+    return DiT(null, torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
 
 
 @pytest.fixture

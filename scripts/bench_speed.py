@@ -8,15 +8,16 @@ import time
 import torch
 
 from nanodit.data import pad_sequences
-from nanodit.model import NULL_TOKENS, SEQ_DIM, DiT, Prompt
+from nanodit.model import NULL_TOKENS, SEQ_DIM, BlockType, DiT, Prompt
 
 TOKENS_PER_BATCH = 4096  # 64 images at 128 px
 RESOLUTIONS = (128, 256, 512, 1024)
+CONV, ATTN = BlockType("conv"), BlockType("attn")
 ARMS = {  # name: DiT keywords
-    "attn": dict(conv_period=1),
-    "conv2": dict(conv_period=2),
-    "conv4": dict(conv_period=4),
-    "conv4_cross": dict(conv_period=4, cross=True),
+    "attn": dict(layout=(ATTN,)),
+    "conv2": dict(layout=(CONV, ATTN)),
+    "conv4": dict(layout=(CONV, CONV, CONV, ATTN)),
+    "conv4_cross": dict(layout=(CONV, CONV, CONV, BlockType("attn", cross=True))),
 }
 WARMUP, STEPS = 3, 8
 

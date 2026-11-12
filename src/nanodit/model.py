@@ -22,7 +22,17 @@ GATE_ROWS = (2, 5)
 MLP_RATIO = 4  # SwiGLU hidden over the stream width
 KV_RATIO = 4  # query heads per key/value head
 ROPE_FRACTION = 0.25  # of each axis' frequencies rotate: the fast ones; the slow ones barely turn on the grid and carry no position
-CONV_PERIOD = 4  # every CONV_PERIOD-th block is attention, the rest are conv blocks
+
+
+class BlockType(NamedTuple):
+    """One block's settings. A layout is a sequence of them, repeated to the depth (SPEC §3)."""
+
+    mixer: str  # "conv" or "attn"
+    cross: bool = False  # attention only: then read the caption's token states by cross attention
+
+
+MIXERS = ("conv", "attn")
+LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("conv"), BlockType("attn"))
 
 
 class Prompt(NamedTuple):
@@ -79,14 +89,16 @@ class Block(nn.Module):
     gated update (GDN2's decoupled forget and write gates, diagonal). An attention block mixes with gated grouped-query attention and, with `cross`, then reads
     the caption's token states through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
 
-    def __init__(self, width: int, conv: bool, cross: bool):
+    def __init__(self, width: int, kind: BlockType):
         super().__init__()
+        assert kind.mixer in MIXERS, kind
+        assert not (kind.cross and kind.mixer == "conv"), "cross attention is in attention blocks only"
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
-        self.is_conv, self.cross = conv, cross and not conv
+        self.is_conv, self.cross = kind.mixer == "conv", kind.cross
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
-        if conv:
+        if self.is_conv:
             self.gdn_proj = nn.Linear(width, 4 * width, bias=False)  # value, current state, forget gate, write gate
             self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)  # on the value
             self.out = nn.Linear(width, width, bias=False)
@@ -148,12 +160,14 @@ class Block(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, conv_period: int = CONV_PERIOD,
-                 cross: bool = False, pooled_ada: bool = True):
+    def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT,
+                 pooled_ada: bool = True):
+        """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth."""
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
-        assert cross or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
-        assert conv_period >= 1, conv_period
+        assert layout, "a layout needs at least one block type"
+        kinds = [layout[i % len(layout)] for i in range(depth)]
+        assert any(kind.cross for kind in kinds) or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
         self.null_tokens = nn.Parameter(null_tokens.detach().clone().float())  # [NULL_TOKENS, 512]
@@ -161,7 +175,7 @@ class DiT(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.text_proj = nn.Linear(TEXT_DIM, width) if pooled_ada else None
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
-        self.blocks = nn.ModuleList(Block(width, i % conv_period != conv_period - 1, cross) for i in range(depth))  # conv first, attention next
+        self.blocks = nn.ModuleList(Block(width, kind) for kind in kinds)
         self.init_weights()
 
     @torch.no_grad()

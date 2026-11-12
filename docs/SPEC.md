@@ -36,13 +36,14 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; blocks with cross attention (an experiment switch, off by default) also read the 512-d token states.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; attention blocks whose type cross-attends (an experiment switch, not in the default layout) also read the 512-d token states.
 
 | Component | Decision |
 |---|---|
 | Width | 768 |
 | Depth | 12 layers. Width and depth are the baseline for trials, not final (PLAN G1) |
-| Mixer | Every 4th block (the 4th, 8th, …) is self-attention, the others a conv block. After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
+| Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer and whether it cross-attends |
+| Mixer | After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |

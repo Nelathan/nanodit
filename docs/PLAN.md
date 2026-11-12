@@ -221,8 +221,8 @@ MLP, RoPE against partial RoPE against NoPE, MHA against GQA for self-attention 
 costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the blocks.
 
 Open: where the attention block sits in the period. The trunk puts it fourth of four, as Qwen does; an earlier ablation
-on another model found the third position best of the 3/4 layouts. Settle: one arm per position, once the layout is a
-config pattern of block types repeated to the depth.
+on another model found the third position best of the 3/4 layouts. Settle: one config-only arm per position (`layout`,
+SPEC §3).
 
 ---
 

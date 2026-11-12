@@ -3,9 +3,9 @@ import copy
 import pytest
 import torch
 
-from conftest import open_gates
+from conftest import CROSS_PAIR, open_gates
 from nanodit.data import pad_sequences
-from nanodit.model import DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
+from nanodit.model import BlockType, DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
@@ -164,20 +164,29 @@ def build(**kw):
     return DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512, **kw)
 
 
-@pytest.mark.parametrize("period, layout", [(1, [0] * 4), (2, [1, 0, 1, 0]), (3, [1, 1, 0, 1]), (4, [1, 1, 1, 0])])
-def test_every_conv_period_th_block_is_attention_and_conv_comes_first(period, layout):
-    assert [int(b.is_conv) for b in build(conv_period=period).blocks] == layout
+CONV, ATTN = BlockType("conv"), BlockType("attn")
 
 
-def test_cross_attention_is_in_the_attention_blocks_only():
-    assert [b.cross for b in build(conv_period=2, cross=True).blocks] == [False, True, False, True]
-    assert not any(b.cross for b in build(conv_period=2).blocks)
+@pytest.mark.parametrize("layout, convs", [((ATTN,), [0] * 4), ((CONV, ATTN), [1, 0, 1, 0]), ((CONV, CONV, ATTN), [1, 1, 0, 1]), ((CONV, ATTN, CONV), [1, 0, 1, 1])])
+def test_the_layout_repeats_to_the_depth_and_the_last_repeat_is_cut_short(layout, convs):
+    assert [int(b.is_conv) for b in build(layout=layout).blocks] == convs
+
+
+def test_the_default_layout_puts_attention_in_every_fourth_block():
+    assert [int(b.is_conv) for b in build().blocks] == [1, 1, 1, 0]
+
+
+def test_cross_attention_is_where_the_block_type_asks_for_it():
+    assert [b.cross for b in build(layout=CROSS_PAIR).blocks] == [False, True, False, True]
+    assert not any(b.cross for b in build(layout=(CONV, ATTN)).blocks)
+    with pytest.raises(AssertionError, match="attention blocks only"):
+        build(layout=(BlockType("conv", cross=True), ATTN))
 
 
 def test_a_caption_reaches_the_network_through_the_adaln_or_the_cross_attention():
     with pytest.raises(AssertionError):
-        build(cross=False, pooled_ada=False)
-    model = build(conv_period=2, cross=True, pooled_ada=False)
+        build(pooled_ada=False)
+    model = build(layout=CROSS_PAIR, pooled_ada=False)
     assert model.text_proj is None
     open_gates(model)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
@@ -188,7 +197,7 @@ def test_a_caption_reaches_the_network_through_the_adaln_or_the_cross_attention(
 
 
 def test_attention_uses_grouped_key_value_heads_and_a_quarter_of_the_rotary_frequencies():
-    block = build(conv_period=2).blocks[1]
+    block = build(layout=(CONV, ATTN)).blocks[1]
     assert (block.heads, block.kv_heads) == (8, 2) and block.qkv.weight.shape == (512 + 2 * 2 * HEAD_DIM, 512)
     cos, sin = rope_angles(4, 4)
     assert sin[:, :4].abs().max() > 0 and sin[:, 4:16].eq(0).all() and sin[:, 16:20].abs().max() > 0 and sin[:, 20:].eq(0).all()  # 4 of 16 per axis
@@ -197,7 +206,7 @@ def test_attention_uses_grouped_key_value_heads_and_a_quarter_of_the_rotary_freq
 def conv_block_change(prompt, poke=None):
     """The first conv block's change to the stream, with the MLP gate closed so it is the mixer's alone; after `poke`
     edits the input, the change again."""
-    model = build(conv_period=2, cross=True)
+    model = build(layout=CROSS_PAIR)
     open_gates(model)
     model.blocks[0].table.data[5] = 0
     seen = {}

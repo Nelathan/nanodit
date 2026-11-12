@@ -18,7 +18,7 @@ from PIL import Image
 from safetensors.torch import load_file, save_file
 
 from nanodit.data import Stream, pad_sequences, read_rows
-from nanodit.model import DiT, Prompt
+from nanodit.model import BlockType, DiT, Prompt
 from nanodit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
 from nanodit.optim import build_optimizers
 from nanodit.sampler import euler_sample
@@ -38,6 +38,8 @@ class Config:
     null_embedding: str
     depth: int
     width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden MLP_RATIO times it
+    layout: list[str]  # block type names, repeated to the depth (SPEC §3)
+    block_types: dict[str, dict]  # name -> the fields of a model.BlockType
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's
@@ -60,8 +62,6 @@ class Config:
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
-    conv_period: int = 4  # every conv_period-th block is attention, the rest are conv blocks; 1 is all attention
-    cross: bool = False  # the attention blocks also read the caption's token states by cross attention
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
     lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
 
@@ -69,7 +69,8 @@ class Config:
 def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     """The config's DiT at its init, the null prompt from the precomputed empty caption."""
     null = load_file(cfg.null_embedding)
-    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, cfg.conv_period, cfg.cross, cfg.pooled_ada).to(device, dtype)
+    layout = tuple(BlockType(**cfg.block_types[name]) for name in cfg.layout)
+    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, layout, cfg.pooled_ada).to(device, dtype)
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
@@ -274,9 +275,9 @@ def main(config_path: str) -> None:
     # a record checks for non-finite steps, so nothing is evaluated or saved past an unchecked one
     if cfg.eval_every % cfg.log_every or cfg.checkpoint_every % cfg.log_every:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
-    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=cfg.cross)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = build_model(cfg, device, torch.bfloat16)
+    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=any(block.cross for block in model.blocks))
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.norm_max, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
