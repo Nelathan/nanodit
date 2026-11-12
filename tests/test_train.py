@@ -56,6 +56,7 @@ seed = 0
 usui_lr = 3e-3
 beta = 0.95
 rank_fraction = 0.1
+norm_max = 1.0
 fallback_lr = 1e-3
 warmup = 2
 shift = 1.5
@@ -143,7 +144,13 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
         assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_caption"] == s["loss_caption"]
         assert data["eval_r2_caption_by_t/q0.2-0.4"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
-        assert len(data) == 2 + 2 * 5  # the two means, and the loss and R² in fifths
+        weights = {"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
+        assert {key: value for key, value in data.items() if key in weights} == weights
+        assert len(data) == 2 + 2 * 5 + len(weights)  # the two means, the loss and R² in fifths, the weight reads
+    for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
+        assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
+        assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])
+        assert all(0 < v <= 1 for v in s["weights"]["stable_rank"].values())
     for s in scores:
         assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["r2_caption_by_t"]) == 10 and "loss_null" not in s
 
@@ -167,7 +174,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
-    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
+    matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1.0, 1e-3)
     matrix.load_state_dict(usui_state)
     fallback.load_state_dict(adam_state)
 
@@ -320,7 +327,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
         torch.manual_seed(1)
         model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True)
         open_gates(model)
-        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
+        build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1.0, 1e-3)
         size = 8 // micro_batches
         chunks = [(x[i : i + size], prompt.rows(i, i + size)) for i in range(0, 8, size)]
         loss, per_sample, t, _ = train.accumulate_gradients(model, FixedBatches(chunks), micro_batches, shift=1.0, sigma=1.0)
@@ -340,7 +347,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True)
     open_gates(model)
     model.bfloat16()
-    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
+    optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1.0, 1e-3)
     start = {n: p.detach().clone() for n, p in model.named_parameters()}
     g = torch.Generator().manual_seed(0)
     x = torch.randn(8, 2, 16, 16, generator=g)
@@ -359,17 +366,17 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
     assert all(fraction > 0.02 for fraction in changed.values()), changed
 
 
-def test_a_resumed_run_takes_its_lr_from_the_config_not_the_checkpoint(train, tmp_path):
+def test_a_resumed_run_takes_its_lr_and_norm_ceiling_from_the_config_not_the_checkpoint(train, tmp_path):
     torch.manual_seed(0)
     model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, conv_period=2, cross=True).bfloat16()
     open_gates(model)
     fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
-    saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
+    saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1.0, 1e-3)
     train.save_checkpoint(model, saved, 7, tmp_path)
     model = fresh
-    resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 1e-3)
+    resumed = build_optimizers(model, 2e-3, 0.95, 0.1, 2.0, 1e-3)
     assert train.load_checkpoint(model, resumed, tmp_path / "checkpoints" / "step_0000007") == 7
-    assert {g["lr"] for g in resumed[0].param_groups} == {2e-3}
+    assert {(g["lr"], g["norm_bounds"]) for g in resumed[0].param_groups} == {(2e-3, (None, 2.0))}
 
 
 def test_scores_follow_eval_every_and_checkpoints_follow_checkpoint_every(train, tmp_path, monkeypatch):

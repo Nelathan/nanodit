@@ -13,6 +13,7 @@ seed = 41
 usui_lr = 0.002
 beta = 0.99
 rank_fraction = 0.1
+norm_max = 1.0
 fallback_lr = 0.0025
 warmup = 376
 shift = 1.0

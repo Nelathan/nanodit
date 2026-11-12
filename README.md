@@ -10,7 +10,7 @@ of those pieces earn their place when each is measured?
   cross attention to its 512-d token states
 - **Blocks:** three gated depthwise-conv blocks (a GDN2-style local update) for every attention block; sandwich
   norm; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
-- **Optimizer:** **UsuiTrack**, each matrix pinned to its init norm, so the learning rate is a constant relative step
+- **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix's norm is capped at a multiple of its init norm
 - **Framework:** pure PyTorch, bf16 parameters, single GPU, no trainer framework
 
 It is a research log as much as a codebase: every design choice is in `docs/SPEC.md`, every number behind it in
@@ -56,8 +56,8 @@ uv run python -m pytest tests/
 uv run python scripts/train.py configs/128_d768x12_gdn_6k.toml
 ```
 
-torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is an editable path dependency on
-a sibling checkout (`AGENTS.md`, "Running things"). Primal VAE loads via `diffusers` `AutoModel` with
+torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is a git dependency pinned to a
+commit of its `lab` branch. Primal VAE loads via `diffusers` `AutoModel` with
 `trust_remote_code`; EmbeddingGemma 2 via `sentence-transformers`.
 
 Training reads precomputed rows, not images. The pipeline, each step a script with its usage in its docstring:

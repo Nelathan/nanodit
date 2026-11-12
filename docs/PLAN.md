@@ -101,7 +101,7 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 
 ### C2. Which LR from scratch, and how long a warmup?
 
-The lr is now a constant relative step on pinned weights (SPEC §6, archive 2026-11-05); what follows was measured
+The lr is now the relative step, on weights under a norm ceiling (SPEC §6, archive 2026-11-12); what follows was measured
 under Usui's fixed step, where a moment that fills its rank writes `‖ΔW‖ = lr·√(max(1, out/in)·r)`. The smoke config takes 2e-3 with rank fraction 0.1
 and beta 0.99, chosen for now after 2e-2 read too high (archive 2026-11-01, final frame and smoke settings; eval grid, beta 0.99). The
 negative `grad_moment_cosine` followed beta more than lr (FACTS, Runs at usui lr 2e-3). Settle: the sweep at 128 px, usui lr 2e-4, 1e-3, 2e-3 and 4e-3, one pass each over the deduped shards 0–46
@@ -314,7 +314,7 @@ Run the simple identity patch embed with no final layer: `128_d768x12_slice_ep1`
 
 `128_d768x12_slice_ep1` ended 1.4745 / 1.4749 against 1.4807 / 1.4811 (-0.0062 / -0.0062; ahead from step 2000 on, by 0.005 to 0.007 at 3000 to 7521; one seed, the other one-change arms moved at most 0.0014). Reading: gradients flow freely through the slice. Next idea: a solver that iterates on the 768 residual until the 128-channel slice may pass; simplest form without conv.
 
-A single linear now, then an MLP, identity at init, on Usui. `128_d768x12_solver1_ep1` (branch `arm/solver`): one change from `_slice_ep1`, a tied 768 x 768 bias-free linear on the rms-normed stream applied 4 times as a residual (`SOLVER_ITERATIONS`) before the readout, zero-initialised. Molegrad with a Linear called several times is fine under `frame_init="random"` (a scratch comparison against the dense-G path at K = 1, 2, 4, 8 differs by about 1e-4 in every case, no trend with K); under `"fit"` it refuses a second call before the first step (`tests/test_molegrad.py`). `128_d768x12_solver1_ep1` ended 1.4816 / 1.4817, +0.0071 against `_slice_ep1` (1.4745), back at the baseline; `tangent_live_fraction` fell from 0.99 to 0.96 and `projected_grad_norm` rose 4 to 5 times (read as near 10x; measured 0.0341 against 0.0078 at step 500, 0.0203 against 0.0043 at 5000 to 7500); The run was judged not that good. Cause not isolated: whether the tied matrix's summed gradient dominates the aggregate norm, or the four-fold reuse hurts the frame, is untested.
+A single linear now, then an MLP, identity at init, on Usui. `128_d768x12_solver1_ep1` (branch `arm/solver`): one change from `_slice_ep1`, a tied 768 x 768 bias-free linear on the rms-normed stream applied 4 times as a residual (`SOLVER_ITERATIONS`) before the readout, zero-initialised. Molegrad with a Linear called several times is fine under `frame_init="random"` (a scratch comparison against the dense-G path at K = 1, 2, 4, 8 differs by about 1e-4 in every case, no trend with K); under `"range_finder"` it refuses a second call before the first step (`tests/test_molegrad.py`). `128_d768x12_solver1_ep1` ended 1.4816 / 1.4817, +0.0071 against `_slice_ep1` (1.4745), back at the baseline; `tangent_live_fraction` fell from 0.99 to 0.96 and `projected_grad_norm` rose 4 to 5 times (read as near 10x; measured 0.0341 against 0.0078 at step 500, 0.0203 against 0.0043 at 5000 to 7500); The run was judged not that good. Cause not isolated: whether the tied matrix's summed gradient dominates the aggregate norm, or the four-fold reuse hurts the frame, is untested.
 
 Build the full-stream SwiGLU first, as the most powerful form, which needs SwiGLU very much; if it is best, explore the cheaper forms (render-only patch, cached context) to match it. `128_d768x12_solvermlp_ep1` (branch `arm/solvermlp`): one change from `_slice_ep1`, a tied `Solver` of SwiGLU (768 -> 1536 -> 768, zero-init `w_down`) as residual on the rms-normed stream, 4 iterations, on Usui, identity at init (checked). The adaptive stop comes later.
 
@@ -332,18 +332,22 @@ The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3
 - Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
 - `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation at usui lr 1e-4 (archive 2026-11-05) is the first long run at σ 0.7.
 
-### G8. What the pin leaves open
+### G8. What the norm ceiling leaves open
 
-Every Usui matrix is pinned to its init Frobenius norm and takes a constant relative step (SPEC §6, archive 2026-11-05).
+Every Usui matrix takes the trust step, its Frobenius norm clipped at `norm_max` times its init norm (SPEC §6, archive
+2026-11-12). The reference config sets 1.0, which differs from the former pin only where a step shrinks a norm.
 The sandwich norm was necessary against the loss spikes (2026-11-06); no arm checks it again.
 Open:
-- Whether a learned scalar gain per pinned matrix (direction pinned, gain on the fallback) helps: some scale is free in
+- The ceiling's height. Free norms grew 3–5× by step 3750 and the function came to depend on them (FACTS, Spikes);
+  a ceiling above 1 lets that growth happen up to a bound. The trust step stays `lr` relative at any norm, so the
+  height changes the function's scale, not the step. Settle: config-only arms at `norm_max` 2 and 4 against the reference,
+  read with the logged norm ratio and stable ranks (SPEC §8).
+- Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
-- A pin per output row instead of per matrix.
-- Norm bounds instead of a pin: each matrix's norm clipped into [min, max] after the step, the pin being min = max =
-  the init norm and the default; roles override the bounds, which a zero-initialized matrix needs, having no init
-  norm. Settle: built in usuitrack `lab`; an arm only once a role wants bounds other than the pin.
+- A bound per output row instead of per matrix.
+- Bounds per role, and a zero-initialized matrix: Usui's bounds are multiples of the init norm, so a matrix that
+  starts at zero cannot take them; none does here (§5).
 - Reading: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
@@ -389,7 +393,7 @@ in the past only `eigh` gave a stable aim, while with a diagonal aim simpler sol
 2026-11-02: fitting is the default and pretraining uses random frames; an option gives a pretraining run a random frame
 at init with the standard `eta`, no schedule, no refit (calling fit is dead; a geometric `eta` decay helped very short
 runs before, but was not worth keeping in the code, since more rank does the same); and the `eigh` calls are stacked.
-No random-frame comparison run: by step 1k the fitted frame has fully caught up, with zero difference. Both are usuitrack changes, in the usuitrack `zero-init` checkout. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Block compile measured
+No random-frame comparison run: by step 1k the fitted frame has fully caught up, with zero difference. Both are usuitrack changes, on usuitrack `lab`. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Block compile measured
 on a free GPU: FACTS, Sweep throughput.
 
 ---

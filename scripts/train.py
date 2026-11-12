@@ -42,9 +42,10 @@ class Config:
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's
     seed: int
-    usui_lr: float  # Usui's fixed step (SPEC §6)
+    usui_lr: float  # Usui's relative step (SPEC §6)
     beta: float
     rank_fraction: float  # Usui's frame size (SPEC §6)
+    norm_max: float  # each tracked matrix's norm is clipped at this multiple of its init norm (SPEC §6)
     fallback_lr: float
     warmup: int  # steps of linear lr warmup from lr / warmup, both optimizers
     shift: float  # timestep shift, PLAN C3
@@ -77,7 +78,7 @@ def load_checkpoint(model, optimizers, path: Path) -> int:
     ones, as the saved lr belongs to the earlier run's schedule and the other two define what `usui_lr` means. Returns the step it was saved at."""
     model.load_state_dict(load_file(path / "model.safetensors"))
     for optimizer, state in zip(optimizers, torch.load(path / "optimizer.pt", map_location="cpu"), strict=True):
-        configured = [{key: group[key] for key in ("lr", "step_rule", "pin_norm") if key in group} for group in optimizer.param_groups]
+        configured = [{key: group[key] for key in ("lr", "step_rule", "norm_bounds") if key in group} for group in optimizer.param_groups]
         optimizer.load_state_dict(state)
         for group, keep in zip(optimizer.param_groups, configured, strict=True):
             group.update(keep)
@@ -145,6 +146,27 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
     )
 
 
+@torch.no_grad()
+def weight_reads(model, matrix) -> dict:
+    """The tracked matrices' global Frobenius norm and its ratio to the init norm, and per role the stable rank
+    ||W||_F^2 / sigma_max^2 over the shorter side, averaged over the role's blocks (SPEC §8). A role is the
+    parameter's name without its block index, prefixed by the block's mixer, since conv and attention both have `out`."""
+    names = {id(p): n for n, p in model.named_parameters()}
+    kinds = {f"blocks.{i}.": "conv." if block.is_conv else "attn." for i, block in enumerate(model.blocks)}
+    total, init, ranks = 0.0, 0.0, {}
+    for group in matrix.param_groups:
+        for param in group["params"]:
+            weight, name = param.float(), names[id(param)].removesuffix(".weight")
+            frobenius = weight.square().sum()
+            total += frobenius.item()
+            init += matrix.state[param]["init_norm"] ** 2
+            stable = (frobenius / torch.linalg.matrix_norm(weight, ord=2).square()).item() / min(weight.shape)
+            prefix = next((p for p in kinds if name.startswith(p)), "")
+            role = kinds[prefix] + name.removeprefix(prefix) if prefix else name
+            ranks.setdefault(role, []).append(stable)
+    return dict(norm=math.sqrt(total), norm_ratio=math.sqrt(total / init), stable_rank={role: sum(v) / len(v) for role, v in ranks.items()})
+
+
 def append_jsonl(path: Path, record: dict) -> None:
     with open(path, "a") as f:
         f.write(json.dumps(record) + "\n")
@@ -174,6 +196,10 @@ def wandb_scores(scores: dict) -> dict:
     for key in ("loss_caption_by_t", "r2_caption_by_t"):
         flat |= {f"eval_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
+
+
+def wandb_weights(weights: dict) -> dict:
+    return {"weights/norm": weights["norm"], "weights/norm_ratio": weights["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in weights["stable_rank"].items()}
 
 
 def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
@@ -251,7 +277,7 @@ def main(config_path: str) -> None:
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=cfg.cross)
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = build_model(cfg, device, torch.bfloat16)
-    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
+    optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.norm_max, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
         block.compile()
@@ -294,8 +320,9 @@ def main(config_path: str) -> None:
         if step % cfg.eval_every == 0 or step == last:
             evaluate(model, decoder, eval_prompt, cfg, step, run_dir, device)
             scores = score(model, score_x, score_prompt, score_noise, score_ts, cfg.micro_batch, device)
-            append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores)
-            wandb.log(wandb_scores(scores), step=step)
+            weights = weight_reads(model, optimizers[0])
+            append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores | dict(weights=weights))
+            wandb.log(wandb_scores(scores) | wandb_weights(weights), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only

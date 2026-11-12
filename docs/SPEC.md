@@ -88,9 +88,9 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 
 ## 6. Optimizer: UsuiTrack
 
-- Every tracked matrix is pinned to the Frobenius norm it has at its first step (Usui's `pin_norm`), and takes Usui's trust step, so `lr` is a constant relative step for the whole run: the weights cannot grow, and the step does not shrink as they would have. No tracked matrix is zero-initialized (§5), so every one has a norm to keep.
+- Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at `norm_max` times the norm it has at its first step (Usui's `norm_bounds = (None, norm_max)`): a ceiling, no floor, no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
 - Frame size: one rank fraction for every tracked matrix.
-- Frames drawn at random when the optimizer is built (Usui's `frame_init="random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
+- Frames drawn at random when the optimizer is built (Usui's group key `frame_init = "random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers, then a linear decay over the run to a configured fraction of the peak.
 - Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
@@ -108,4 +108,5 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little), with R² = 1 − loss·t²/E, E the mean square of the clean latents. The F loss is the clean-latent error over t, so R² is the share of the latents' energy the prediction recovers from the noisy input: 0 is no better than predicting zero, 1 is exact. It falls with t by construction (more noise, less to recover), so it is read across steps at one t, not across t. Ten equal-width buckets in the records; wandb shows five (each the pooled pair).
 - Score at every eval: the loss on an eval set never trained on, with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t.
+- At every eval, of the tracked matrices: the global Frobenius norm and its ratio to the init norm, and per role (the parameter name without the block index, prefixed by the block's mixer) the stable rank `‖W‖²_F / σ²_max` over the shorter side, averaged over the role's blocks.
 - Logs: plain JSONL files, the record: one line per `log_every` steps, the reads averaged over them on the GPU. The same values and the eval grid stream to wandb for live curves.

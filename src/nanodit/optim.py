@@ -10,21 +10,21 @@ LEFT_SIDE = ("out.weight", "w_down.weight", "patch_embed.weight")  # also the cr
 USUI_EXCLUDED = ("table", "null")
 
 
-def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float) -> tuple[UsuiTrack, StochasticAdamW]:
+def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, norm_max: float, fallback_lr: float) -> tuple[UsuiTrack, StochasticAdamW]:
     """UsuiTrack for the 2-D Linear weights, StochasticAdamW (AdamW whose bf16 updates round stochastically)
     for everything else (1-D, biases, tables, null embedding); betas (0.9, 0.99), no
     weight decay, as in usuitrack SPEC "Fallback path".
     Molegrad is attached to the model (which must already be on its device), so the tracked matrices
     never get a `.grad`; it hooks the optimizer, which stays the only handle.
-    Frames are drawn at random. Every tracked matrix keeps its init norm and takes the trust step, so `usui_lr` is a
-    constant relative step (SPEC §6)."""
+    Frames are drawn at random. Every tracked matrix takes the trust step, so `usui_lr` is the relative step, and
+    its norm is clipped at `norm_max` times its init norm (SPEC §6)."""
     sided, fallback = {"left": [], "auto": []}, []
     for name, param in model.named_parameters():
         if param.ndim == 2 and not any(key in name for key in USUI_EXCLUDED):
             sided["left" if name.endswith(LEFT_SIDE) else "auto"].append(param)
         else:
             fallback.append(param)
-    groups = [{"params": params, "side": side, "step_rule": "trust", "pin_norm": True} for side, params in sided.items()]
-    matrix = UsuiTrack(groups, lr=usui_lr, beta=beta, rank_fraction=rank_fraction, frame_init="random", diagnostics=True)
+    groups = [{"params": params, "side": side, "step_rule": "trust", "frame_init": "random", "norm_bounds": (None, norm_max)} for side, params in sided.items()]
+    matrix = UsuiTrack(groups, lr=usui_lr, beta=beta, rank_fraction=rank_fraction, diagnostics=True)
     Molegrad(model, matrix)
     return matrix, StochasticAdamW(fallback, lr=fallback_lr, betas=(0.9, 0.99), weight_decay=0.0)

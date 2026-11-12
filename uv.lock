@@ -639,7 +639,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = ">=0.29.2" },
     { name = "torchvision", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=0.29.2", index = "https://download.pytorch.org/whl/cu132" },
     { name = "transformers", specifier = ">=5.22.1" },
-    { name = "usuitrack", editable = "../usuitrack-zero-init" },
+    { name = "usuitrack", git = "https://github.com/Nelathan/usuitrack?rev=c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6" },
     { name = "wandb", specifier = ">=0.31.0" },
     { name = "webdataset", specifier = ">=1.0.2" },
 ]
@@ -1763,30 +1763,11 @@ wheels = [
 [[package]]
 name = "usuitrack"
 version = "0.1.0"
-source = { editable = "../usuitrack-zero-init" }
+source = { git = "https://github.com/Nelathan/usuitrack?rev=c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6#c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6" }
 dependencies = [
     { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.15.0+cu132", source = { registry = "https://download.pytorch.org/whl/cu132" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = ">=2.1" },
-    { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=2.1", index = "https://download.pytorch.org/whl/cu132" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-lab = [
-    { name = "cut-cross-entropy", specifier = ">=25.1.1" },
-    { name = "flash-linear-attention", specifier = ">=0.5.0" },
-    { name = "huggingface-hub", specifier = ">=1.19.0" },
-    { name = "peft", specifier = ">=0.19.1" },
-    { name = "pyarrow", specifier = ">=24.0.0" },
-    { name = "transformers", specifier = ">=5.12.0" },
-    { name = "wandb", specifier = ">=0.23.0" },
-]
-lfm25 = [{ name = "causal-conv1d", marker = "sys_platform == 'linux'", specifier = "==1.7.0+cu.13.2.torch.2.14", index = "https://wheels.astral.sh/simple/cu132/" }]
 
 [[package]]
 name = "wandb"

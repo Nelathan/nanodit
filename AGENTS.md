@@ -90,8 +90,8 @@ subject says what changed; a body when intent or impact needs it. Pushing stays 
 
 ## Running things
 
-`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index. usuitrack is an editable path dependency
-on the sibling checkout `../usuitrack-zero-init`, so it runs whatever is checked out there.
+`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index. usuitrack is a git dependency pinned to a commit
+on its `lab` branch (`pyproject.toml`); a change to the optimizer is made there, pushed, and repinned here.
 
 Scripts run from the repo root as `uv run python scripts/<name>.py ARGS`; the usage is in each docstring. They import
 each other by module name (`from train import Config`).

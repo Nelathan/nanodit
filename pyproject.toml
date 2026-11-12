@@ -36,7 +36,7 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu132", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
 torchvision = [{ index = "pytorch-cu132", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
-usuitrack = { path = "../usuitrack-zero-init", editable = true }
+usuitrack = { git = "https://github.com/Nelathan/usuitrack", rev = "c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
