@@ -36,20 +36,20 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning; attention blocks whose type cross-attends (an experiment switch, not in the default layout) also read the 512-d token states.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
 
 | Component | Decision |
 |---|---|
 | Width | 768 |
 | Depth | 12 layers, the baseline for trials, not final: the model grows in depth (PLAN G1) |
-| Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer and whether it cross-attends |
+| Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer |
 | Mixer | After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
 | Position | 2D axial RoPE on the first quarter of the frequencies per axis, the rest position-free; the convs carry local position |
-| Cross attention (switch) | In attention blocks only, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
+| Cross attention | In every attention block, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
 | MLP | SwiGLU, hidden 4 × width |
 | Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's six shift/scale/gate vectors (mixer, MLP), plus a learned 6×width table per block; per image, not per token |
 | Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |

@@ -276,7 +276,7 @@ def main(config_path: str) -> None:
         raise ValueError(f"eval_every {cfg.eval_every} and checkpoint_every {cfg.checkpoint_every} must be multiples of log_every {cfg.log_every}")
     # Pure bf16: the fp32 init is rounded once, and the optimizers update with stochastic rounding.
     model = build_model(cfg, device, torch.bfloat16)
-    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed, sequences=any(block.cross for block in model.blocks))
+    stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
@@ -306,7 +306,7 @@ def main(config_path: str) -> None:
     for step in range(start + 1, last + 1):
         loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
-        fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]  # the null tokens have none without cross attention
+        fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]
         interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))
         lr_usui, lr_fallback = (o.param_groups[0]["lr"] for o in optimizers)
         for optimizer, schedule in zip(optimizers, schedules):

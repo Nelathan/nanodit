@@ -28,7 +28,6 @@ class BlockType(NamedTuple):
     """One block's settings. A layout is a sequence of them, repeated to the depth (SPEC §3)."""
 
     mixer: str  # "conv" or "attn"
-    cross: bool = False  # attention only: then read the caption's token states by cross attention
 
 
 MIXERS = ("conv", "attn")
@@ -86,17 +85,17 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 class Block(nn.Module):
     """A conv block mixes tokens over their 3x3 neighbourhood on the token grid: it replaces each token's state by a
-    gated update (GDN2's decoupled forget and write gates, diagonal). An attention block mixes with gated grouped-query attention and, with `cross`, then reads
-    the caption's token states through a cross attention that takes no adaLN, only a zero-initialised gate per channel."""
+    gated update (GDN2's decoupled forget and write gates, diagonal). An attention block mixes with gated grouped-query
+    attention, then reads the caption's token states through a cross attention, grouped-query and without RoPE, that
+    takes no adaLN, only a zero-initialised gate per channel."""
 
     def __init__(self, width: int, kind: BlockType):
         super().__init__()
         assert kind.mixer in MIXERS, kind
-        assert not (kind.cross and kind.mixer == "conv"), "cross attention is in attention blocks only"
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
-        self.is_conv, self.cross = kind.mixer == "conv", kind.cross
+        self.is_conv = kind.mixer == "conv"
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         if self.is_conv:
             self.gdn_proj = nn.Linear(width, 4 * width, bias=False)  # value, current state, forget gate, write gate
@@ -110,7 +109,6 @@ class Block(nn.Module):
             self.k_norm = nn.RMSNorm(HEAD_DIM)
             self.out = nn.Linear(width, width, bias=False)
             self.attn_norm = nn.RMSNorm(width)
-        if self.cross:
             self.cross_q = nn.Linear(width, width, bias=False)
             self.cross_kv = nn.Linear(SEQ_DIM, 2 * self.kv_heads * HEAD_DIM, bias=False)
             self.cross_q_norm = nn.RMSNorm(HEAD_DIM)
@@ -148,7 +146,6 @@ class Block(nn.Module):
             q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
             attn = F.scaled_dot_product_attention(q, k, v, enable_gqa=self.kv_heads != self.heads).transpose(1, 2).reshape(B, N, self.width)
             x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
-        if self.cross:
             y = F.rms_norm(x, (self.width,))
             q = self.cross_q_norm(self.cross_q(y).view(B, N, self.heads, HEAD_DIM).transpose(1, 2))
             k, v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
@@ -167,7 +164,7 @@ class DiT(nn.Module):
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert layout, "a layout needs at least one block type"
         kinds = [layout[i % len(layout)] for i in range(depth)]
-        assert any(kind.cross for kind in kinds) or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
+        assert any(kind.mixer == "attn" for kind in kinds) or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
         self.width = width
         self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
         self.null_tokens = nn.Parameter(null_tokens.detach().clone().float())  # [NULL_TOKENS, 512]

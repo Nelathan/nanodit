@@ -5,7 +5,7 @@ measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 78 tests
 pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
@@ -30,8 +30,8 @@ below about 0.003 in caption loss is within what one seed can say.
 3. **The data pipeline**: `precompute.py` writes one fused Parquet per shard (128 and 256 px Lanczos latents, pooled
    embedding, 512-d token states); `shuffle.py` makes the training set, `precompute_lunara.py` the eval set.
 4. **Cross attention to the token states** (`log/2026-11-06-cross-attention-and-conv-period-3k.md`,
-   `log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`). A switch, off by default. Level in loss, better prompt binding
-   in the three sample grids in `log/2026-11-07-samples/`.
+   `log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`). Decided as design, in every attention block. Level in loss,
+   better prompt binding in the three sample grids in `log/2026-11-07-samples/`.
 5. **The block layout** (`topics/block-design.md`, `log/2026-11-06-*`): conv in three of four blocks, GQA, quarter
    RoPE, concat patch embed. In SPEC §3 and §5 on the strength of 3000-step arms.
 6. **The GDN2-style gated update in the conv blocks** (same log note): 0.0022 ahead of plain conv at 128 px, 0.005
@@ -48,10 +48,8 @@ below about 0.003 in caption loss is within what one seed can say.
 
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
 - **Switches on the trunk**, each for an open question:
-  - A block type's `cross`: cross attention is decided as design (archive 2026-11-12, plan history); the switch and
-    its pooled-only branch have not been removed yet.
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
-    Level in loss with cross plus adaLN at 6000 steps, and the simpler model if cross attention is adopted.
+    Level in loss with cross plus adaLN at 6000 steps.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
 - **usui lr 4e-3** is decided (PLAN C2); the reference config still runs 2e-3.
@@ -77,5 +75,3 @@ Not merged, each the record of an arm: `gdn-conv` (a content-dependent window mi
 - wandb groups series on the first slash only; keep keys one level deep.
 - With the concat patch embed the patch embed gets zero gradient at step 0 (no gate reads the meta channels yet);
   only `ada.1.weight` moves on the first step. That is expected.
-- `Stream` reads the token states only for a model with cross attention; whether that changes the step time of the
-  pooled-only model is not measured.

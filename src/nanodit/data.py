@@ -56,13 +56,10 @@ class Stream:
     buffers allocated once, cast to `dtype` on the way. Each pass over the file visits the blocks in a fresh
     random order and shuffles the rows inside each block, so batches differ between epochs while the file is
     read a block at a time. A thread reads the next block while the current one is consumed; a micro-batch
-    that runs past a block's end continues into the next. The token states are several times the latent's bytes
-    at 128 px, so they are read only with `sequences`, for a model that attends to them; without it every prompt
-    carries NULL_TOKENS masked-out zero tokens."""
+    that runs past a block's end continues into the next."""
 
-    def __init__(self, path: str, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, seed: int, sequences: bool):
+    def __init__(self, path: str, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, seed: int):
         self.file = pq.ParquetFile(path)
-        self.read_sequences = sequences
         self.column = f"latent_{resolution}"
         self.side = resolution // 2
         groups = self.file.num_row_groups
@@ -79,8 +76,6 @@ class Stream:
         self.dtype, self.device = dtype, device
         self.x = torch.empty(batch, LATENT_CHANNELS, self.side, self.side, dtype=dtype, device=device)
         self.pooled = torch.empty(batch, TEXT_DIM, dtype=dtype, device=device)
-        self.no_tokens = torch.zeros(batch, NULL_TOKENS, SEQ_DIM, dtype=dtype, device=device)
-        self.no_mask = torch.zeros(batch, NULL_TOKENS, dtype=torch.bool, device=device)
 
     def _read_next(self):
         if not self.order:
@@ -89,12 +84,12 @@ class Stream:
         return self.reader.submit(self._read, self.blocks[block], torch.from_numpy(self.rng.permutation(self.rows[block])))
 
     def _read(self, groups: list[int], shuffle: Tensor) -> tuple[Tensor, Tensor, list[Tensor]]:
-        table = self.file.read_row_groups(groups, columns=[self.column, "embedding"] + ["sequence"] * self.read_sequences)
-        sequences = _sequences(table["sequence"]) if self.read_sequences else []
+        table = self.file.read_row_groups(groups, columns=[self.column, "embedding", "sequence"])
+        sequences = _sequences(table["sequence"])
         return (
             _bf16(table[self.column], LATENT_CHANNELS, self.side, self.side)[shuffle],
             _bf16(table["embedding"], TEXT_DIM)[shuffle],
-            [sequences[i] for i in shuffle.tolist()] if self.read_sequences else [],
+            [sequences[i] for i in shuffle.tolist()],
         )
 
     def next(self) -> tuple[Tensor, Prompt]:
@@ -110,7 +105,5 @@ class Stream:
         self.x.copy_(self.latents[rows])
         self.pooled.copy_(self.embeddings[rows])
         self.position += n
-        if not self.read_sequences:
-            return self.x, Prompt(self.pooled, self.no_tokens, self.no_mask)
         tokens, mask = pad_sequences(self.sequences[rows])  # on the CPU, so the GPU gets one copy of each
         return self.x, Prompt(self.pooled, tokens.to(self.device, self.dtype), mask.to(self.device))

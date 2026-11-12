@@ -4,14 +4,14 @@ import torch
 from nanodit.data import pad_sequences
 from nanodit.model import BlockType, DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
 
-CROSS_PAIR = (BlockType("conv"), BlockType("attn", cross=True))  # the smallest layout with every kind of matrix
+PAIR = (BlockType("conv"), BlockType("attn"))  # the smallest layout with every kind of matrix
 
 
 def open_gates(model):
     """Opens the zero-initialised gates, so every block's output reaches F and every matrix gets a gradient."""
     for block in model.blocks:
         block.table.data[list(GATE_ROWS)] = 0.5
-        if block.cross:
+        if not block.is_conv:
             block.cross_gate.data.fill_(0.5)
 
 
@@ -19,7 +19,7 @@ def open_gates(model):
 def model():
     torch.manual_seed(0)
     null = torch.nn.functional.normalize(torch.randn(TEXT_DIM), dim=0)
-    return DiT(null, torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+    return DiT(null, torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
 
 
 @pytest.fixture

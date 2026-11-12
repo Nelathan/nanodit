@@ -1,7 +1,7 @@
 import copy
 
 import torch
-from conftest import CROSS_PAIR, open_gates
+from conftest import PAIR, open_gates
 
 from nanodit.data import pad_sequences
 from nanodit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
@@ -10,7 +10,7 @@ from nanodit.optim import build_optimizers
 
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     names = {id(p): n for n, p in model.named_parameters()}
     usui = {names[id(p)] for g in matrix.param_groups for p in g["params"]}
@@ -23,7 +23,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
 
 
 def test_residual_stream_output_matrices_track_their_left_side():
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     names = {id(p): n for n, p in model.named_parameters()}
     side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
@@ -35,7 +35,7 @@ def test_residual_stream_output_matrices_track_their_left_side():
 
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR).bfloat16()
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     fallback_lr = 1e-3
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
@@ -56,7 +56,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
 def trained_model(steps=2):
     """A depth-2 bf16 model with open gates (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
@@ -93,15 +93,14 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
     assert model.blocks[0].table.requires_grad  # fallback parameters keep their gradients
 
 
-def test_the_production_layout_trains_a_step_with_the_pooled_embedding_alone():
+def test_the_production_layout_trains_a_step():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).bfloat16()  # the default layout, no cross attention
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).bfloat16()
     open_gates(model)
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
-    null, conv = model.null_tokens.detach().clone(), model.blocks[0].conv.weight.detach().clone()
+    conv, cross = model.blocks[0].conv.weight.detach().clone(), model.blocks[3].cross_kv.weight.detach().clone()
     train_step(model, optimizers, *batch(0))
-    assert torch.equal(model.null_tokens, null)  # no cross attention reads them: no gradient, no step
-    assert not torch.equal(model.blocks[0].conv.weight, conv)
+    assert not torch.equal(model.blocks[0].conv.weight, conv) and not torch.equal(model.blocks[3].cross_kv.weight, cross)
 
 
 def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
@@ -109,7 +108,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
     grads = []
     for micro_batch in (8, 2):
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
@@ -131,7 +130,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR).bfloat16()
+    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     for optimizer, saved in zip(resumed, state[1]):
@@ -147,7 +146,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
 
 def test_no_tracked_norm_grows_past_its_init_norm():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=CROSS_PAIR)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3)

@@ -6,8 +6,8 @@ of those pieces earn their place when each is measured?
 
 - **Target:** Ostris's *x0 velocity* parameterization of rectified flow
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched 8×8 by the DiT itself into 128-d tokens
-- **Conditioning:** **EmbeddingGemma 2**: the pooled 768-d caption embedding through adaLN, and optionally
-  cross attention to its 512-d token states
+- **Conditioning:** **EmbeddingGemma 2**: the pooled 768-d caption embedding through adaLN, and cross
+  attention to its 512-d token states in the attention blocks
 - **Blocks:** three gated depthwise-conv blocks (a GDN2-style local update) for every attention block; sandwich
   norm; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
 - **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix stays in the ball of its init norm
