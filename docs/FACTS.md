@@ -13,7 +13,7 @@ Probe sample = first 256 images/captions of `data_512_2M/data_000000.tar` (not r
 - Repeats in shards 0–46 at 128 px (2026-11-02, scratch scripts hashing each row's latent bytes, with its caption, not kept): 1,925,416 distinct latents and 2,021,723 distinct (latent, caption) rows in 2,290,793. Shards 20–34 (`llava_next_captioned_700K`, 738,524 rows) hold 378,362 distinct latents and 472,515 distinct (latent, caption) rows; the other shards (1,552,269 rows) 1,547,055 distinct latents. Within that source an image comes in runs of consecutive keys, 1 to 7 long and most often 4 (shard 20), with the same or a slightly different caption (shard 20, keys 11137–11140: three identical captions, one with "a pitcher of water"), and recurs at later keys and in other shards of the source, up to 11 times in one shard. Distinct latents per 50,000 rows rise, with dips, from 19,653 in shard 20 to 49,331 in shard 33. `128_shuffled_0-10.parquet` has none of these shards.
 - The same caption does not always give the same embedding bytes: in shard 20, 1033 captions that occur more than once have embeddings differing by at most 4.9e-4 per entry, cosine ≥ 0.9999999, bf16 rounding (2026-11-02).
 
-## Primal 2x2 (B1)
+## Primal 2x2
 
 Source: `scripts/probe_primal.py`, `/mnt/mars/ai/tiny-dit/probes/primal.json`, 2026-10-31. fp32, CPU. Resize: torch bicubic, antialias=True, from the 512 crop. Latent [N,2,H/2,W/2]. 80.35M params.
 
@@ -63,7 +63,7 @@ Source: `scripts/probe_resize.py`, CPU, fp32. First 256 square 512 px jpgs of `d
 - Round trip PSNR rises with smoothness, so it does not rank the resizers. Latent std is 1.03 to 1.04 for all.
 - 512 px jpgs, 256 images: the sources are already compressed, and nothing here says what the model does with the extra detail.
 
-## EmbeddingGemma 2 (B2, B3)
+## EmbeddingGemma 2 (B3)
 
 Source: `scripts/probe_embeddinggemma.py`, `/mnt/mars/ai/tiny-dit/probes/embeddinggemma.json`, 2026-10-31. Text-only, 271.0M params, via sentence-transformers 6.2.0 (`config_kwargs=dict(vision_config=None, audio_config=None)`, `model_kwargs={"dtype": ...}`): Transformer, mean Pooling over all tokens (bos and eos included), Normalize. Raw norms come from the first two modules. Prefix `title: none | text: `. 256 captions + 16 short prompts.
 

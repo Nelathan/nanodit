@@ -47,7 +47,6 @@ below about 0.003 in caption loss is within what one seed can say.
 
 - **SPEC §6 lr schedule** says linear decay to a fraction; PLAN C2 aims at a constant lr with a late anneal.
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
-- **PLAN A2, B1, B2** are measured and ready to close.
 - **Switches on the trunk**, each for an open question:
   - A block type's `cross` (F3): cross attention to the token states in the attention blocks of that type.
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.

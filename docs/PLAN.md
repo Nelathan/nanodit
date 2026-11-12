@@ -12,13 +12,6 @@ agreed arm.
 
 ## Group A. Usui wiring
 
-### A2. How does Usui treat 1-D params?
-
-Norm gains (QK-RMSNorm, final norm), biases and the null embedding are not
-matrices. Usui rejects any `ndim != 2` param (`optimizer.py` `add_param_group`); they
-go to a caller-owned fallback (AdamW or `StochasticAdamW`, Usui SPEC). Settled by code
-reading, and the harness runs that split (`src/nanodit/optim.py`). Ready to close.
-
 ### A3. Does Usui need `eigh` at all?
 
 A first frame fitted to a low-rank first gradient is not worth an `eigh`: the trunk draws its frames at random, and
@@ -31,23 +24,6 @@ if it holds.
 ---
 
 ## Group B. Data and conditioning
-
-### B1. Are Primal 2x2 latents unit-normal per image and channel?
-
-The model card says so, and SPEC §1 relies on it (no scale/shift factors, patch
-embed init for unit-normal inputs). Settle: a script that encodes a sample of
-text-to-image-2M at 128 px and 256 px and reports per-image, per-channel mean and
-std. Evidence: FACTS "Primal 2x2" (statistics, flips, stability under small changes). Ready to close: whether the measured spread is close enough to the card's claim.
-
-### B2. What is EmbeddingGemma 2's output norm?
-
-SPEC §1 stores the embedding L2-normalized as the model returns it; §3 feeds it
-to the text projection through `rms_norm`, which is ×√768 for a unit-norm
-embedding, and §5 initializes the null embedding from the encoder's empty caption.
-Unsure the model returns unit norm. Settle: a script that embeds a
-sample of captions in bf16 and fp32 and reports the norm distribution. Evidence:
-FACTS "EmbeddingGemma 2": unit norm comes from the Normalize module; per dim, the
-√768-scaled embedding is far from unit variance. Ready to close.
 
 ### B3. Do short prompts get ignored?
 
