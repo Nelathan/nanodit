@@ -95,13 +95,10 @@ def load_checkpoint(model, optimizers, path: Path) -> int:
 
 def embed_prompts(prompts: list[str]) -> Prompt:
     """The prompts as EmbeddingGemma 2 gives them (SPEC §1): the unit-norm pooled embeddings and the 512-d token states, as in the precomputed rows."""
-    from precompute import encode_text
-    from reencode_sequence import encoder
-    from sentence_transformers import SentenceTransformer
+    from precompute import encode_text, load_text_encoder
 
-    pooler = SentenceTransformer("google/embeddinggemma-2", config_kwargs=dict(vision_config=None, audio_config=None), model_kwargs=dict(dtype=torch.float32), device="cpu")
-    pooled, _ = encode_text(pooler, prompts)
-    tokens, mask = pad_sequences(encode_text(encoder("cpu"), prompts)[1])
+    pooled, sequences = encode_text(load_text_encoder("cpu"), prompts)
+    tokens, mask = pad_sequences(sequences)
     return Prompt(pooled, tokens, mask)
 
 

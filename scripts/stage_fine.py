@@ -1,9 +1,9 @@
 """Stage Fine-T2I (ma-xu/fine-t2i) for encoding: one small Parquet per source tar, images cropped to aspect buckets.
 
-usage: stage_fine.py SUBSET [SUBSET ...]
+usage: stage_fine.py DIR SUBSET [SUBSET ...]
 
 SUBSET is a top-level folder of the dataset repo (`synthetic_original_prompt_square_resolution`, `curated`, ...). Each
-tar (0.3 to 3.2 GB) downloads to RAW, becomes STAGED/<subset>/<tar name>.parquet and is deleted; the next tar downloads
+tar (0.3 to 3.2 GB) downloads to DIR/raw, becomes DIR/staged/<subset>/<tar name>.parquet and is deleted; the next tar downloads
 while one is processed. A tar whose Parquet exists is skipped, so a killed run resumes.
 
 An image goes to the aspect bucket nearest its own (log ratio), is scaled until it covers the bucket and is cropped at
@@ -26,8 +26,6 @@ from huggingface_hub import HfApi, hf_hub_download
 from PIL import Image
 
 REPO = "ma-xu/fine-t2i"
-RAW = Path("/mnt/luna/tiny-dit/fine/raw")
-STAGED = Path("/mnt/luna/tiny-dit/fine/staged")
 BUCKETS = [(256, 256), (224, 288), (288, 224), (224, 320), (320, 224), (192, 352), (352, 192)]  # (height, width) in image pixels
 QUALITY = 90
 WORKERS = 12
@@ -81,15 +79,15 @@ def stage(path: Path, out: Path, pool: ProcessPoolExecutor, subset: str) -> int:
     return len(rows)
 
 
-def main(subsets: list[str]) -> None:
+def main(root: Path, subsets: list[str]) -> None:
     files = sorted(f for f in HfApi().list_repo_files(REPO, repo_type="dataset") if f.endswith(".tar"))
-    todo = [(f, STAGED / Path(f).parent / (Path(f).stem + ".parquet")) for f in files if Path(f).parts[0] in subsets]
+    todo = [(f, root / "staged" / Path(f).parent / (Path(f).stem + ".parquet")) for f in files if Path(f).parts[0] in subsets]
     todo = [(f, out) for f, out in todo if not out.exists()]
     for _, out in todo:
         out.parent.mkdir(parents=True, exist_ok=True)
 
     def fetch(name: str) -> Path:
-        return Path(hf_hub_download(REPO, name, repo_type="dataset", local_dir=RAW))
+        return Path(hf_hub_download(REPO, name, repo_type="dataset", local_dir=root / "raw"))
 
     with ThreadPoolExecutor(1) as downloads, ProcessPoolExecutor(WORKERS) as pool:
         pending = downloads.submit(fetch, todo[0][0]) if todo else None
@@ -102,4 +100,4 @@ def main(subsets: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main(Path(sys.argv[1]), sys.argv[2:])

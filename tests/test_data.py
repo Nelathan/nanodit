@@ -18,8 +18,8 @@ def bf16_bytes(t):
 
 
 def write_shard(path, latents, embeddings, sequences, keys=None):
-    """A fused shard in the precompute schema (the 768-d sequence and the 64 px latent are stand-ins the shuffle must leave
-    behind) and its sibling sequence512 file; row groups of 3 so the readers see several chunks."""
+    """A fused shard in the precompute schema (the 64 px latent is a stand-in the shuffle must leave behind); row groups
+    of 3 so the readers see several chunks."""
     n = len(latents)
     keys = keys or [f"k{i}" for i in range(n)]
     table = pa.table({
@@ -27,13 +27,11 @@ def write_shard(path, latents, embeddings, sequences, keys=None):
         "source": ["s"] * n,
         "caption": ["c"] * n,
         "embedding": pa.array([bf16_bytes(e) for e in embeddings], pa.binary(1536)),
-        "sequence": [b"768"] * n,
+        "sequence": [bf16_bytes(q) for q in sequences],
         "latent_32": pa.array([bf16_bytes(x) for x in latents], pa.binary(2 * 16 * 16 * 2)),
         "latent_64": pa.array([b"x" * 4] * n, pa.binary(4)),
     })
     pq.write_table(table, path, row_group_size=3)
-    path = Path(path)
-    pq.write_table(pa.table({"key": keys, "sequence": [bf16_bytes(q) for q in sequences]}), path.with_name(f"sequence512_{path.name}"), row_group_size=3)
 
 
 @pytest.fixture

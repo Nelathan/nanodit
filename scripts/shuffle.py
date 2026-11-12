@@ -2,10 +2,8 @@
 
 usage: shuffle.py OUT RESOLUTION SHARD [SHARD ...]
 
-SHARD is a fused shard `fused/data_<name>.parquet`; its token sequences are read from the sibling
-`sequence512_data_<name>.parquet` (`scripts/reencode_sequence.py`), row for row. OUT has the columns key, source, caption,
-embedding, sequence (the 512-d token states) and latent_<RESOLUTION> of the shards; the other latent and the 768-d
-sequence stay behind.
+SHARD is a fused shard of `precompute.py`. OUT has its columns key, source, caption, embedding, sequence and
+latent_<RESOLUTION>; the other latent stays behind.
 
 Two passes, so no more than a few thousand rows of a shard or one bucket are in memory. Pass 1 deals each shard's rows into BUCKETS
 temporary files, each row to a uniformly random one; pass 2 permutes each bucket in memory and appends it to
@@ -43,30 +41,20 @@ def first_sightings(latents, seen: set[bytes]) -> np.ndarray:
     return keep
 
 
-def read_shard(shard: str, columns: list[str]):
-    """The shard's `columns` with the 512-d sequences in place of the 768-d ones, TAKE_ROWS rows at a time."""
-    path = Path(shard)
-    tables = pq.ParquetFile(shard).iter_batches(TAKE_ROWS, columns=columns)
-    sequences = pq.ParquetFile(path.with_name(f"sequence512_{path.name}")).iter_batches(TAKE_ROWS)
-    for batch, sequence in zip(tables, sequences, strict=True):
-        table, sequence = pa.Table.from_batches([batch]), pa.Table.from_batches([sequence])
-        assert sequence["key"].equals(table["key"]), shard
-        yield table.append_column("sequence", sequence["sequence"])
-
-
 def shuffle(shards: list[str], resolution: int, out: Path) -> None:
     rng = np.random.default_rng(SEED)
     latent = f"latent_{resolution}"
-    columns = ["key", "source", "caption", "embedding", latent]
+    columns = ["key", "source", "caption", "embedding", latent, "sequence"]
     fused = pq.read_schema(shards[0])
-    schema = pa.schema([fused.field(c) for c in columns] + [pa.field("sequence", pa.binary())])
+    schema = pa.schema([fused.field(c) for c in columns])
     parts = [out.with_name(f"{out.name}.bucket{b:03d}") for b in range(BUCKETS)]
     writers = [pq.ParquetWriter(part, schema, compression="none") for part in parts]
     seen: set[bytes] = set()
     rows = 0
     for shard in shards:
         dealt = dropped = 0
-        for part in read_shard(shard, columns):  # a whole 256 px shard is 3.3 GB of latents: read it in pieces
+        for batch in pq.ParquetFile(shard).iter_batches(TAKE_ROWS, columns=columns):  # a whole 256 px shard is 3.3 GB of latents: read it in pieces
+            part = pa.Table.from_batches([batch])
             assert part.schema.equals(schema), shard
             keep = first_sightings(part[latent], seen)
             bucket = rng.integers(BUCKETS, size=len(part))

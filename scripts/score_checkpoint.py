@@ -1,6 +1,6 @@
 """Score a finished run's checkpoint on a joined eval set at another resolution: how a position code, trained at 128 px,
 carries to a bigger token grid. Same caption loss and noise rule as the training score; appends to RUN_DIR/score_<res>.jsonl.
-The eval set comes from `join_sequences.py OUT RESOLUTION SHARD`.
+The eval set is the fused shard of `precompute_lunara.py`, which holds both resolutions.
 
 usage: score_checkpoint.py RUN_DIR STEP EVAL_SET RESOLUTION
 """

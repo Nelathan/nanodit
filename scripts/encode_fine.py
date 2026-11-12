@@ -1,8 +1,8 @@
 """Encode the staged Fine-T2I Parquets (`stage_fine.py`) into Primal 2x2 latents and EmbeddingGemma 2 encodings (GPU).
 
-usage: encode_fine.py SUBSET [SUBSET ...]
+usage: encode_fine.py DIR SUBSET [SUBSET ...]
 
-For every STAGED/<subset>/<tar>.parquet writes ENCODED/<subset>/<tar>.parquet with columns
+For every DIR/staged/<subset>/<tar>.parquet (`stage_fine.py DIR`) writes DIR/encoded/<subset>/<tar>.parquet with columns
   key              string
   source           string                   the image's generator (`unsplash_lite` for the curated photographs)
   bucket           int8                     index into stage_fine.BUCKETS
@@ -12,7 +12,7 @@ For every STAGED/<subset>/<tar>.parquet writes ENCODED/<subset>/<tar>.parquet wi
   aesthetic        float32
   embedding        fixed_size_binary(1536)  768 bf16, the normalized pooled embedding, as precompute.py
   sequence         binary                   bf16 [n, 512], C-contiguous: the token states before the encoder's
-                                            768x512 projection, prompt prefix dropped, unpadded, as reencode_sequence.py
+                                            768x512 projection, prompt prefix dropped, unpadded, as precompute.py
   latent_128       binary                   bf16 [2, h/4, w/4], C-contiguous, from a Lanczos halving of the staged crop
   latent_256       binary                   bf16 [2, h/2, w/2], C-contiguous, from the staged crop (h, w = BUCKETS[bucket])
 The latents are variable-size binary because the buckets differ in shape; the shuffle splits rows by bucket. A
@@ -31,9 +31,7 @@ import torch
 from PIL import Image
 
 from precompute import DEVICE, TEXT_DIM, bf16_bytes, bf16_column, encode_text, load_encoders
-from stage_fine import STAGED
 
-ENCODED = Path("/mnt/luna/tiny-dit/fine/encoded")
 ROW_GROUP = 1024
 VAE_BATCH = 32
 TEXT_TOKENS = 8192  # padded tokens per text batch: a few captions run to thousands of tokens, and 32 of them overflow the GPU
@@ -85,18 +83,12 @@ def encode_captions(st, captions: list[str]):
 
 def encode(src: Path, out: Path, subset: str, vae, st) -> int:
     table = pq.read_table(src)
-    projection = st[0].auto_model.language_model.embedding_projection
     tmp, t0 = out.with_name(out.name + ".tmp"), time.time()
     with torch.inference_mode(), pq.ParquetWriter(tmp, SCHEMA, compression="none") as writer:
         for start in range(0, len(table), ROW_GROUP):
             chunk = table.slice(start, ROW_GROUP)
             jpgs, buckets, captions = chunk["jpg"].to_pylist(), chunk["bucket"].to_pylist(), chunk["prompt"].to_pylist()
-            embedding, _ = encode_captions(st, captions)
-            hook = projection.register_forward_hook(lambda module, args, output: args[0])  # token states at 512, as reencode_sequence.py
-            try:
-                _, sequences = encode_captions(st, captions)
-            finally:
-                hook.remove()
+            embedding, sequences = encode_captions(st, captions)
             writer.write_table(pa.table({
                 "key": chunk["key"], "source": chunk["source"], "bucket": chunk["bucket"], "caption": captions,
                 "prompt": chunk["prompt"], "enhanced_prompt": chunk["enhanced_prompt"], "aesthetic": chunk["aesthetic"],
@@ -110,9 +102,10 @@ def encode(src: Path, out: Path, subset: str, vae, st) -> int:
 
 if __name__ == "__main__":
     vae, st = load_encoders()
-    for subset in sys.argv[1:]:
-        (ENCODED / subset).mkdir(parents=True, exist_ok=True)
-        for src in sorted((STAGED / subset).glob("*.parquet")):
-            out = ENCODED / subset / src.name
+    root = Path(sys.argv[1])
+    for subset in sys.argv[2:]:
+        (root / "encoded" / subset).mkdir(parents=True, exist_ok=True)
+        for src in sorted((root / "staged" / subset).glob("*.parquet")):
+            out = root / "encoded" / subset / src.name
             if not out.exists():
                 encode(src, out, subset, vae, st)

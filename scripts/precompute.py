@@ -1,20 +1,21 @@
 """Precompute Primal 2x2 latents and EmbeddingGemma 2 encodings for text-to-image-2M data_512_2M shards (GPU).
 
-usage: precompute.py SHARD [SHARD ...]
+usage: precompute.py DIR SHARD [SHARD ...]
 
-Writes /mnt/luna/tiny-dit/precomputed/fused/data_<SHARD>.parquet with columns
+Writes DIR/precomputed/fused/data_<SHARD>.parquet with columns
   key         string
   source      string                    the Hugging Face dataset the row comes from
   caption     string
   embedding   fixed_size_binary(1536)   768 bf16, L2-normalized fp32 embedding rounded to bf16
-  sequence    binary                    bf16 [n, 768], C-contiguous: the encoder's token states of the caption, the
-                                        prompt prefix's tokens dropped, unpadded (n = bytes / 1536)
+  sequence    binary                    bf16 [n, 512], C-contiguous: the encoder's token states of the caption after its
+                                        final norm, before the 768x512 `embedding_projection`; the prompt prefix's
+                                        tokens dropped, unpadded (n = bytes / 1024)
   latent_128  fixed_size_binary(...)    bf16 [2, 64, 64], C-contiguous
   latent_256  fixed_size_binary(...)    bf16 [2, 128, 128], C-contiguous
 Both latents are encoded from a Lanczos resize of the 512 px crop (PLAN B5). The shard tar is downloaded to
-/mnt/luna and deleted once encoded; the next shard's tar downloads while one encodes. A shard whose parquet exists
-is skipped. Also writes /mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors (key `null`, fp32 [768]), the embedding of the
-empty caption, when it is missing; reencode_sequence.py adds its tokens as `null_tokens`.
+DIR/data and deleted once encoded; the next shard's tar downloads while one encodes. A shard whose parquet exists
+is skipped. Also writes DIR/precomputed/null_embedding.safetensors when it is missing: the empty caption's pooled
+embedding (key `null`, fp32 [768]) and token states (`null_tokens`, fp32 [2, 512]).
 """
 import io
 import json
@@ -35,14 +36,13 @@ from PIL import Image
 from safetensors.torch import save_file
 from sentence_transformers import SentenceTransformer
 
-ROOT = Path("/mnt/mars/ai/tiny-dit")
-STAGE = Path("/mnt/luna/tiny-dit")  # HDD: the tars and the encoded shards before the shuffle
 REPO = "jackyhate/text-to-image-2M"
 PREFIX = "title: none | text: "
 PREFIX_TOKENS = 7  # <bos> title : ▁none ▁| ▁text : -- the prefix's trailing space merges into the caption's first token
 RESOLUTIONS = (128, 256)
 TEXT_DIM = 768
 ROW_GROUP = 1024
+TEXT_BATCH = 32
 DEVICE = torch.device("cuda")  # cuDNN's TF32 convolutions stay on: 2x the rate, 0.25% on a latent (FACTS, GPU precompute)
 
 
@@ -58,24 +58,29 @@ def samples(tar_path):
                 yield key, s["jpg"], json.loads(s["json"])["prompt"]
 
 
-def fetch(name):
-    """The shard's tar path, downloading it unless it is on disk."""
-    tar_path = STAGE / "data" / "data_512_2M" / f"{name}.tar"
+def fetch(data_dir, name):
+    """The shard's tar path under `data_dir`, downloading it unless it is on disk."""
+    tar_path = data_dir / "data_512_2M" / f"{name}.tar"
     if not tar_path.exists():
-        hf_hub_download(REPO, f"data_512_2M/{name}.tar", repo_type="dataset", local_dir=STAGE / "data")
+        hf_hub_download(REPO, f"data_512_2M/{name}.tar", repo_type="dataset", local_dir=data_dir)
     return tar_path
+
+
+def load_text_encoder(device):
+    """EmbeddingGemma 2's text path, fp32."""
+    return SentenceTransformer("google/embeddinggemma-2", device=device, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})
 
 
 def load_encoders():
     """Primal 2x2 and EmbeddingGemma 2, fp32, on the GPU."""
     vae = AutoModel.from_pretrained("ostris/primal_vae", variant="2x2", trust_remote_code=True, torch_dtype=torch.float32).to(DEVICE)
-    st = SentenceTransformer("google/embeddinggemma-2", device=DEVICE, config_kwargs={"vision_config": None, "audio_config": None}, model_kwargs={"dtype": torch.float32})
-    return vae, st
+    return vae, load_text_encoder(DEVICE)
 
 
 def write_null_embedding(st, path):
-    """The null embedding's init (SPEC §5): the encoder's embedding of the empty caption, under the same prefix."""
-    save_file({"null": st.encode([""], prompt=PREFIX, convert_to_tensor=True)[0].contiguous()}, path)
+    """The null prompt's init (SPEC §5): the encoder's pooled embedding and token states of the empty caption."""
+    pooled, sequences = encode_text(st, [""])
+    save_file({"null": pooled[0].cpu().contiguous(), "null_tokens": sequences[0].cpu().contiguous()}, path)
 
 
 def bf16_bytes(t):
@@ -93,16 +98,24 @@ def resize(image_bytes, res):
     return torch.from_numpy(np.array(image)).permute(2, 0, 1)[None].float() / 127.5 - 1
 
 
+@torch.inference_mode()
 def encode_text(st, captions):
-    """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 768] after the prefix."""
-    outputs = st.encode(captions, prompt=PREFIX, batch_size=32, output_value=None)
+    """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 512] after the prefix, from one
+    forward: the states are what the encoder's `embedding_projection` (768x512, per token, before the pooling) is given."""
     prefix_ids = st.tokenizer(PREFIX.rstrip())["input_ids"][:PREFIX_TOKENS]
-    sequences = []
-    for o in outputs:
-        live = o["attention_mask"].bool()
-        assert o["input_ids"][live][:PREFIX_TOKENS].tolist() == prefix_ids
-        sequences.append(o["token_embeddings"][live][PREFIX_TOKENS:])
-    return torch.stack([o["sentence_embedding"] for o in outputs]), sequences
+    states = []
+    hook = st[0].auto_model.language_model.embedding_projection.register_forward_hook(lambda module, args, output: states.append(args[0]))
+    pooled, sequences = [], []
+    try:
+        for start in range(0, len(captions), TEXT_BATCH):
+            features = st.preprocess([PREFIX + caption for caption in captions[start : start + TEXT_BATCH]])
+            out = st({k: v.to(st.device) if isinstance(v, torch.Tensor) else v for k, v in features.items()})
+            assert (out["input_ids"][:, :PREFIX_TOKENS] == torch.tensor(prefix_ids, device=st.device)).all()
+            pooled.append(out["sentence_embedding"])
+            sequences += [s[PREFIX_TOKENS:n] for s, n in zip(states.pop(), out["attention_mask"].sum(1).tolist())]  # padded on the right
+    finally:
+        hook.remove()
+    return torch.cat(pooled), sequences
 
 
 def write_shard(rows_in, source, out_path, vae, st):
@@ -144,14 +157,13 @@ def write_shard(rows_in, source, out_path, vae, st):
 
 
 if __name__ == "__main__":
-    shards = [int(s) for s in sys.argv[1:]]
+    root, shards = Path(sys.argv[1]), [int(s) for s in sys.argv[2:]]
     vae, st = load_encoders()
-    null_path = ROOT / "precomputed" / "null_embedding.safetensors"
-    if not null_path.exists():
-        null_path.parent.mkdir(parents=True, exist_ok=True)
-        write_null_embedding(st, null_path)
-    out_dir = STAGE / "precomputed" / "fused"
+    out_dir = root / "precomputed" / "fused"
     out_dir.mkdir(parents=True, exist_ok=True)
+    null_path = root / "precomputed" / "null_embedding.safetensors"
+    if not null_path.exists():
+        write_null_embedding(st, null_path)
     todo = []
     for shard in shards:
         name = f"data_{shard:06d}"
@@ -160,10 +172,10 @@ if __name__ == "__main__":
         else:
             todo.append(name)
     with ThreadPoolExecutor(1) as downloads:
-        pending = downloads.submit(fetch, todo[0]) if todo else None
+        pending = downloads.submit(fetch, root / "data", todo[0]) if todo else None
         for i, name in enumerate(todo):
             tar_path = pending.result()
             if i + 1 < len(todo):
-                pending = downloads.submit(fetch, todo[i + 1])
+                pending = downloads.submit(fetch, root / "data", todo[i + 1])
             write_shard(samples(tar_path), REPO, out_dir / f"{name}.parquet", vae, st)
             tar_path.unlink()
