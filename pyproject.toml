@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nanodit"
 version = "0.1.0"
-description = "A from-scratch toy text-to-image diffusion transformer"
+description = "A from-scratch text-to-image diffusion transformer"
+license = "MIT"
 requires-python = ">=3.14"
 authors = [{ name = "Daniel Jonas Gaderbauer" }]
 dependencies = [
