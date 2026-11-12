@@ -1,125 +1,110 @@
 # AGENTS.md
 
-Operating contract for agents in the nanodit repo.
+Operating contract for agents working in the nanodit repo.
 
 ## What this repo is
 
-A from-scratch text-to-image DiT on one consumer GPU. The design is agreed
-(`docs/SPEC.md`); `docs/HANDOVER.md` says where things stand. `README.md` has
-the layout and how to run it.
+A from-scratch text-to-image DiT on one consumer GPU. `docs/SPEC.md` is the design, `docs/HANDOVER.md` says where
+things stand, `README.md` has the layout and how to run it.
 
-## Documentation map
+## Who decides what
 
-- `README.md` — what the project is, layout, setup.
-- `docs/SPEC.md` — the settled design, in present tense. The source of truth.
-  **Carries no history**: when a rule changes, SPEC states the new rule, nothing
-  about what it replaced. Every change to it is a design change and goes to Daniel.
-- `docs/PLAN.md` — the open-questions ledger, grouped: what is unsure, how each
-  would be settled, current evidence. Questions only; measured numbers live in FACTS. Read
-  before running an experiment or changing a default.
-- `docs/FACTS.md` — a dense index of insights and the measured numbers behind them, each with source
-  and date; replaced, not appended to, when a new read supersedes it. Not a logbook.
-- `docs/log/` — the logbook: one note per run or read, `YYYY-MM-DD-title.md`, with the full tables;
-  FACTS and PLAN point to them where helpful.
-- `docs/archive/` — closed questions and decisions, one note per session or
-  closure, named `YYYY-MM-DD-kebab-title.md`. Read for the reasons; never rewrite.
-- `docs/topics/` — one doc per side quest or line of work that would bloat the main
-  ledgers (priming, edge of stability, weight spectra, datasets and encode, block
-  design): its question, design, reads and numbers, all in the one doc. PLAN keeps
-  the question's heading, one line of state and the link; FACTS lists which numbers
-  live in which topic. Closures still go to `archive/`. When a PLAN question grows
-  past a screen, it has become a topic: move it.
-- `docs/HANDOVER.md` — session-to-session orientation: where things stand, what
-  waits on Daniel, traps. Rewritten, not appended to.
-- `docs/REFERENCES.md`, `docs/references/` — sources and what each establishes;
-  verbatim source material.
+The maintainer decides the design: anything SPEC states, which questions are open or closed, what gets merged into
+the design. Agents write the code, run the experiments, keep the record and commit.
 
-## How we work from PLAN
-
-When a question closes, Daniel decides it. Its conclusion goes into a new note in
-`docs/archive/` with the reason, and the question leaves PLAN in the same session.
-If the answer settles design, SPEC gets the result and only the result. A new
-question goes into PLAN when it is found. A measurement goes into FACTS, and
-moves a PLAN answer when it bears on one. When a finding contradicts something
-already written, correct it where the wrong claim lives. Nothing is settled
-because it is written down; measurement beats the docs.
-
-Work one PLAN group at a time: the questions in a group share runs or code.
-
-## Rules
-
-- `docs/SPEC.md` is the source of truth. Implement what it says. Any deviation,
-  however small, is a design change: stop and bring it to Daniel with the facts
-  that decide it. Do not "improve" the design silently.
+- Implement what SPEC says. A deviation, however small, is a design change: stop and bring it with the facts that
+  decide it. Do not improve the design silently, and do not write an experiment's winner into SPEC yourself.
 - An observation is not a fix request. Report it; change nothing until asked.
-- Fail early: verify the risky assumption before building on it, with a small
-  script, and report the numbers. The listed ones are in PLAN (groups A and B):
-  Primal latent stats, EmbeddingGemma 2 output norm, Usui's handling of 1-D
-  params.
+- Verify the risky assumption before building on it, with a small script, and report the numbers.
 - Never discard a working state without isolating the cause of a problem.
+- Measurement beats the docs. When a finding contradicts something written, correct it where the wrong claim lives.
+
+## Documentation
+
+Each fact has one home. Before writing, find where it belongs; if it is already written, change it there.
+
+| File | Holds | Rule |
+|---|---|---|
+| `README.md` | what the project is, layout, how to run | for a reader who has never seen the repo |
+| `docs/SPEC.md` | the settled design, present tense | no history, no reasons, no numbers from runs |
+| `docs/PLAN.md` | open questions, grouped | a question, how it would be settled, the state in a few lines; nothing closed, no diary |
+| `docs/FACTS.md` | measured numbers that the design or an open question rests on | each with source and date; replaced when superseded, never appended to |
+| `docs/log/` | one note per run or read, `YYYY-MM-DD-title.md` | full tables; written once |
+| `docs/topics/` | one doc per side quest: its question, design, reads and numbers | PLAN keeps the heading, one line of state and the link |
+| `docs/archive/` | closed questions, one note per closure, `YYYY-MM-DD-title.md` | read for the reasons; never edited |
+| `docs/HANDOVER.md` | where things stand, what waits on a decision, traps | rewritten each time, never appended to |
+| `docs/REFERENCES.md`, `docs/references/` | sources and what each establishes; verbatim source material | |
+
+How a question moves: found, it goes into PLAN. Measured, the numbers go to a log note, and the one line that matters
+to FACTS. Grown past a screen, it becomes a topic. Closed by the maintainer, it leaves PLAN in the same session, its
+conclusion and reason go into a new archive note, and SPEC gets the result and only the result.
+
+How to write them:
+
+- Impersonal and in the present tense. No names, no "I", no account of who said what or when a session happened.
+  What matters about a statement is its status, so mark that: *Decided*, *Measured*, *Hypothesis*, *Not wanted*.
+  A date belongs on a measurement and on a decision, nowhere else.
+- A number cites a script in `scripts/` or a run directory. A result from a script that was not kept is not a fact;
+  commit the script or do not record the number.
+- One seed is one seed. Say how large a difference the comparison can resolve before reading a smaller one.
+- Do not narrate. A log note has what ran, the table and the read; it does not have the order things were tried in.
+- When code or a config is removed, fix the references to it in the same commit.
+
+## Code
+
+- Every line earns its place against the task. No flags, branches, adapters, warnings or "just in case" scaffolding.
+  When the shape is wrong, prefer deletion or a sharper boundary over accommodation.
+- A switch exists for an open question in PLAN. When the question closes, the losing branch of the switch is deleted
+  in the same change. The trunk carries the design plus the switches of questions still open, nothing else.
+- One implementation of each thing. No parallel compiled and uncompiled paths, no second copy of a model
+  construction or an encoder call in another script.
+- When a data layout changes, the data is migrated and the old layout is removed from the code. No side files, no
+  reader that accepts both.
+- Code holds no machine paths; scripts take them as arguments. Configs may hold them.
 - Pure PyTorch. No HF Trainer, no Accelerate, no ai-toolkit.
-- Logs are JSONL in the run directory, one object per line, so they can be read
-  directly. wandb mirrors them for live curves (SPEC §8); the JSONL is the record.
+- Boring and clear over clever; explicit domain concepts over generic plumbing. Comments for non-obvious maths,
+  tensor-shape invariants and performance traps, never to narrate an operation.
 - EmbeddingGemma 2 runs in bf16 or fp32, never fp16.
-- Reports say what was verified, what was assumed, and what is still open.
+- Tests test behaviour. Change a test when the design changes, not to get back to green.
+
+## Experiments
+
+- `main` is the trunk: what SPEC describes, and where every run that counts starts from.
+- An arm that changes code lives on a branch `arm/<name>`, committed before it runs. Never run from uncommitted
+  code: the commit is the run's only description. An arm that is only a config runs from `main`.
+- Work in the one checkout. No extra worktrees left behind; if one is needed to run an arm while the trunk moves,
+  remove it when the run ends.
+- When an arm is read, write its log note, then either bring it to the maintainer for merging or leave the branch as
+  the record. Delete its config from `configs/` unless it is a reference other arms compare against; the run
+  directory keeps the `config.toml` it ran with.
+- `configs/` holds only configs that load on the current code and data.
+- Checkpoints: an arm keeps none once it is scored, unless something continues from it. A long run keeps its last.
+  A checkpoint that no longer loads into the model is deleted.
+- Logs are JSONL in the run directory, one object per line; wandb mirrors them (SPEC §8). The JSONL is the record.
 
 ## Commits
 
-Agents own commits in this repo. Daniel takes part in design, not code review:
-a subagent reviews each unit against SPEC and these rules, the session judges the
-review and commits. One commit per coherent change: a design change, a probe and
-a doc correction are separate commits. Subject says what changed; a body when
-intent or impact needs it. Pushing stays with Daniel.
-
-## Branches
-
-`main` is the trunk: what SPEC describes, and where every run that counts starts
-from. An arm that changes the model lives on its own branch (a worktree beside the
-repo if it has to run while the trunk moves) and is either merged or left as the
-record of what ran; an arm that is only a config stays on `main`. Never run an arm
-from uncommitted code: a run's commit is its only description.
+Agents own commits. A subagent reviews each unit against SPEC and this file; the session judges the review and
+commits. One commit per coherent change: a design change, a probe and a doc correction are separate commits. The
+subject says what changed; a body when intent or impact needs it. Pushing stays with the maintainer.
 
 ## Running things
 
-From the repo root, `uv sync`. torch 2.15 comes from the PyTorch cu132 index.
-usuitrack is an editable path dependency from `../usuitrack-zero-init`, the worktree
-of usuitrack branch `zero-init` (archive, 2026-11-01), so it runs whatever is checked
-out there.
+`uv sync` from the repo root. torch 2.15 comes from the PyTorch cu132 index. usuitrack is an editable path dependency
+on the sibling checkout `../usuitrack-zero-init`, so it runs whatever is checked out there.
 
-Scripts run from the repo root as `uv run python scripts/<name>.py`; they import
-each other by module name (`from train import Config`), which works because the
-script's directory is on the path.
+Scripts run from the repo root as `uv run python scripts/<name>.py ARGS`; the usage is in each docstring. They import
+each other by module name (`from train import Config`).
 
-Only the configs in `configs/` that load on the current model and data are kept.
-Every run directory holds the `config.toml` it ran with; an old run is read from
-there and from its commit, not rebuilt from `configs/`.
+A run streams to wandb (`wandb_project` in its config) with the entity and key from `$WANDB_ENTITY` and
+`$WANDB_API_KEY`; `WANDB_MODE=offline` runs without the network. A run directory that exists is refused; one whose
+`wandb.init` failed has to be deleted before rerunning.
 
-A run streams to wandb (project `wandb_project` in its config) with the entity and key
-from `$WANDB_ENTITY` and `$WANDB_API_KEY`; `WANDB_MODE=offline` runs without the network.
-A run whose `wandb.init` fails leaves its run directory behind: delete it before rerunning.
+The data lives outside the repo, in the directories the configs name. On the development machine these still carry
+the project's first name, `tiny-dit` (archive, 2026-11-11).
 
-Datasets, latents, embeddings and runs live outside the repo, under directories
-still named `tiny-dit` (archive, 2026-11-11): runs, probes and the null embedding
-under `/mnt/mars/ai/tiny-dit/`, the fused per-shard Parquets and Fine-T2I under
-`/mnt/luna/tiny-dit/`, the trial and eval sets the configs read on the SSD at
-`/run/media/djg/vel-ssd/tiny-dit/`.
-
-The GPU (RTX 4070 Super, 12 GB) is shared with ai-toolkit jobs. Check
-`nvidia-smi` before launching. **Launch training jobs in the background, never in
-the foreground.**
-
-## Code style
-
-- Every line earns its place against the task. No flags, branches, adapters,
-  warnings, or "just in case" scaffolding. When the shape is wrong, prefer
-  deletion or a sharper boundary over accommodation.
-- No parallel compiled and uncompiled implementations of the same maths; they
-  drift silently. A compiled path is the only implementation, or the eager path
-  calls into the same function.
-- Boring and clear over clever; explicit domain concepts over generic plumbing.
-- Direct, readable PyTorch. Comments for non-obvious math, tensor-shape
-  invariants, and performance traps, never to narrate an obvious operation.
-- Match the surrounding code's density, naming, and idiom.
+The GPU (RTX 4070 Super, 12 GB) is shared with other jobs. Check `nvidia-smi` before launching, and launch training
+in the background, never in the foreground.
 
 ## Validation
 
@@ -127,5 +112,5 @@ the foreground.**
 uv run python -m pytest tests/
 ```
 
-Do not report work as done because imports resolve or a smoke run descends. If
-validation could not run, say exactly what is unverified.
+Work is not done because imports resolve or a smoke run descends. If validation could not run, say exactly what is
+unverified. A report says what was verified, what was assumed, and what is still open.
