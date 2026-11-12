@@ -62,7 +62,7 @@ class Config:
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
-    anneal_to: float | None = None  # an anneal run (SPEC §6): Usui's lr falls by a cosine over `steps` to this value
+    anneal_to: float | None = None  # an anneal run (SPEC §6), from a checkpoint with warmup = 0: Usui's lr falls by a cosine over `steps` to this value
 
 
 def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:

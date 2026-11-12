@@ -46,7 +46,7 @@ The lr-jump test (2026-11-06, below) bears on this: from a late checkpoint, a hi
 negative (about -0.04, -0.08 and -0.11 at 1e-4, 4e-4 and 1e-3), and the network answered by flattening: the top Hessian
 eigenvalue fell 35 % at 1e-3 within 150 steps and stayed put at the control lr, for about 2 % more loss and no spikes.
 Reading: the cosine follows lr times sharpness, not the lr, and the pinned lr is not a stability ceiling, since the
-curvature adapts to it. That favours a constant lr with a late anneal: the extra loss at a high lr looks like a higher
+curvature adapts to it. That favours a constant lr with a late anneal (the schedule since archive 2026-11-12-constant-lr): the extra loss at a high lr looks like a higher
 noise floor, which the anneal removes; whether it recovers the 2 % is untested. The cosine at 10x the lr is still far from
 the -0.4 of the earlier runs, so the lr alone does not explain those. Next: lower the lr again after a high-lr stretch and
 see whether the curvature rebounds (then the anneal is partly progressive sharpening and should stay short).

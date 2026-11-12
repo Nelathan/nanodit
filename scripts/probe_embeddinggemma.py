@@ -1,4 +1,4 @@
-"""PLAN B2: EmbeddingGemma 2 text path via sentence-transformers: output norm, per-dim statistics, bf16 vs fp32, short prompts, on CPU.
+"""Archive 2026-11-12-embedding-norm: EmbeddingGemma 2 text path via sentence-transformers: output norm, per-dim statistics, bf16 vs fp32, short prompts, on CPU.
 
 The raw (pre-Normalize) vectors come from the Transformer + Pooling modules; L2 normalization is the third module.
 

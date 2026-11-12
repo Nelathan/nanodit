@@ -1,4 +1,4 @@
-"""PLAN B1: Primal VAE 2x2 latent statistics, flip equivariance and reconstruction, on CPU.
+"""Archive 2026-11-12-primal-latent-statistics: Primal VAE 2x2 latent statistics, flip equivariance and reconstruction, on CPU.
 
 usage: probe_primal.py SHARD.tar OUT_DIR
 """

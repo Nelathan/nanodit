@@ -1,4 +1,4 @@
-"""How UsuiTrack treats nanodit's parameter shapes (archive 2026-11-01 row 2, PLAN A2), on toy problems; prints, writes nothing."""
+"""How UsuiTrack treats nanodit's parameter shapes (archive 2026-11-01 row 2, archive 2026-11-12-fallback-params), on toy problems; prints, writes nothing."""
 import torch
 from usuitrack import UsuiTrack
 

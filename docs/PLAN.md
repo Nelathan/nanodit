@@ -77,8 +77,9 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 
 ### C2. Warmup and the fallback lr at the chosen Usui lr
 
-*Decided* (2026-11-12): usui lr 4e-3, the best of the sweep under the trust rule at d768x16 over 3000 steps
-(`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`: 5e-4 1.5332, 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950).
+*Decided* (2026-11-12): usui lr 4e-3, the best of the sweep at d768x16 over 3000 steps under the trust rule with each
+norm pinned at its init, before the ceiling (archive 2026-11-12-norm-ceiling;
+`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`: 5e-4 1.5332, 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950).
 The reference config still runs 2e-3. Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at
 4e-3. Settle: config-only arms against a 4e-3 reference.
 
@@ -88,7 +89,7 @@ The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or
 
 ### C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate chosen?
 
-Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, the toy, the lr-jump read and what is open). State: the pinned lr is not a stability ceiling, the curvature adapts to it; that favours a constant lr with a late anneal (C2), untested at length.
+Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, the toy, the lr-jump read and what is open). State: the pinned lr is not a stability ceiling, the curvature adapts to it; that favours a constant lr with a late anneal, now the schedule (archive 2026-11-12-constant-lr); whether the anneal recovers the loss is untested at length.
 
 ---
 
@@ -142,7 +143,8 @@ identity.
 
 Cross attention in the attention blocks is *Decided* as design (2026-11-12); the conv blocks have none, so the caption
 reaches them only through the adaLN, which is cheap in compute. Open: whether the pooled caption stays in the adaLN
-(`pooled_ada`, SPEC §3), or the adaLN takes t alone. Settle: by reading how other text-to-image DiTs with cross
+(`pooled_ada`, SPEC §3), or the adaLN takes t alone; and if it stays, whether one shared `ada` is enough or each block
+wants its own (or a per-block LoRA on the shared one). Settle: by reading how other text-to-image DiTs with cross
 attention condition their adaLN, not by an arm. At 6000 steps, cross with or without the pooled adaLN ended within
 0.002 of each other (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`).
 
