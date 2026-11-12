@@ -16,17 +16,17 @@ for the fine-tune set (see the FID and Lunara question in the sampling group).
 Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
 sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
 free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
-32 GB, 256 px latents 128 GB; the token sequence unpadded without the prompt prefix at 1,536 B per token (768-d bf16):
+32 GB, 256 px latents 128 GB; the token sequence unpadded at 1,536 B per token (768-d bf16):
 the first encoded rows average 58 tokens, 90 KB, so about 170 GB per 1.9M rows (the 30-token mean estimated from 3,000
 captions was low); at the 512-d states (1,024 B per token) about 115 GB, the figure for the shuffled set.
 
 Decided 2026-11-05: a fused dataset of both sources, deduplicated later, both at 128 and 256 px with Lanczos; the
-sequence for cross attention at 512-d, with the prompt prefix tokens dropped and unpadded. EmbeddingGemma 2's
-residual stream is 512-d (24 layers); its `embedding_projection` (768x512, after the final norm, per token) lifts
-the token states to 768 before the mean pooling and normalize, so the 768-d states span only 512 dimensions and the
-stored sequence is the projection's input. The pooled embedding is 768-d. The prefix `title: none | text: ` is
-`<bos>` and 6 tokens; its trailing space merges into the caption's first token. `scripts/precompute.py` writes both
-from one encoder pass, one Parquet per shard (shards 0–46 encoded 2026-11-05 to 11-06).
+sequence for cross attention at 512-d, unpadded; since 2026-11-12 the caption is encoded with no prefix and the
+sequence drops `<bos>` and `<eos>` (archive 2026-11-12-no-prefix). EmbeddingGemma 2's residual stream is 512-d (24
+layers); its `embedding_projection` (768x512, after the final norm, per token) lifts the token states to 768 before
+the mean pooling and normalize, so the 768-d states span only 512 dimensions and the stored sequence is the
+projection's input. The pooled embedding is 768-d. `scripts/precompute.py` writes both from one encoder pass, one
+Parquet per shard (shards 0–46 encoded 2026-11-05 to 11-06).
 
 Open:
 - Fine-T2I's images are above 1K and partly not square. Decided: no square crop; the images go into aspect buckets (token grids of about

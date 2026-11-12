@@ -12,7 +12,7 @@ For every DIR/staged/<subset>/<tar>.parquet (`stage_fine.py DIR`) writes DIR/enc
   aesthetic        float32
   embedding        fixed_size_binary(1536)  768 bf16, the normalized pooled embedding, as precompute.py
   sequence         binary                   bf16 [n, 512], C-contiguous: the token states before the encoder's
-                                            768x512 projection, prompt prefix dropped, unpadded, as precompute.py
+                                            768x512 projection, <bos> and <eos> dropped, unpadded, as precompute.py
   latent_128       binary                   bf16 [2, h/4, w/4], C-contiguous, from a Lanczos halving of the staged crop
   latent_256       binary                   bf16 [2, h/2, w/2], C-contiguous, from the staged crop (h, w = BUCKETS[bucket])
 The latents are variable-size binary because the buckets differ in shape; the shuffle splits rows by bucket. A

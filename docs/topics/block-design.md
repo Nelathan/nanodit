@@ -46,7 +46,7 @@ Each comes from that list unless noted. Status: open, queued, running, read.
    conflating concepts. The pair needs a longer budget, or a prompt-following read rather than caption loss. Recorded.
 4. **Parallel mixers with one output projection writing only the meta channels** (an experiment, not a rule): self-attention,
    cross attention and the conv all read the same modulated input and their outputs are summed through one `out`. Three mixer
-   types: conv, self, cross. Open, needs cross attention back in the model.
+   types: conv, self, cross. Open; cross attention is in every attention block (archive 2026-11-12, plan history).
 5. **Sparse layout**: n conv-only layers, then one layer with cross and self attention; if self-attention is cheap, more often.
    Open, after 4.
 6. **Conv at 3/4 of the blocks is the edge and preferred** (a faster model allows more layers). Read: loss level at 3000, 1.32× faster.
@@ -56,7 +56,7 @@ Each comes from that list unless noted. Status: open, queued, running, read.
 8. **PaLM-style parallel block**: the MLP in parallel with the attention (one norm, one modulation), read for speed and loss.
    Queued → `conv4_pmlp_3k`.
 9. **Cross attention: aggressive GQA and NoPE** — the keys come from an already-encoded sequence. NoPE already holds (no RoPE on
-   the keys). Open → GQA arm after cross attention is back in.
+   the keys). Open → GQA arm; cross attention is in.
 10. **Self-attention ablations never run**: RoPE vs partial RoPE vs NoPE; MHA vs GQA. MHA was argued as cheap, but the runtime
     shows attention is not cheap even at 64 tokens (conv in its place gives 1.2–1.3×), and a 1-megapixel image costs far more.
     Queued → `conv4_nope_3k`, `conv4_rope25_3k`, `conv4_gqa3_3k`. Half the frequencies would be a null: the 8 slow ones turn under 0.07 rad across the 8×8 grid, so they are already position-free; a quarter keeps only the fast ones.

@@ -13,9 +13,9 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Resolutions | 128 px and 256 px, each a Lanczos resize of the 512 crop. 512 px skipped for now |
 | Captions | full caption, no truncation |
 | Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
-| Text prefix | one fixed prefix for training and inference: `title: none \| text: {caption}` |
+| Text prefix | none: the caption is encoded as it is, for training and inference |
 | Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |
-| Token states | the encoder's 512-d states of the caption's tokens after its final norm, before the projection to 768; the prefix's tokens dropped, unpadded |
+| Token states | the encoder's 512-d states of the caption's tokens after its final norm, before the projection to 768; `<bos>` and `<eos>` dropped, unpadded |
 | VAE | `ostris/primal_vae`, variant `2x2`: 2 channels at 2× downsample, deterministic, unit-normal per image and channel, no scale/shift factors. Image sides must be multiples of 16 |
 | Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16. Streamed per source shard: download, encode, write one Parquet file per shard (key, source, caption, embedding, token states, both latents), delete the shard |
 | Training data | the shards shuffled into one Parquet per resolution, rows in uniformly random order, each image once (a repeated latent keeps its first row in shard order); adding shards means shuffling again. Training streams it in blocks of row groups, each pass visiting the blocks in a new random order and shuffling rows within a block |
@@ -75,7 +75,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Patch embed 128→(width − 128) | fan-in normal, zero bias; the first 128 channels are the raw patch, no parameters | Usui |
 | Timestep MLP | fan-in normal | Usui |
 | Text projection 768→width | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
-| Null embedding | EmbeddingGemma 2's embedding of the empty caption (`title: none \| text: `), learned from there | fallback |
+| Null embedding | EmbeddingGemma 2's embedding of the empty caption, learned from there; the null tokens start as its `<bos>` and `<eos>` states | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
 | Conv block projection, depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |

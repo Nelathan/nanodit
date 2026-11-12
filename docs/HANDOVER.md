@@ -5,7 +5,7 @@ measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 78 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
 pass (`uv run python -m pytest tests/`, about 100 s). Nothing runs on the GPU.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
@@ -46,7 +46,8 @@ below about 0.003 in caption loss is within what one seed can say.
 
 ## Open decisions
 
-- **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
+- **The re-encode without the prefix** (archive 2026-11-12-no-prefix) rewrites `embedding` and `sequence` in every
+  precomputed Parquet and the null embedding; until it has run, the stored data carries the document prefix.
 - **Switches on the trunk**, each for an open question:
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
     Level in loss with cross plus adaLN at 6000 steps.

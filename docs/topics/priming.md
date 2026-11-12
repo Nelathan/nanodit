@@ -120,7 +120,7 @@ to the reference only once priming has ended; the eval score is never primed.
 - Caption alignment: the image embedding of the generated image against the pooled caption, by cosine, as an eval of
   prompt following. EmbeddingGemma 2 maps text, images, video and audio into one 768-d space; that is its core feature
   (model card). Against the real image's cosine to the same caption, it also marks captions that miss their image.
-  Captions without a prefix retrieve their image best of the model's prefixes; the stored ones carry the document prefix (FACTS, PLAN B7).
+  Captions without a prefix retrieve their image best of the model's prefixes; the stored ones carry the document prefix (FACTS; re-encoded without, archive 2026-11-12-no-prefix).
   Reading: prompt following was poor for want of cross attention, and now waits on a long run on good
   captions.
 - A 64 px first stage needs latents encoded again; noted, not planned: in the samples 128 px learns the mood within

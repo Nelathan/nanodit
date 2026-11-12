@@ -8,14 +8,15 @@ Writes DIR/precomputed/fused/data_<SHARD>.parquet with columns
   caption     string
   embedding   fixed_size_binary(1536)   768 bf16, L2-normalized fp32 embedding rounded to bf16
   sequence    binary                    bf16 [n, 512], C-contiguous: the encoder's token states of the caption after its
-                                        final norm, before the 768x512 `embedding_projection`; the prompt prefix's
-                                        tokens dropped, unpadded (n = bytes / 1024)
+                                        final norm, before the 768x512 `embedding_projection`; <bos> and <eos>
+                                        dropped, unpadded (n = bytes / 1024)
   latent_128  fixed_size_binary(...)    bf16 [2, 64, 64], C-contiguous
   latent_256  fixed_size_binary(...)    bf16 [2, 128, 128], C-contiguous
 Both latents are encoded from a Lanczos resize of the 512 px crop (PLAN B5). The shard tar is downloaded to
 DIR/data and deleted once encoded; the next shard's tar downloads while one encodes. A shard whose parquet exists
 is skipped. Also writes DIR/precomputed/null_embedding.safetensors when it is missing: the empty caption's pooled
-embedding (key `null`, fp32 [768]) and token states (`null_tokens`, fp32 [2, 512]).
+embedding (key `null`, fp32 [768]) and its <bos> and <eos> states (`null_tokens`, fp32 [2, 512]).
+The captions are encoded with no prompt prefix (SPEC §1).
 """
 import io
 import json
@@ -37,8 +38,6 @@ from safetensors.torch import save_file
 from sentence_transformers import SentenceTransformer
 
 REPO = "jackyhate/text-to-image-2M"
-PREFIX = "title: none | text: "
-PREFIX_TOKENS = 7  # <bos> title : ▁none ▁| ▁text : -- the prefix's trailing space merges into the caption's first token
 RESOLUTIONS = (128, 256)
 TEXT_DIM = 768
 ROW_GROUP = 1024
@@ -78,9 +77,10 @@ def load_encoders():
 
 
 def write_null_embedding(st, path):
-    """The null prompt's init (SPEC §5): the encoder's pooled embedding and token states of the empty caption."""
-    pooled, sequences = encode_text(st, [""])
-    save_file({"null": pooled[0].cpu().contiguous(), "null_tokens": sequences[0].cpu().contiguous()}, path)
+    """The null prompt's init (SPEC §5): the encoder's pooled embedding of the empty caption and its two states, <bos>
+    and <eos>, the only tokens it has."""
+    pooled, states = encode_states(st, [""])
+    save_file({"null": pooled[0].cpu().contiguous(), "null_tokens": states[0].cpu().contiguous()}, path)
 
 
 def bf16_bytes(t):
@@ -99,23 +99,33 @@ def resize(image_bytes, res):
 
 
 @torch.inference_mode()
-def encode_text(st, captions):
-    """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 512] after the prefix, from one
-    forward: the states are what the encoder's `embedding_projection` (768x512, per token, before the pooling) is given."""
-    prefix_ids = st.tokenizer(PREFIX.rstrip())["input_ids"][:PREFIX_TOKENS]
+def encode_states(st, captions):
+    """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 512], <bos> to <eos>, from one
+    forward with no prompt prefix: the states are what the encoder's `embedding_projection` (768x512, per token, before
+    the pooling) is given. The pooling averages all of them, <bos> and <eos> included."""
+    bos, eos = st.tokenizer.bos_token_id, st.tokenizer.eos_token_id
     states = []
     hook = st[0].auto_model.language_model.embedding_projection.register_forward_hook(lambda module, args, output: states.append(args[0]))
     pooled, sequences = [], []
     try:
         for start in range(0, len(captions), TEXT_BATCH):
-            features = st.preprocess([PREFIX + caption for caption in captions[start : start + TEXT_BATCH]])
+            features = st.preprocess(captions[start : start + TEXT_BATCH])
             out = st({k: v.to(st.device) if isinstance(v, torch.Tensor) else v for k, v in features.items()})
-            assert (out["input_ids"][:, :PREFIX_TOKENS] == torch.tensor(prefix_ids, device=st.device)).all()
+            lengths = out["attention_mask"].sum(1).tolist()  # padded on the right
+            assert all(ids[0] == bos and ids[n - 1] == eos for ids, n in zip(out["input_ids"].tolist(), lengths))
             pooled.append(out["sentence_embedding"])
-            sequences += [s[PREFIX_TOKENS:n] for s, n in zip(states.pop(), out["attention_mask"].sum(1).tolist())]  # padded on the right
+            sequences += [s[:n] for s, n in zip(states.pop(), lengths)]
     finally:
         hook.remove()
     return torch.cat(pooled), sequences
+
+
+def encode_text(st, captions):
+    """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 512] without <bos> and <eos>,
+    which carry nothing of the caption (SPEC §1)."""
+    pooled, states = encode_states(st, captions)
+    assert min(len(s) for s in states) > 2, "a caption with no tokens: cross attention would see a fully masked row"
+    return pooled, [s[1:-1] for s in states]
 
 
 def write_shard(rows_in, source, out_path, vae, st):

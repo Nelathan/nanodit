@@ -51,12 +51,6 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I is staged and encoded in part; the per-bucket shuffle and stream are not built.
 
-### B7. Which caption prefix should the pooled embedding carry?
-
-Every stored pooled embedding is encoded with the document prefix `title: none | text: ` (SPEC §1; checked against a fresh encode, FACTS). On image retrieval that prefix ranks the caption's own image first for 90.5% of 1000 eval images, no prefix for 94.4% (FACTS, caption prefix). The 2026-11-07 read concluded that the stored embeddings stay because they were taken to have no prefix; that premise was wrong, so the conclusion is open again.
-- Whether retrieval of the image by the caption says anything about the embedding as conditioning: a paired arm on a subset re-encoded without the prefix would say (pooled embedding and null embedding both; the 512-d token states already drop the prefix tokens but are computed with it in context).
-- The cost of changing it: every pooled embedding encoded again (text only, no latents), and SPEC §1 and §5.
-
 ## Group C. LR sweep and step budget
 
 ### C1. Batch size and step budget at 256 px
