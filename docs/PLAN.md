@@ -338,11 +338,6 @@ Every Usui matrix takes the trust step inside the ball of its init norm (SPEC §
 from the former pin only where a step shrinks a norm.
 The sandwich norm was necessary against the loss spikes (2026-11-06); no arm checks it again.
 Open:
-- Whether the trust rule is still needed inside the ball. With the norm at most its init radius, the trust step and
-  Usui's shape-sized `fixed` step differ by a per-matrix factor `‖W‖ / √(max(1, m/n) r)`. *Hypothesis:* the norms
-  stay near the radius, so the factor is fixed by the init and the rules differ only in how the lr scales across
-  shapes. Settle: a per-matrix norm ratio read on a reference run (SPEC §8 logs only the global one); if it holds, an
-  arm of `fixed` against `trust` at matched lr.
 - Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
