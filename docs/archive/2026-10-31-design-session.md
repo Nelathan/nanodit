@@ -8,7 +8,7 @@ Closed in the design session of 2026-10-31. Each entry: what, and why.
 | 2 | x0 velocity target | Ostris reports sharper results at high compression; drop-in for flow-matching samplers |
 | 3 | Primal VAE, 2x2 variant | Card shows 2x2 matching or beating the Flux.2 VAE at the same budget; 2x1 trails on texture and its per-image std drifts |
 | 4 | EmbeddingGemma 2, pooled 768-d only; per-token maybe later | Simplest conditioning path |
-| 5 | Full captions | Daniel judges EmbeddingGemma 2 capable of embedding them; length mismatch noted as a risk (PLAN B3) |
+| 5 | Full captions | EmbeddingGemma 2 is judged capable of embedding them; length mismatch noted as a risk (PLAN B3) |
 | 6 | text-to-image-2M | Ready-to-stream WebDataset at 512 px; fastest path to images. Trade-off: largely synthetic images |
 | 7 | Width 512, 12 layers (→24) | Small, fast to train; scale depth once it works |
 | 8 | MHA 8×64 | Head dim 64. GQA saves nothing without a KV cache |

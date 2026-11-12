@@ -1,6 +1,6 @@
 # Interval logging, 2026-11-01
 
-Decided by Daniel: "on logging, we should accumulate on gpu like we do on ai-toolkit and report at interval, here 100 steps."
+Decided: logging accumulates on the GPU, as in ai-toolkit, and reports at an interval, here 100 steps.
 
 | # | Decision | Reason |
 |---|---|---|
