@@ -45,7 +45,6 @@ below about 0.003 in caption loss is within what one seed can say.
 
 ## Open decisions
 
-- **SPEC §6 lr schedule** says linear decay to a fraction; PLAN C2 aims at a constant lr with a late anneal.
 - **PLAN B7**: the stored pooled embeddings carry the document prefix, which retrieves images worse than no prefix.
 - **Switches on the trunk**, each for an open question:
   - A block type's `cross` (F3): cross attention to the token states in the attention blocks of that type.

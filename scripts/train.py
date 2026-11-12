@@ -62,7 +62,7 @@ class Config:
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
-    lr_final_fraction: float = 1.0  # both lrs fall linearly over `steps` from the peak to this fraction of it
+    anneal_to: float | None = None  # an anneal run (SPEC §6): Usui's lr falls by a cosine over `steps` to this value
 
 
 def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
@@ -282,8 +282,10 @@ def main(config_path: str) -> None:
     for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
         block.compile()
 
+    end = 1.0 if cfg.anneal_to is None else cfg.anneal_to / cfg.usui_lr  # the fallback falls by the same factor
+
     def lr_factor(done: int) -> float:
-        return min(1.0, (done + 1) / max(1, cfg.warmup)) * (1 + (cfg.lr_final_fraction - 1) * done / cfg.steps)
+        return min(1.0, (done + 1) / max(1, cfg.warmup)) * (end + (1 - end) * (1 + math.cos(math.pi * done / cfg.steps)) / 2)
 
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lr_factor) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts

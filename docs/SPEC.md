@@ -92,7 +92,7 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 - Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at the norm it has at its first step (Usui's `norm_bounds = (None, 1)`): each matrix lives in the ball of its init radius, set by its init (§5), with no floor and no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
 - Frame size: one rank fraction for every tracked matrix.
 - Frames drawn at random when the optimizer is built (Usui's group key `frame_init = "random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
-- Linear LR warmup on both optimizers, then a linear decay over the run to a configured fraction of the peak.
+- Linear LR warmup on both optimizers, then a constant lr. An anneal is a run of its own, continued from a checkpoint: Usui's lr falls by a cosine to 1e-5 over at most one epoch, the fallback's by the same factor.
 - Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.

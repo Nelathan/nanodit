@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -400,12 +401,21 @@ def test_wandb_buckets_pool_the_interval_rather_than_averaging_the_train_buckets
     assert by_t["r2_by_t"][0] == pytest.approx(1 - error[:6].sum().item() / 6) and by_t["r2_by_t"][4] == pytest.approx(1 - error[6:].sum().item() / 2)
 
 
-def test_both_lrs_decay_linearly_to_the_final_fraction_over_the_run_after_warmup(train, tmp_path, monkeypatch):
+def test_the_lr_is_constant_after_warmup(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
     config = write_config(tmp_path, steps=4, eval_every=100)
-    config.write_text(config.read_text().replace("warmup = 2", "warmup = 2\nlr_final_fraction = 0.5"))
     train.main(str(config))
     log = [json.loads(line) for line in (tmp_path / "runs" / "smoke" / "train.jsonl").read_text().splitlines()]
-    factors = [0.5, 0.875, 0.75, 0.625]  # warmup 2, then 1 - 0.5 · done / 4
+    assert [r["lr_usui"] for r in log] == pytest.approx([1.5e-3, 3e-3, 3e-3, 3e-3])  # warmup 2
+
+
+def test_an_anneal_takes_both_lrs_down_a_cosine_to_the_usui_target(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=4, eval_every=100)
+    config.write_text(config.read_text().replace("warmup = 2", "warmup = 0\nanneal_to = 1e-5"))
+    train.main(str(config))
+    log = [json.loads(line) for line in (tmp_path / "runs" / "smoke" / "train.jsonl").read_text().splitlines()]
+    end = 1e-5 / 3e-3
+    factors = [end + (1 - end) * (1 + math.cos(math.pi * done / 4)) / 2 for done in range(4)]
     assert [r["lr_usui"] for r in log] == pytest.approx([3e-3 * f for f in factors])
     assert [r["lr_fallback"] for r in log] == pytest.approx([1e-3 * f for f in factors])
