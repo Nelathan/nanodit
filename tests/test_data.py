@@ -89,6 +89,7 @@ def test_shuffle_writes_each_bucket_once_whole_and_in_a_new_order(mixed, rows):
     assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet"]  # parts and .tmp are gone
     square, wide = pq.read_table(out / "32x32.parquet"), pq.read_table(out / "28x36.parquet")
     assert square.column_names == ["key", "source", "caption", "embedding", "sequence", "latent_32"]  # the other latent and Fine's spare columns stay behind
+    assert square.schema.field("sequence").type == wide.schema.field("sequence").type == pa.binary()  # data._sequences reads int32 offsets
     keys = square["key"].to_pylist()
     expected = [f"k{i}" for i in range(20)] + [f"f{i}" for i in range(1, 12, 2)]
     assert sorted(keys) == sorted(expected) and keys != expected

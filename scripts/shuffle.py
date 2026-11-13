@@ -32,7 +32,7 @@ import pyarrow.parquet as pq
 
 from stage_fine import BUCKETS as FINE_BUCKETS
 
-PART_ROWS = 16384  # about 0.8 GB at 128 px: under the 2 GB a binary column holds in one chunk
+PART_ROWS = 16384  # about 1 GB of sequences and latents at 128 px, the part pass 2 holds in memory
 DEAL_ROWS = 32768  # input rows dealt at once, so a part's row groups hold tens of rows, not a few
 ROW_GROUP = 1024
 SEED = 0
@@ -68,10 +68,12 @@ def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
         counts.update(map(tuple, image_sizes(f, resolution).tolist()))
     fields = pq.read_schema(files[0])
     out_dir.mkdir(parents=True, exist_ok=True)
-    writers = {}
+    writers, schemas = {}, {}
     for (h, w), n in sorted(counts.items()):
         schema = pa.schema([fields.field(c) for c in COLUMNS] + [pa.field(latent, pa.binary(LATENT_CHANNELS * (h // 2) * (w // 2) * 2))])
-        writers[h, w] = [pq.ParquetWriter(out_dir / f"{h}x{w}.part{p:04d}", schema, compression="none") for p in range(math.ceil(n / PART_ROWS))]
+        schemas[h, w] = schema
+        part_schema = schema.set(schema.get_field_index("sequence"), pa.field("sequence", pa.large_binary()))  # a part's sequences pass 2 GB
+        writers[h, w] = [pq.ParquetWriter(out_dir / f"{h}x{w}.part{p:04d}", part_schema, compression="none") for p in range(math.ceil(n / PART_ROWS))]
     seen: set[bytes] = set()
     dealt = Counter()
 
@@ -94,7 +96,7 @@ def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
         for batch in source.iter_batches(DEAL_ROWS, columns=COLUMNS + [latent] + extra):
             table = pa.Table.from_batches([batch])
             sizes.append(image_sizes(f, resolution, table))
-            tables.append(pa.table([table[c] for c in COLUMNS] + [pc.cast(table[latent], pa.binary())], names=COLUMNS + [latent]))  # one schema for both datasets
+            tables.append(pa.table([pc.cast(table[c], pa.large_binary()) if c == "sequence" else table[c] for c in COLUMNS] + [pc.cast(table[latent], pa.binary())], names=COLUMNS + [latent]))  # one schema for both datasets; large_binary, as 32768 rows of sequences pass 2 GB
             if sum(map(len, tables)) >= DEAL_ROWS:
                 deal(tables, np.concatenate(sizes))
                 tables, sizes = [], []
@@ -107,11 +109,14 @@ def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
     for (h, w), size_writers in writers.items():
         out = out_dir / f"{h}x{w}.parquet"
         tmp = out.with_name(out.name + ".tmp")
-        with pq.ParquetWriter(tmp, size_writers[0].schema, compression="none") as writer:
+        with pq.ParquetWriter(tmp, schemas[h, w], compression="none") as writer:
             for p in range(len(size_writers)):
                 part = out_dir / f"{h}x{w}.part{p:04d}"
                 table = pq.read_table(part)
-                writer.write_table(table.take(rng.permutation(len(table))), row_group_size=ROW_GROUP)
+                table = table.take(rng.permutation(len(table)))
+                for start in range(0, len(table), ROW_GROUP):
+                    group = table.slice(start, ROW_GROUP)
+                    writer.write_table(pa.table([pc.cast(group[c], schemas[h, w].field(c).type) for c in group.column_names], schema=schemas[h, w]))
                 part.unlink()
         assert pq.ParquetFile(tmp).metadata.num_rows == dealt[h, w]
         if not dealt[h, w]:
