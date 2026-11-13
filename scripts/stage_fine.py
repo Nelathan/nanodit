@@ -4,7 +4,8 @@ usage: stage_fine.py DIR SUBSET [SUBSET ...]
 
 SUBSET is a top-level folder of the dataset repo (`synthetic_original_prompt_square_resolution`, `curated`, ...). Each
 tar (0.3 to 3.2 GB) downloads to DIR/raw, becomes DIR/staged/<subset>/<tar name>.parquet and is deleted; the next tar downloads
-while one is processed. A tar whose Parquet exists is skipped, so a killed run resumes.
+while one is processed. A tar whose staged or encoded (`encode_fine.py`) Parquet exists is skipped, so a killed run
+resumes.
 
 An image goes to the aspect bucket nearest its own (log ratio), is scaled until it covers the bucket and is cropped at
 the centre: only overflow is cut, nothing is stretched. Bucket sizes are those of the 256 px stage (the 128 px stage
@@ -82,7 +83,7 @@ def stage(path: Path, out: Path, pool: ProcessPoolExecutor, subset: str) -> int:
 def main(root: Path, subsets: list[str]) -> None:
     files = sorted(f for f in HfApi().list_repo_files(REPO, repo_type="dataset") if f.endswith(".tar"))
     todo = [(f, root / "staged" / Path(f).parent / (Path(f).stem + ".parquet")) for f in files if Path(f).parts[0] in subsets]
-    todo = [(f, out) for f, out in todo if not out.exists()]
+    todo = [(f, out) for f, out in todo if not out.exists() and not (root / "encoded" / out.relative_to(root / "staged")).exists()]
     for _, out in todo:
         out.parent.mkdir(parents=True, exist_ok=True)
 

@@ -122,9 +122,11 @@ def encode_states(st, captions):
 
 def encode_text(st, captions):
     """The normalized pooled embeddings [N, 768] and each caption's token states [n_i, 512] without <bos> and <eos>,
-    which carry nothing of the caption (SPEC §1)."""
+    which carry nothing of the caption (SPEC §1); an empty caption has none."""
     pooled, states = encode_states(st, captions)
-    assert min(len(s) for s in states) > 2, "a caption with no tokens: cross attention would see a fully masked row"
+    empty = sum(len(s) == 2 for s in states)
+    if empty:
+        print(f"warning: {empty} of {len(captions)} captions have no tokens; training gives them the null prompt", file=sys.stderr, flush=True)
     return pooled, [s[1:-1] for s in states]
 
 

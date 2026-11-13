@@ -201,7 +201,11 @@ class DiT(nn.Module):
         """x [B, 2, H, W] latent at noise level t [B] -> F [B, 2, H, W].
         The network runs in the parameters' dtype (bf16 in training); x and the prompt are cast on the way in
         and F comes back fp32, so the objective and the sampler never see the network's dtype. t stays
-        fp32 up to the sinusoid, whose phases need the precision."""
+        fp32 up to the sinusoid, whose phases need the precision. A caption with no tokens is the null prompt: cross
+        attention over a fully masked row has no softmax."""
+        empty = (~prompt.mask.any(1)).view(-1, 1)
+        null = self.null_prompt(*prompt.tokens.shape[:2])
+        prompt = Prompt(torch.where(empty, null.pooled, prompt.pooled), torch.where(empty[..., None], null.tokens, prompt.tokens), torch.where(empty, null.mask, prompt.mask))
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype))

@@ -56,9 +56,10 @@ below about 0.003 in caption loss is within what one seed can say.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
 - **The reference** `configs/128_d768x12_6k.toml` (cross attention, usui lr 4e-3) has not run; nothing blocks it.
-- **Disk**: luna is 97 % full (132 GB free). Candidates to free, not decided: the staged copies of the three encoded
-  Fine-T2I subsets (about 73 GB), and the old pre-fused `128_shuffled_0-46.parquet` on mars (33 GB, a layout no
-  code reads, and the prefixed pooled embedding, not re-encoded).
+- **Disk** (2026-11-13): luna 210 GB free, mars 459 GB, vel-ssd 536 GB. The staged copies of the encoded Fine-T2I
+  subsets and the old pre-fused `128_shuffled_0-46.parquet` are deleted; `encode_fine.py` deletes each staged
+  Parquet once encoded. The original-prompt subsets are being staged and encoded; the merged 128 px training set
+  of both datasets (per aspect bucket, deduplicated) waits on them and on the maintainer's go.
 - **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
   default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
   PLAN. Moving `lab` also moved ai-toolkit's Anima lane, which runs the `../usuitrack` checkout: its first frame is

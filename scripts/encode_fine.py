@@ -16,7 +16,7 @@ For every DIR/staged/<subset>/<tar>.parquet (`stage_fine.py DIR`) writes DIR/enc
   latent_128       binary                   bf16 [2, h/4, w/4], C-contiguous, from a Lanczos halving of the staged crop
   latent_256       binary                   bf16 [2, h/2, w/2], C-contiguous, from the staged crop (h, w = BUCKETS[bucket])
 The latents are variable-size binary because the buckets differ in shape; the shuffle splits rows by bucket. A
-Parquet whose output exists is skipped, so a killed run resumes.
+Parquet whose output exists is skipped, so a killed run resumes; a staged Parquet is deleted once it is encoded.
 """
 import io
 import os
@@ -109,3 +109,4 @@ if __name__ == "__main__":
             out = root / "encoded" / subset / src.name
             if not out.exists():
                 encode(src, out, subset, vae, st)
+            src.unlink()

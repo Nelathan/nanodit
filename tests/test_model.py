@@ -120,6 +120,16 @@ def test_a_caption_is_the_same_alone_and_padded_in_a_batch(model, prompt):
     assert torch.allclose(model(x[2:], t[2:], alone), batched[2:], atol=1e-5)
 
 
+def test_a_caption_with_no_tokens_is_the_null_prompt(model, prompt):
+    open_gates(model)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    empty = prompt._replace(mask=prompt.mask & torch.tensor([True, False, True])[:, None])
+    out = model(x, t, empty)
+    assert out.isfinite().all()
+    assert torch.allclose(out[1], model(x[1:2], t[1:2], model.null_prompt(1, prompt.tokens.shape[1]))[0], atol=1e-5)
+    assert torch.allclose(out[[0, 2]], model(x, t, prompt)[[0, 2]], atol=1e-5)
+
+
 class TestRope:
     """With the same q and k vector at every token, logits depend on position only through RoPE."""
 
