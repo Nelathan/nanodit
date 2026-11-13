@@ -1,13 +1,12 @@
 # Handover
 
-State on the night of 2026-11-12, with the re-encode running. `PLAN.md` carries the questions, `FACTS.md` the
-measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
+State on 2026-11-13, after the re-encode of the captions without the prefix. `PLAN.md` carries the questions,
+`FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
 `main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
-pass (`uv run python -m pytest tests/`, about 100 s). The GPU runs the re-encode (below) until it ends; start no
-training before.
+pass (`uv run python -m pytest tests/`, about 100 s). The GPU is free.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
 depthwise-conv block (GDN2-style); cross attention to the caption's token states in every attention block (GQA, no
@@ -46,25 +45,17 @@ below about 0.003 in caption loss is within what one seed can say.
    subsets (1621, 1544) staged and encoded, 372 GB; original-prompt random resolution staged (1688), square staged
    1150 of 1311, staging stopped on a full disk; neither encoded. The per-bucket shuffle and stream are not built, so
    none of it can be trained on.
+9. **The captions without the prefix** (archive 2026-11-12-no-prefix): every stored text column and the null
+   embedding re-encoded on 2026-11-13 (FACTS, the caption-prefix line).
 
 ## Open decisions
 
-- **The re-encode without the prefix** (archive 2026-11-12-no-prefix), running since the night of 2026-11-12:
-  `scripts/reencode_text.py` over the 3409 files in `/mnt/mars/ai/tiny-dit/reencode_2026-11-12.files` (the Lunara
-  eval sets, the null embedding, the trial set, the 47 fused shards and Lunara art, the Fine-T2I encoded tars), one
-  line per file in `reencode_2026-11-12.log` beside it, `exit N` at the end. About 6 h at 254 rows/s (fused) and
-  391 rows/s (Fine-T2I), measured on copies. Each file is replaced whole by a rename, so a killed run is resumed by
-  passing the files the log does not list. A caption with no tokens stops it on an assertion, naming no file: the
-  next file after the log's last line holds it. When it ends: check row counts and a pooled embedding against a fresh
-  encode, then correct FACTS (the caption-prefix line, the null embedding line) and `topics/priming.md`, which still
-  describe the prefixed data.
 - **Switches on the trunk**, each for an open question:
   - `pooled_ada = false` (F3): the pooled caption leaves the adaLN, so the caption enters by cross attention only.
     Level in loss with cross plus adaLN at 6000 steps.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-- **The reference** `configs/128_d768x12_6k.toml` (cross attention, usui lr 4e-3) has not run; it waits for the
-  re-encode of the captions without the prefix.
+- **The reference** `configs/128_d768x12_6k.toml` (cross attention, usui lr 4e-3) has not run; nothing blocks it.
 - **Disk**: luna is 97 % full (132 GB free). Candidates to free, not decided: the staged copies of the three encoded
   Fine-T2I subsets (about 73 GB), and the old pre-fused `128_shuffled_0-46.parquet` on mars (33 GB, a layout no
   code reads, and the prefixed pooled embedding, not re-encoded).
