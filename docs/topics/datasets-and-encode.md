@@ -32,8 +32,7 @@ Open:
 - Fine-T2I's images are above 1K and partly not square. Decided: no square crop; the images go into aspect buckets (token grids of about
   the same token count, the image resized to the grid's exact size), and the data is fused, deduplicated and shuffled in one
   pass once it is encoded. The sizes are good (below, Fine-T2I image sizes): nine aspect ratios, at most 5 % stretch on the
-  synthetic sets at 128 px, more on the curated photos. Revised (2026-11-06): stretch is worse than a crop, so each image is scaled to cover its bucket with its aspect kept and only the overflow is cropped; the point was not to crop everything to 1:1. Open: the bucket set (a larger token count for less stretch), how the
-  stream draws a bucket per batch, and one file per bucket (the latent width differs). The model already takes any grid.
+  synthetic sets at 128 px, more on the curated photos. Revised (2026-11-06): stretch is worse than a crop, so each image is scaled to cover its bucket with its aspect kept and only the overflow is cropped; the point was not to crop everything to 1:1. Open: the bucket set (a larger token count for less stretch). Decided 2026-11-13: one file per bucket, a bucket per micro-batch, token-weighted accumulation (archive 2026-11-13-merged-training-set). The model takes any grid.
 - Fine-T2I's 2.3 TB at the 39 MB/s of the last download is about 16 h of download alone: several nights.
 
 ## Measurements

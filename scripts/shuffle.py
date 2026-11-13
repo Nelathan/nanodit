@@ -1,79 +1,124 @@
-"""Shuffle precomputed shard Parquets into one Parquet, rows in uniformly random order (SPEC Precompute).
+"""Shuffle the precomputed Parquets of both datasets into one training set per resolution: one Parquet per aspect
+bucket, its rows in uniformly random order (SPEC §1).
 
-usage: shuffle.py OUT RESOLUTION SHARD [SHARD ...]
+usage: shuffle.py OUT_DIR RESOLUTION FILE [FILE ...]
 
-SHARD is a fused shard of `precompute.py`. OUT has its columns key, source, caption, embedding, sequence and
-latent_<RESOLUTION>; the other latent stays behind.
+FILE is a fused shard of `precompute.py` (square images) or an encoded Fine-T2I Parquet of `encode_fine.py` (a
+`bucket` column into `stage_fine.BUCKETS`, sizes at 256 px). OUT_DIR/<h>x<w>.parquet holds every row whose image is
+h x w pixels at RESOLUTION, with the columns key, source, caption, embedding, sequence and latent_<RESOLUTION>, the
+latent of fixed size within the file; the other latent and Fine-T2I's spare captions stay behind.
 
-Two passes, so no more than a few thousand rows of a shard or one bucket are in memory. Pass 1 deals each shard's rows into BUCKETS
-temporary files, each row to a uniformly random one; pass 2 permutes each bucket in memory and appends it to
-OUT. A random bucket per row, then a random order inside each bucket, is a uniformly random permutation of all
-rows. OUT is written as OUT.tmp and renamed when complete. It needs about the shards' size again in free disk: the
-buckets, then OUT as each bucket is appended and deleted. A new shard means running it again over all shards.
-Each image is kept once: pass 1 drops a row whose latent bytes repeat an earlier row's, in shard order, so an image
+Each image is kept once: a row whose latent bytes repeat an earlier row's, in FILE order, is dropped, so an image
 keeps the caption of its first row.
+
+Two passes, so fewer than 2 x DEAL_ROWS input rows and one part are in memory. Pass 1 counts each bucket's rows and
+gives it parts of about PART_ROWS rows, then deals every row to a uniformly random part of its bucket; pass 2
+permutes each part in memory and appends it to its bucket's file. A random part per row, then a random order inside
+each part, is a uniformly random permutation of the bucket's rows. Each file is written as .tmp and renamed when
+complete; a bucket left without rows by the dedup gets no file. It needs the output's size in free disk, plus one
+part. New data means running it again over all FILEs.
 """
 import hashlib
+import math
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-BUCKETS = 128  # about 150 GB of rows at 128 px make buckets of about 1.2 GB, under the 2 GB a binary column holds in one chunk
+from stage_fine import BUCKETS as FINE_BUCKETS
+
+PART_ROWS = 16384  # about 0.8 GB at 128 px: under the 2 GB a binary column holds in one chunk
+DEAL_ROWS = 32768  # input rows dealt at once, so a part's row groups hold tens of rows, not a few
 ROW_GROUP = 1024
-TAKE_ROWS = 4096
 SEED = 0
+LATENT_CHANNELS = 2
+COLUMNS = ["key", "source", "caption", "embedding", "sequence"]
 
 
-def first_sightings(latents, seen: set[bytes]) -> np.ndarray:
+def image_sizes(path: str, resolution: int, rows: pa.Table | None = None) -> np.ndarray:
+    """[n, 2] (height, width) in pixels at `resolution` of the rows of `path` (or of `rows`, read from it): square
+    for a fused shard, the bucket's for a Fine-T2I Parquet."""
+    if "bucket" not in pq.read_schema(path).names:
+        n = pq.ParquetFile(path).metadata.num_rows if rows is None else len(rows)
+        return np.full((n, 2), resolution)
+    buckets = (pq.read_table(path, columns=["bucket"]) if rows is None else rows)["bucket"].to_numpy()
+    return np.array(FINE_BUCKETS)[buckets] * resolution // 256
+
+
+def first_sightings(latents: pa.ChunkedArray, seen: set[bytes]) -> np.ndarray:
     """Mask of the rows whose latent bytes are not in `seen`, adding them to it."""
-    array = latents.combine_chunks()
-    width = array.type.byte_width
-    raw = np.frombuffer(array.buffers()[1], dtype=np.uint8, count=len(array) * width, offset=array.offset * width)
-    keep = np.zeros(len(array), dtype=bool)
-    for i, row in enumerate(raw.reshape(len(array), width)):
+    keep = np.zeros(len(latents), dtype=bool)
+    for i, row in enumerate(latents.to_pylist()):
         digest = hashlib.blake2b(row, digest_size=16).digest()
         keep[i] = digest not in seen
         seen.add(digest)
     return keep
 
 
-def shuffle(shards: list[str], resolution: int, out: Path) -> None:
+def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
     rng = np.random.default_rng(SEED)
     latent = f"latent_{resolution}"
-    columns = ["key", "source", "caption", "embedding", latent, "sequence"]
-    fused = pq.read_schema(shards[0])
-    schema = pa.schema([fused.field(c) for c in columns])
-    parts = [out.with_name(f"{out.name}.bucket{b:03d}") for b in range(BUCKETS)]
-    writers = [pq.ParquetWriter(part, schema, compression="none") for part in parts]
+    counts = Counter()
+    for f in files:
+        counts.update(map(tuple, image_sizes(f, resolution).tolist()))
+    fields = pq.read_schema(files[0])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    writers = {}
+    for (h, w), n in sorted(counts.items()):
+        schema = pa.schema([fields.field(c) for c in COLUMNS] + [pa.field(latent, pa.binary(LATENT_CHANNELS * (h // 2) * (w // 2) * 2))])
+        writers[h, w] = [pq.ParquetWriter(out_dir / f"{h}x{w}.part{p:04d}", schema, compression="none") for p in range(math.ceil(n / PART_ROWS))]
     seen: set[bytes] = set()
-    rows = 0
-    for shard in shards:
-        dealt = dropped = 0
-        for batch in pq.ParquetFile(shard).iter_batches(TAKE_ROWS, columns=columns):  # a whole 256 px shard is 3.3 GB of latents: read it in pieces
-            part = pa.Table.from_batches([batch])
-            assert part.schema.equals(schema), shard
-            keep = first_sightings(part[latent], seen)
-            bucket = rng.integers(BUCKETS, size=len(part))
-            for b, writer in enumerate(writers):
-                writer.write_table(part.take(np.flatnonzero(keep & (bucket == b))))
-            dealt, dropped = dealt + keep.sum(), dropped + len(part) - keep.sum()
-        rows += dealt
-        print(f"{shard}: {dealt} rows dealt, {dropped} repeated images dropped", flush=True)
-    for writer in writers:
-        writer.close()
-    tmp = out.with_name(out.name + ".tmp")
-    with pq.ParquetWriter(tmp, schema, compression="none") as writer:
-        for part in parts:
-            table = pq.read_table(part)
-            writer.write_table(table.take(rng.permutation(len(table))), row_group_size=ROW_GROUP)
-            part.unlink()
-    assert pq.ParquetFile(tmp).metadata.num_rows == rows
-    os.replace(tmp, out)
-    print(f"{out}: {rows} rows", flush=True)
+    dealt = Counter()
+
+    def deal(tables: list[pa.Table], sizes: np.ndarray) -> None:
+        table = pa.concat_tables(tables)
+        keep = first_sightings(table[latent], seen)
+        for size, size_writers in writers.items():
+            mine = keep & (sizes == size).all(1)
+            part = rng.integers(len(size_writers), size=len(table))
+            for p, writer in enumerate(size_writers):
+                rows = table.take(np.flatnonzero(mine & (part == p)))
+                writer.write_table(pa.table([rows[c] for c in COLUMNS] + [pc.cast(rows[latent], writer.schema.field(latent).type)], schema=writer.schema))
+            dealt[size] += int(mine.sum())
+        print(f"{sum(dealt.values())} rows dealt; {len(table) - int(keep.sum())} of {len(table)} dropped as repeated images", flush=True)
+
+    tables, sizes = [], []
+    for f in files:
+        source = pq.ParquetFile(f)
+        extra = ["bucket"] if "bucket" in source.schema_arrow.names else []
+        for batch in source.iter_batches(DEAL_ROWS, columns=COLUMNS + [latent] + extra):
+            table = pa.Table.from_batches([batch])
+            sizes.append(image_sizes(f, resolution, table))
+            tables.append(pa.table([table[c] for c in COLUMNS] + [pc.cast(table[latent], pa.binary())], names=COLUMNS + [latent]))  # one schema for both datasets
+            if sum(map(len, tables)) >= DEAL_ROWS:
+                deal(tables, np.concatenate(sizes))
+                tables, sizes = [], []
+    if tables:
+        deal(tables, np.concatenate(sizes))
+    for size_writers in writers.values():
+        for writer in size_writers:
+            writer.close()
+
+    for (h, w), size_writers in writers.items():
+        out = out_dir / f"{h}x{w}.parquet"
+        tmp = out.with_name(out.name + ".tmp")
+        with pq.ParquetWriter(tmp, size_writers[0].schema, compression="none") as writer:
+            for p in range(len(size_writers)):
+                part = out_dir / f"{h}x{w}.part{p:04d}"
+                table = pq.read_table(part)
+                writer.write_table(table.take(rng.permutation(len(table))), row_group_size=ROW_GROUP)
+                part.unlink()
+        assert pq.ParquetFile(tmp).metadata.num_rows == dealt[h, w]
+        if not dealt[h, w]:
+            tmp.unlink()
+            continue
+        os.replace(tmp, out)
+        print(f"{out}: {dealt[h, w]} rows", flush=True)
 
 
 if __name__ == "__main__":

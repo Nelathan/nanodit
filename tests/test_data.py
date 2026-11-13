@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 import pyarrow as pa
@@ -8,7 +9,7 @@ import torch
 
 from nanodit import data
 from nanodit.data import Stream, pad_sequences
-from nanodit.model import NULL_TOKENS, SEQ_DIM, Prompt
+from nanodit.model import NULL_TOKENS, SEQ_DIM
 
 ROOT = Path(__file__).parent.parent
 
@@ -41,109 +42,136 @@ def rows():
     return torch.randn(20, 2, 16, 16).bfloat16(), torch.randn(20, 768).bfloat16(), sequences
 
 
-def shuffle_module(buckets):
+def write_fine(path, latents, buckets, embeddings, sequences, keys):
+    """An encoded Fine-T2I Parquet in the encode_fine schema: a bucket column and variable-size latents."""
+    n = len(latents)
+    table = pa.table({
+        "key": keys, "source": ["f"] * n, "bucket": pa.array(buckets, pa.int8()), "caption": ["c"] * n,
+        "prompt": ["p"] * n, "enhanced_prompt": ["e"] * n, "aesthetic": pa.array([5.0] * n, pa.float32()),
+        "embedding": pa.array([bf16_bytes(e) for e in embeddings], pa.binary(1536)),
+        "sequence": [bf16_bytes(q) for q in sequences],
+        "latent_32": [bf16_bytes(x) for x in latents], "latent_64": [b"x" * 4] * n,
+    })
+    pq.write_table(table, path, row_group_size=3)
+
+
+def shuffle_module():
+    sys.path.insert(0, str(ROOT / "scripts"))
     spec = importlib.util.spec_from_file_location("shuffle", ROOT / "scripts" / "shuffle.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.BUCKETS = buckets  # 20 rows would leave most of 64 buckets empty, which 50k-row shards never do
+    module.PART_ROWS = 4  # several parts per bucket, as 16k-row parts of millions of rows are
+    module.DEAL_ROWS = 5  # dealt in several pieces, across file boundaries
     module.ROW_GROUP = 3  # several row groups per bucket, so the stream sees several per block
-    module.TAKE_ROWS = 5  # a shard is read in several pieces, as a 256 px one must be
     return module
 
 
-def shuffle(tmp_path, rows, buckets):
-    latents, embeddings, sequences = rows
-    module = shuffle_module(buckets)
-    write_shard(tmp_path / "a.parquet", latents[:12], embeddings[:12], sequences[:12], [f"k{i}" for i in range(12)])
-    write_shard(tmp_path / "b.parquet", latents[12:], embeddings[12:], sequences[12:], [f"k{i}" for i in range(12, 20)])
-    out = tmp_path / "shuffled.parquet"
-    module.shuffle([str(tmp_path / "a.parquet"), str(tmp_path / "b.parquet")], 32, out)
-    return out
+WIDE = (28, 36)  # Fine-T2I's bucket 1 (224 x 288 at 256 px) at 32 px
 
 
 @pytest.fixture
-def shuffled(tmp_path, rows):
-    return shuffle(tmp_path, rows, buckets=4)
-
-
-def test_shuffle_keeps_every_row_once_in_a_new_order(shuffled, rows):
+def mixed(tmp_path, rows):
+    """12 + 8 square rows from two fused shards and 6 square plus 6 wide rows from a Fine-T2I file."""
     latents, embeddings, sequences = rows
-    table = pq.read_table(shuffled)
-    assert table.column_names == ["key", "source", "caption", "embedding", "latent_32", "sequence"]  # the other latent and the 768-d sequence stay behind
-    keys = table["key"].to_pylist()
-    assert sorted(keys, key=lambda k: int(k[1:])) == [f"k{i}" for i in range(20)] and keys != sorted(keys, key=lambda k: int(k[1:]))
-    got_latents = data._bf16(table["latent_32"], 2, 16, 16)
-    got_embeddings = data._bf16(table["embedding"], 768)
-    got_sequences = data._sequences(table["sequence"])
-    for key, latent, embedding, sequence in zip(keys, got_latents, got_embeddings, got_sequences):  # each row stays whole
-        i = int(key[1:])
-        assert torch.equal(latent, latents[i]) and torch.equal(embedding, embeddings[i]) and torch.equal(sequence, sequences[i])
-    assert not list(shuffled.parent.glob("shuffled.parquet.*"))  # the buckets and the .tmp are gone
+    write_shard(tmp_path / "a.parquet", latents[:12], embeddings[:12], sequences[:12], [f"k{i}" for i in range(12)])
+    write_shard(tmp_path / "b.parquet", latents[12:], embeddings[12:], sequences[12:], [f"k{i}" for i in range(12, 20)])
+    torch.manual_seed(1)
+    fine = [torch.randn(2, 16, 16).bfloat16() if i % 2 else torch.randn(2, WIDE[0] // 2, WIDE[1] // 2).bfloat16() for i in range(12)]
+    write_fine(tmp_path / "f.parquet", fine, [0 if i % 2 else 1 for i in range(12)], embeddings[:12], sequences[:12], [f"f{i}" for i in range(12)])
+    out = tmp_path / "set"
+    shuffle_module().shuffle([str(tmp_path / n) for n in ("a.parquet", "b.parquet", "f.parquet")], 32, out)
+    return out, fine
 
 
-def test_shuffle_keeps_each_image_once_with_its_first_caption(tmp_path, rows):
+def test_shuffle_writes_each_bucket_once_whole_and_in_a_new_order(mixed, rows):
+    out, fine = mixed
+    latents, embeddings, sequences = rows
+    assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet"]  # parts and .tmp are gone
+    square, wide = pq.read_table(out / "32x32.parquet"), pq.read_table(out / "28x36.parquet")
+    assert square.column_names == ["key", "source", "caption", "embedding", "sequence", "latent_32"]  # the other latent and Fine's spare columns stay behind
+    keys = square["key"].to_pylist()
+    expected = [f"k{i}" for i in range(20)] + [f"f{i}" for i in range(1, 12, 2)]
+    assert sorted(keys) == sorted(expected) and keys != expected
+    assert sorted(wide["key"].to_pylist()) == sorted(f"f{i}" for i in range(0, 12, 2))
+    for key, latent, embedding, sequence in zip(keys, data._bf16(square["latent_32"], 2, 16, 16), data._bf16(square["embedding"], 768), data._sequences(square["sequence"])):
+        i = int(key[1:])  # each row stays whole
+        assert torch.equal(latent, (latents if key[0] == "k" else fine)[i]) and torch.equal(embedding, embeddings[i]) and torch.equal(sequence, sequences[i])
+    for key, latent in zip(wide["key"].to_pylist(), data._bf16(wide["latent_32"], 2, 14, 18)):
+        assert torch.equal(latent, fine[int(key[1:])])
+
+
+def test_shuffle_keeps_each_image_once_with_its_first_caption_across_datasets(tmp_path, rows):
     latents, embeddings, sequences = rows
     write_shard(tmp_path / "a.parquet", latents[[0, 1, 1, 2]], embeddings[[0, 1, 2, 3]], sequences[:4], ["k0", "k1", "k2", "k3"])  # k2 repeats k1's image
-    write_shard(tmp_path / "b.parquet", latents[[0, 4]], embeddings[[10, 11]], sequences[10:12], ["k10", "k11"])  # k10 repeats k0's image
-    out = tmp_path / "shuffled.parquet"
-    shuffle_module(buckets=4).shuffle([str(tmp_path / "a.parquet"), str(tmp_path / "b.parquet")], 32, out)
-    table = pq.read_table(out)
+    write_fine(tmp_path / "f.parquet", latents[[0, 4]], [0, 0], embeddings[[10, 11]], sequences[10:12], ["f10", "f11"])  # f10 repeats k0's image
+    out = tmp_path / "set"
+    shuffle_module().shuffle([str(tmp_path / "a.parquet"), str(tmp_path / "f.parquet")], 32, out)
+    table = pq.read_table(out / "32x32.parquet")
     by_key = dict(zip(table["key"].to_pylist(), data._bf16(table["embedding"], 768)))
-    assert sorted(by_key) == ["k0", "k1", "k11", "k3"]
+    assert sorted(by_key) == ["f11", "k0", "k1", "k3"]
     assert torch.equal(by_key["k0"], embeddings[0]) and torch.equal(by_key["k1"], embeddings[1])
 
 
-def test_rows_are_shuffled_inside_a_bucket(tmp_path, rows):
-    keys = pq.read_table(shuffle(tmp_path, rows, buckets=1))["key"].to_pylist()
-    assert keys != [f"k{i}" for i in range(20)]
+def keys_of(out):
+    """Row identity by latent: {latent bytes: key} over the set."""
+    found = {}
+    for f in out.glob("*.parquet"):
+        t = pq.read_table(f)
+        found.update(zip(t["latent_32"].to_pylist(), t["key"].to_pylist()))
+    return found
 
 
-def epoch(stream, micro_batches):
-    """The micro-batches as copies, since the stream refills its buffers."""
+def stream_keys(stream, micro_batches, by_latent):
+    """The keys of the next micro-batches, each micro-batch from one bucket."""
     batches = []
-    for _ in range(micro_batches):
-        x, prompt = stream.next()
-        batches.append((x.clone(), Prompt(*(a.clone() for a in prompt))))
+    for bucket in stream.draw(micro_batches):
+        x, prompt = bucket.next()
+        assert x.dtype == prompt.pooled.dtype == prompt.tokens.dtype == torch.float32 and x.shape[1:] == bucket.shape
+        batches.append([by_latent[bf16_bytes(row.bfloat16())] for row in x])
     return batches
 
 
-def test_each_pass_streams_every_row_once_and_the_next_pass_in_another_order(shuffled, rows, monkeypatch):
-    latents, embeddings, sequences = rows
-    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 2)  # blocks of up to 6 rows: batches of 4 cross blocks
-    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0)
+def test_a_bucket_streams_every_row_once_per_pass_and_the_next_pass_in_other_blocks(mixed, monkeypatch):
+    out, _ = mixed
+    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 2)  # blocks of up to 6 rows: micro-batches of 2 cross blocks
+    stream = Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0)
+    by_latent = keys_of(out)
+    square = next(b for b in stream.buckets if b.shape == (2, 16, 16))
     passes = []
     for _ in range(2):
         seen = []
-        for x, prompt in epoch(stream, 5):
-            assert x.dtype == prompt.pooled.dtype == prompt.tokens.dtype == torch.float32 and x.shape == (4, 2, 16, 16) and prompt.pooled.shape == (4, 768)
+        for _ in range(13):  # 26 rows
+            x, prompt = square.next()
             for row, emb, tokens, mask in zip(x, *prompt):
-                match = (latents.float() == row).flatten(1).all(1).nonzero()
-                i = match.item()
-                assert len(match) == 1 and torch.equal(embeddings[i].float(), emb)  # its own embedding
-                assert torch.equal(tokens[mask], sequences[i].float()) and not tokens[~mask].any()  # its own tokens, zero past them
-                seen.append(i)
-        assert sorted(seen) == list(range(20))
+                seen.append(by_latent[bf16_bytes(row.bfloat16())])
+                assert mask.sum() >= 2 and not tokens[~mask].any()  # its tokens, zero past them
+        assert sorted(seen) == sorted(k for k in by_latent.values() if k[0] == "k" or int(k[1:]) % 2)
         passes.append(seen)
     assert passes[0] != passes[1]
 
 
-def test_rows_are_shuffled_inside_a_block(shuffled, rows, monkeypatch):
-    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 100)  # the whole file is one block, so only rows can move
-    stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=0)
-    first, second = (torch.cat([x for x, _ in epoch(stream, 5)]) for _ in range(2))
-    assert not torch.equal(first, second) and torch.equal(first.sort(0).values, second.sort(0).values)
+def test_buckets_are_drawn_by_their_rows_and_a_micro_batch_is_one_bucket(mixed):
+    out, _ = mixed
+    stream = Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0)
+    assert sorted(b.rows for b in stream.buckets) == [6, 26]
+    draws = [b.shape for b in stream.draw(4000)]
+    assert abs(draws.count((2, 14, 18)) / 4000 - 6 / 32) < 0.02
+    for keys in stream_keys(stream, 20, keys_of(out)):
+        assert len({k[0] == "k" or int(k[1:]) % 2 for k in keys}) == 1  # square or wide, never both
 
 
-def test_the_buffers_are_reused_and_the_order_follows_the_seed(shuffled):
-    def first_rows(seed):
-        stream = Stream(str(shuffled), resolution=32, batch=4, device=torch.device("cpu"), dtype=torch.float32, seed=seed)
-        x1, _ = stream.next()
-        pointer = x1.data_ptr()
-        rows = [stream.next()[0][:, 0, 0, 0].tolist() for _ in range(4)]
-        assert stream.next()[0].data_ptr() == pointer
-        return rows
+def test_the_buffers_are_reused_and_the_order_follows_the_seed(mixed):
+    out, _ = mixed
+    by_latent = keys_of(out)
 
-    assert first_rows(0) == first_rows(0) != first_rows(1)
+    def first_keys(seed):
+        stream = Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=seed)
+        pointers = {id(b): b.next()[0].data_ptr() for b in stream.buckets}
+        keys = stream_keys(stream, 12, by_latent)
+        assert all(b.next()[0].data_ptr() == pointers[id(b)] for b in stream.buckets)
+        return keys
+
+    assert first_keys(0) == first_keys(0) != first_keys(1)
 
 
 def test_sequences_pad_to_the_longest_caption_and_at_least_the_null_prompt():

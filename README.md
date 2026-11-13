@@ -21,7 +21,7 @@ It is a research log as much as a codebase: every design choice is in `docs/SPEC
 128 px only so far. The model, objective, sampler, data stream and training harness are built and tested; the
 architecture was settled by short paired arms (3000 to 6000 steps at width 768, depth 12, about 123M parameters). No
 long run of the current architecture exists yet; the longest run, five epochs of an earlier one, is in FACTS. The
-256 px stage and the second dataset (Fine-T2I) are encoded in part and not trained on.
+256 px stage and the second dataset (Fine-T2I) are not trained on yet.
 
 ![16 fixed prompts after 6000 steps at 128 px](docs/log/2026-11-07-samples/arch_cross_6k.png)
 
@@ -64,13 +64,15 @@ Training reads precomputed rows, not images. The pipeline, each step a script wi
 
 1. `precompute.py`: text-to-image-2M shards to one Parquet per shard (Primal latents at 128 and 256 px, the pooled
    embedding, the 512-d token states).
-2. `shuffle.py`: the shards into one Parquet per resolution in uniformly random row order, each image once.
-3. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
-4. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
+2. `stage_fine.py`, `encode_fine.py`: Fine-T2I into aspect-bucket crops, then into the same encodings.
+3. `shuffle.py`: both datasets into one training set per resolution, one Parquet per aspect bucket in uniformly
+   random row order, each image once.
+4. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
+5. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
 Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is
-about 160 GB and is not part of the repo.
+not part of the repo.
 
 ## License
 

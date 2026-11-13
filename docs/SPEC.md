@@ -8,8 +8,8 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 
 | Item | Decision |
 |---|---|
-| Dataset | `jackyhate/text-to-image-2M`, the `data_512_2M` WebDataset shards (512×512 crops, ~2M pairs) |
-| Subset | all 47 shards; trials train on the first 16 |
+| Dataset | `jackyhate/text-to-image-2M`, the `data_512_2M` WebDataset shards (512×512 crops, ~2M pairs), and `ma-xu/fine-t2i`, all five subsets (each image scaled to cover the nearest of seven aspect buckets and centre-cropped, each row captioned by its `prompt`) |
+| Subset | all 47 shards and all of Fine-T2I; trials train on the same set as long runs |
 | Resolutions | 128 px and 256 px, each a Lanczos resize of the 512 crop. 512 px skipped for now |
 | Captions | full caption, no truncation |
 | Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
@@ -17,11 +17,10 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |
 | Token states | the encoder's 512-d states of the caption's tokens after its final norm, before the projection to 768; `<bos>` and `<eos>` dropped, unpadded |
 | VAE | `ostris/primal_vae`, variant `2x2`: 2 channels at 2× downsample, deterministic, unit-normal per image and channel, no scale/shift factors. Image sides must be multiples of 16 |
-| Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16. Streamed per source shard: download, encode, write one Parquet file per shard (key, source, caption, embedding, token states, both latents), delete the shard |
-| Training data | the shards shuffled into one Parquet per resolution, rows in uniformly random order, each image once (a repeated latent keeps its first row in shard order); adding shards means shuffling again. Training streams it in blocks of row groups, each pass visiting the blocks in a new random order and shuffling rows within a block |
-| Storage | latents 16 KB (128 px) + 64 KB (256 px) per image, ≈160 GB for 2M; embeddings 1.5 KB per image, ≈3 GB |
+| Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16. Streamed per source shard or tar: download, encode, write one Parquet file per shard (key, source, caption, embedding, token states, both latents; a Fine-T2I file also its bucket), delete the download and any intermediate copy |
+| Training data | both datasets merged into one set per resolution: one Parquet per aspect bucket, its rows in uniformly random order, each image once across both datasets (a repeated latent keeps its first row, text-to-image-2M first); new data means shuffling again. Each micro-batch is one bucket, drawn with probability proportional to its rows; a batch's micro-batches weigh by their tokens. A bucket streams in blocks of row groups, dealt anew at random every pass, the blocks visited in random order and rows shuffled within a block. The order follows the run's seed |
 | Augmentation | none |
-| Shapes | square crops per stage, so shapes are static (CUDA-graph friendly via a preallocated input buffer) |
+| Shapes | seven aspect buckets per stage, one preallocated input buffer per bucket. At 128 px: 128×128, 112×144, 144×112, 112×160, 160×112, 96×176, 176×96 |
 
 ## 2. Tokens
 

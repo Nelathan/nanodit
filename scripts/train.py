@@ -1,4 +1,4 @@
-"""Train the DiT on a shuffled Parquet of precomputed rows.
+"""Train the DiT on a training set of `shuffle.py`: one shuffled Parquet of precomputed rows per aspect bucket.
 
 usage: train.py CONFIG.toml
 """
@@ -34,7 +34,7 @@ class Config:
     name: str
     runs_dir: str
     resolution: int
-    dataset: str  # one Parquet from scripts/shuffle.py
+    dataset: str  # a training set directory from scripts/shuffle.py, one Parquet per aspect bucket
     null_embedding: str
     depth: int
     width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden MLP_RATIO times it
@@ -248,16 +248,20 @@ class Interval:
 
 
 def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Backward over `micro_batches` micro-batches without stepping. The fallback parameters end with the
-    mean gradient over all of them (UsuiTrack ignores gradient scale). Returns the mean flow loss and the
-    per-sample losses, t and clean-latent energy (mean square) of every sample."""
+    """Backward over `micro_batches` micro-batches without stepping, each micro-batch's loss weighted by its share of
+    the batch's tokens, so the fallback parameters end with the gradient of the mean over every latent element of the
+    batch (UsuiTrack ignores gradient scale). Returns that mean flow loss and the per-sample losses, t and clean-latent
+    energy (mean square) of every sample."""
+    buckets = stream.draw(micro_batches)
+    sizes = [math.prod(b.shape) for b in buckets]  # latent elements per sample, proportional to its tokens
+    weights = [size / sum(sizes) for size in sizes]
     losses, per_samples, ts, energies = [], [], [], []
-    for _ in range(micro_batches):
-        x, prompt = stream.next()
+    for bucket, weight in zip(buckets, weights):
+        x, prompt = bucket.next()
         loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma)
-        (loss / micro_batches).backward()
-        losses.append(loss.detach()), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
-    return torch.stack(losses).mean(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
+        (loss * weight).backward()
+        losses.append(loss.detach() * weight), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
+    return torch.stack(losses).sum(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
 
 
 def main(config_path: str) -> None:

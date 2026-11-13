@@ -49,7 +49,7 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 ### B6. The data sets and the encode
 
-Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I is staged and encoded in part; the per-bucket shuffle and stream are not built.
+Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I's last two subsets are being encoded; the merged set per aspect bucket and its stream are built (archive 2026-11-13-merged-training-set), the 128 px set waits on the encode. The bucket set is open in the topic.
 
 ## Group C. LR sweep and step budget
 

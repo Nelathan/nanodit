@@ -1,8 +1,8 @@
-# The trunk model at d768x12 on the 16-shard trial set, 6000 steps: the reference for trunk arms. Fields: scripts/train.py Config.
+# The trunk model at d768x12 on the merged 128 px set, 6000 steps: the reference for trunk arms. Fields: scripts/train.py Config.
 name = "128_d768x12_6k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
-dataset = "/run/media/djg/vel-ssd/tiny-dit/trial_128_seq512_shuffled_0-15.parquet"
+dataset = "/run/media/djg/vel-ssd/tiny-dit/set_128"
 null_embedding = "/mnt/mars/ai/tiny-dit/precomputed/null_embedding.safetensors"
 depth = 12
 width = 768

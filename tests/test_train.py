@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 import math
+import shutil
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, mic
     torch.manual_seed(0)
     for name, n in (("s", 16), ("eval", 5)):  # the training set and the eval set are both shuffled files
         write_shard(tmp_path / f"{name}_shard.parquet", torch.randn(n, 2, 16, 16).bfloat16(), torch.randn(n, 768).bfloat16(), [torch.randn(2 + i % 4, SEQ_DIM).bfloat16() for i in range(n)])
-        shuffle_module(buckets=1).shuffle([str(tmp_path / f"{name}_shard.parquet")], 32, tmp_path / f"{name}.parquet")
+        shuffle_module().shuffle([str(tmp_path / f"{name}_shard.parquet")], 32, tmp_path / name)
     save_file({"null": torch.randn(768), "null_tokens": torch.randn(NULL_TOKENS, SEQ_DIM)}, tmp_path / "null.safetensors")
     (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
@@ -44,7 +45,7 @@ def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, mic
 name = "smoke"
 runs_dir = "{tmp_path / 'runs'}"
 resolution = 32
-dataset = "{tmp_path / 's.parquet'}"
+dataset = "{tmp_path / 's'}"
 null_embedding = "{tmp_path / 'null.safetensors'}"
 depth = 2
 width = 512
@@ -67,7 +68,7 @@ eval_prompts = "prompts.txt"
 eval_seed = 42
 guidance = 2.0
 sampler_steps = 2
-eval_set = "{tmp_path / 'eval.parquet'}"
+eval_set = "{tmp_path / 'eval' / '32x32.parquet'}"
 wandb_project = "test"
 """)
     return config
@@ -291,21 +292,28 @@ def test_eval_and_checkpoint_fall_on_a_record(train, tmp_path, monkeypatch):
 def test_batch_must_be_a_multiple_of_micro_batch(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
     config = write_config(tmp_path, steps=1, eval_every=5, batch=6, micro_batch=4)
-    (tmp_path / "s.parquet").unlink()  # checked before the dataset is read
+    shutil.rmtree(tmp_path / "s")  # checked before the dataset is read
     with pytest.raises(ValueError, match="multiple"):
         train.main(str(config))
     assert not (tmp_path / "runs" / "smoke").exists()
 
 
 class FixedBatches:
-    """Hands out the given micro-batches in order, like the Stream does for one step."""
+    """Hands out the given micro-batches in order, like the Stream's buckets do for one step."""
 
     def __init__(self, chunks):
-        self.chunks, self.i = chunks, 0
+        self.chunks = chunks
+
+    def draw(self, micro_batches):
+        return [FixedBucket(*self.chunks[i % len(self.chunks)]) for i in range(micro_batches)]
+
+
+class FixedBucket:
+    def __init__(self, x, prompt):
+        self.x, self.prompt, self.shape = x, prompt, tuple(x.shape[1:])
 
     def next(self):
-        self.i += 1
-        return self.chunks[(self.i - 1) % len(self.chunks)]
+        return self.x, self.prompt
 
 
 def fixed_flow_loss(model, x, prompt, shift, sigma):
@@ -340,6 +348,18 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     assert torch.allclose(loss1, loss4, rtol=0.02)
     for full, accumulated in zip(grads1, grads4):
         assert full.abs().max() > 0 and (full.float() - accumulated.float()).norm() < 0.03 * full.float().norm()
+
+
+def test_micro_batches_of_different_buckets_weigh_by_their_tokens(train, monkeypatch):
+    monkeypatch.setattr(train, "flow_loss", fixed_flow_loss)
+    g = torch.Generator().manual_seed(0)
+    small, large = torch.randn(2, 2, 16, 16, generator=g), torch.randn(2, 2, 16, 32, generator=g)  # 4 and 8 tokens
+    prompt = random_prompt(2, g)
+    torch.manual_seed(1)
+    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    open_gates(model)
+    loss, per_sample, _, _ = train.accumulate_gradients(model, FixedBatches([(small, prompt), (large, prompt)]), 2, shift=1.0, sigma=1.0)
+    assert torch.allclose(loss, per_sample[:2].mean() / 3 + per_sample[2:].mean() * 2 / 3)  # the mean over every latent element
 
 
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
