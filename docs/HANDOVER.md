@@ -1,11 +1,11 @@
 # Handover
 
-State on 2026-11-13, after the re-encode of the captions without the prefix. `PLAN.md` carries the questions,
+State on 2026-11-13, after the merged training set and the reference on it. `PLAN.md` carries the questions,
 `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 80 tests
 pass (`uv run python -m pytest tests/`, about 100 s). The GPU is free.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a gated
@@ -42,10 +42,9 @@ below about 0.003 in caption loss is within what one seed can say.
    the cost per aligned step with online targets. No priming code is on the trunk (archive 2026-11-12).
 8. **Fine-T2I and the merged set** (`topics/datasets-and-encode.md`, archive 2026-11-13-merged-training-set):
    `stage_fine.py`, `encode_fine.py` (deletes each staged Parquet once encoded), `shuffle.py` (both datasets into one
-   Parquet per aspect bucket, deduplicated), `Stream` (a bucket per micro-batch, token-weighted accumulation). Curated
-   and both enhanced-prompt subsets are encoded (3.36M rows); the original-prompt subsets (1.69M random resolution on
-   luna, 1.31M square written to mars through a symlink in `fine/encoded/`) are encoding since 2026-11-13 09:40,
-   log `fine/encode_original_2026-11-13.log`, `random exit` and `square exit` lines at the ends.
+   Parquet per aspect bucket, deduplicated), `Stream` (a bucket per micro-batch, token-weighted accumulation). All five Fine-T2I subsets are encoded; the
+   merged set `set_128` (8.24M rows after dedup, seven buckets) is built on vel-ssd and the reference trains on it (log
+   2026-11-13-reference-6k-merged-set).
 9. **The captions without the prefix** (archive 2026-11-12-no-prefix): every stored text column and the null
    embedding re-encoded on 2026-11-13 (FACTS, the caption-prefix line).
 
@@ -56,15 +55,12 @@ below about 0.003 in caption loss is within what one seed can say.
     Level in loss with cross plus adaLN at 6000 steps.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-- **The reference** `configs/128_d768x12_6k.toml` ran on the trial set: 1.4867 at 6000 steps, accepted unannealed
-  (log 2026-11-13-reference-6k-constant-lr). Its `dataset` now names the merged set `set_128` on vel-ssd, which does
-  not exist yet. Next: when the encode ends, `shuffle.py` over the 47 fused shards then every Fine-T2I encoded Parquet,
-  delete `trial_128_seq512_shuffled_0-15.parquet` and the smoke set
-  `smoke_set/`, run the reference again on the set.
-- **Disk** (2026-11-13): luna 210 GB free, mars 459 GB, vel-ssd 536 GB. The staged copies of the encoded Fine-T2I
-  subsets and the old pre-fused `128_shuffled_0-46.parquet` are deleted; `encode_fine.py` deletes each staged
-  Parquet once encoded. The 128 px set is estimated at about 430 GB, on vel-ssd. No off-site backup: a lost source is pulled
-  again.
+- **The reference** `configs/128_d768x12_6k.toml` on the merged set: 1.4905 at 6000 steps, the baseline for arms
+  (log 2026-11-13-reference-6k-merged-set); on the earlier trial set it reached 1.4867. The trial set and the smoke set
+  are deleted.
+- **Disk** (2026-11-13): luna 89 GB free, mars 318 GB, vel-ssd 198 GB. The merged 128 px set is 380 GB on vel-ssd. A
+  256 px set needs its own build, and `shuffle.py` casts the latent to `binary`, which overflows 2 GB per chunk at
+  256 px: it needs `large_binary` first. No off-site backup: a lost source is pulled again.
 - **usuitrack**: a git dependency at `lab` `c13ed91` (pushed): per-group `step_rule`, `frame_init` (`range_finder`
   default, `random` here) and `norm_bounds`. Whether Usui needs `eigh` at all is PLAN A3 here and R2 in usuitrack's
   PLAN. Moving `lab` also moved ai-toolkit's Anima lane, which runs the `../usuitrack` checkout: its first frame is
