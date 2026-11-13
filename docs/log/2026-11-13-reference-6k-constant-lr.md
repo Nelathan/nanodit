@@ -3,7 +3,7 @@
 `configs/128_d768x12_6k.toml` at commit `ff00690`: d768x12, conv-conv-conv-attention, cross attention in every
 attention block, usui lr 4e-3 constant after 376 warmup steps, every matrix under its init-norm ceiling, the trial set
 (text-to-image-2M shards 0–15) re-encoded without the caption prefix. 6000 steps of batch 256, seed 41, 40 minutes.
-Run directory `/mnt/mars/ai/tiny-dit/runs/128_d768x12_6k`.
+Run directory `/mnt/mars/ai/tiny-dit/runs/128_d768x12_6k_trialset` (renamed from `128_d768x12_6k`, the name it ran and logged to wandb under).
 
 Caption eval loss on the Lunara eval set (`score.jsonl`), against `128_d768x12_gdn_6k` (the earlier trunk reference:
 lr 2e-3 decaying linearly over the 6000 steps, norms pinned, prefixed captions, no cross attention):
