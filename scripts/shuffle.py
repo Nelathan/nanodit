@@ -78,7 +78,7 @@ def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
     dealt = Counter()
 
     def deal(tables: list[pa.Table], sizes: np.ndarray) -> None:
-        table = pa.concat_tables(tables)
+        table = pa.concat_tables(tables).combine_chunks()  # take on a chunked column copies the whole column per call
         keep = first_sightings(table[latent], seen)
         for size, size_writers in writers.items():
             mine = keep & (sizes == size).all(1)
