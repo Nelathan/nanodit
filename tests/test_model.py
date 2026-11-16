@@ -229,9 +229,9 @@ def conv_block_change(prompt, poke=None):
     return first, seen["stream_out"] - seen["stream_in"]
 
 
-def test_a_conv_block_writes_every_channel(prompt):
+def test_a_conv_block_writes_the_meta_channels_only(prompt):
     change, _ = conv_block_change(prompt)
-    assert change[..., TOKEN_DIM:].abs().max() > 0 and change[..., :TOKEN_DIM].abs().max() > 0
+    assert change[..., TOKEN_DIM:].abs().max() > 0 and not change[..., :TOKEN_DIM].any()
 
 
 def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):

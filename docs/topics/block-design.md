@@ -50,7 +50,7 @@ Each comes from that list unless noted. Status: open, queued, running, read.
 5. **Sparse layout**: n conv-only layers, then one layer with cross and self attention; if self-attention is cheap, more often.
    Open, after 4.
 6. **Conv at 3/4 of the blocks is the edge and preferred** (a faster model allows more layers). Read: loss level at 3000, 1.32× faster.
-   The conv is the basic form; look at how GDN2 does its short conv, and allow writing to all channels once the model is smart enough.
+   The conv is the basic form again, meta channels only (PLAN G10, 2026-11-16).
 7. **adaLN stays for the conv layers.** Pooled-embedding ada is redundant once tokens arrive through cross attention but cheaper than
    the alternative; the conv blocks already take their modulation rows, so it works as is.
 8. **PaLM-style parallel block**: the MLP in parallel with the attention (one norm, one modulation), read for speed and loss.

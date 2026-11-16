@@ -16,6 +16,7 @@ import torch
 import wandb
 from PIL import Image
 from safetensors.torch import load_file, save_file
+from usuitrack.polar import unit_polar
 
 from nanodit.data import Stream, pad_sequences, read_rows
 from nanodit.model import BlockType, DiT, Prompt
@@ -70,6 +71,12 @@ def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     null = load_file(cfg.null_embedding)
     layout = tuple(BlockType(**cfg.block_types[name]) for name in cfg.layout)
     return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, layout, cfg.pooled_ada).to(device, dtype)
+
+
+def compile_blocks(model: DiT) -> None:
+    """Each block compiled on its own. Call after Molegrad has swapped in its Linears, so the graphs trace them."""
+    for block in model.blocks:
+        block.compile()
 
 
 def load_checkpoint(model, optimizers, path: Path) -> int:
@@ -148,23 +155,26 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
 
 @torch.no_grad()
 def weight_reads(model, matrix) -> dict:
-    """The tracked matrices' global Frobenius norm and its ratio to the init norm, and per role the stable rank
-    ||W||_F^2 / sigma_max^2 over the shorter side, averaged over the role's blocks (SPEC §8). A role is the
-    parameter's name without its block index, prefixed by the block's mixer, since conv and attention both have `out`."""
+    """The tracked matrices' global Frobenius norm and its ratio to the init norm; per role the stable rank
+    ||W||_F^2 / sigma_max^2 over the shorter side, averaged over the role's blocks; and per role, in block order, each
+    matrix's norm of its step before the lift, ||unit_polar(moment)||, from the moment as held: 1 for a moment that fills its planes,
+    sqrt(k / s) for one that fills k of s (SPEC §8). A role is the parameter's name without its block index, prefixed
+    by the block's mixer, since conv and attention both have `out`."""
     names = {id(p): n for n, p in model.named_parameters()}
     kinds = {f"blocks.{i}.": "conv." if block.is_conv else "attn." for i, block in enumerate(model.blocks)}
-    total, init, ranks = 0.0, 0.0, {}
+    total, init, ranks, steps = 0.0, 0.0, {}, {}
     for group in matrix.param_groups:
         for param in group["params"]:
             weight, name = param.float(), names[id(param)].removesuffix(".weight")
             frobenius = weight.square().sum()
             total += frobenius.item()
-            init += matrix.state[param]["init_norm"] ** 2
+            init += float(matrix.state[param]["init_norm"]) ** 2
             stable = (frobenius / torch.linalg.matrix_norm(weight, ord=2).square()).item() / min(weight.shape)
             prefix = next((p for p in kinds if name.startswith(p)), "")
             role = kinds[prefix] + name.removeprefix(prefix) if prefix else name
             ranks.setdefault(role, []).append(stable)
-    return dict(norm=math.sqrt(total), norm_ratio=math.sqrt(total / init), stable_rank={role: sum(v) / len(v) for role, v in ranks.items()})
+            steps.setdefault(role, []).append(torch.linalg.vector_norm(unit_polar(matrix.state[param]["moment"].float())).item())
+    return dict(norm=math.sqrt(total), norm_ratio=math.sqrt(total / init), stable_rank={role: sum(v) / len(v) for role, v in ranks.items()}, step_norm=steps)
 
 
 def append_jsonl(path: Path, record: dict) -> None:
@@ -199,7 +209,10 @@ def wandb_scores(scores: dict) -> dict:
 
 
 def wandb_weights(weights: dict) -> dict:
-    return {"weights/norm": weights["norm"], "weights/norm_ratio": weights["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in weights["stable_rank"].items()}
+    """The weight reads, each role's step norms averaged over its blocks, as the stable ranks are; score.jsonl keeps
+    every matrix's."""
+    return ({"weights/norm": weights["norm"], "weights/norm_ratio": weights["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in weights["stable_rank"].items()}
+            | {f"step_norm/{role}": sum(v) / len(v) for role, v in weights["step_norm"].items()})
 
 
 def save_checkpoint(model, optimizers, step: int, run_dir: Path) -> None:
@@ -283,8 +296,7 @@ def main(config_path: str) -> None:
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     optimizers = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
     start = load_checkpoint(model, optimizers, Path(cfg.init_from)) if cfg.init_from else 0
-    for block in model.blocks:  # after Molegrad has swapped in its Linears, so the compiled graphs trace them
-        block.compile()
+    compile_blocks(model)
 
     end = 1.0 if cfg.anneal_to is None else cfg.anneal_to / cfg.usui_lr  # the fallback falls by the same factor
 

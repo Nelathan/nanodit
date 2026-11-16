@@ -84,8 +84,8 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 
 class Block(nn.Module):
-    """A conv block mixes tokens over their 3x3 neighbourhood on the token grid: it replaces each token's state by a
-    gated update (GDN2's decoupled forget and write gates, diagonal). An attention block mixes with gated grouped-query
+    """A conv block mixes tokens by a depthwise 3x3 conv over the token grid and writes only the meta channels, so the
+    image channels pass it unchanged. An attention block mixes with gated grouped-query
     attention, then reads the caption's token states through a cross attention, grouped-query and without RoPE, that
     takes no adaLN, only a zero-initialised gate per channel."""
 
@@ -98,10 +98,9 @@ class Block(nn.Module):
         self.is_conv = kind.mixer == "conv"
         self.table = nn.Parameter(torch.zeros(N_MOD, width))
         if self.is_conv:
-            self.gdn_proj = nn.Linear(width, 4 * width, bias=False)  # value, current state, forget gate, write gate
-            self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)  # on the value
-            self.out = nn.Linear(width, width, bias=False)
-            self.conv_norm = nn.RMSNorm(width)
+            self.conv = nn.Conv2d(width, width, 3, padding=1, groups=width, bias=False)
+            self.out = nn.Linear(width, width - TOKEN_DIM, bias=False)  # into the meta channels
+            self.conv_norm = nn.RMSNorm(width - TOKEN_DIM)
         else:
             self.qkv = nn.Linear(width, width + 2 * self.kv_heads * HEAD_DIM, bias=False)
             self.gate = nn.Linear(width, width, bias=False)
@@ -121,23 +120,14 @@ class Block(nn.Module):
         self.w_up = nn.Linear(width, hidden, bias=False)
         self.w_down = nn.Linear(hidden, width, bias=False)
 
-    def grid_conv(self, y: Tensor, h: int, w: int) -> Tensor:
-        B, N, _ = y.shape
-        return self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
-
-    def gdn_mix(self, y: Tensor, h: int, w: int) -> Tensor:
-        """The update d = wr r - f s of the token's own state s, with r the depthwise 3x3 read of the value over the
-        neighbourhood and the forget gate f and write gate wr separate per channel."""
-        value, state, forget, write = self.gdn_proj(y).chunk(4, dim=-1)
-        return torch.sigmoid(write) * F.silu(self.grid_conv(value, h, w)) - torch.sigmoid(forget) * state
-
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], text: Tensor, mask: Tensor, h: int, w: int) -> Tensor:
         B, N, _ = x.shape
         shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
         if self.is_conv:
-            x = x + gate_a[:, None] * self.conv_norm(self.out(self.gdn_mix(y, h, w)))
+            mixed = self.conv(y.transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
+            x = x + F.pad(gate_a[:, None, TOKEN_DIM:] * self.conv_norm(self.out(mixed)), (TOKEN_DIM, 0))  # zero on the image channels
         else:
             kv = self.kv_heads * HEAD_DIM
             q, k, v = self.qkv(y).split([self.width, kv, kv], dim=-1)

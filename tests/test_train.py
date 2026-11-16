@@ -117,8 +117,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert all(len(r["loss_by_t"]) == 10 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
     # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (FACTS, GPU smoke runs);
     # random frames: a matrix behind a still-closed zero gate reads capture 0, which pulls the mean down in a 3-step run
-    assert all(0 < r["usui"]["grad_capture"] < 1.5 for r in log)
-    assert "tangent_live_fraction" in log[1]["usui"]
+    assert all(0 < r["usui"]["grad_capture_probe"] < 1.5 for r in log)
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\na cat\n"
     assert [r["lr_usui"] for r in log] == [3e-3, 3e-3] and [r["lr_fallback"] for r in log] == [1e-3, 1e-3]  # the last step's, past warmup 2
 
@@ -145,13 +144,18 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
         assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_caption"] == s["loss_caption"]
         assert data["eval_r2_caption_by_t/q0.2-0.4"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
-        weights = {"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
+        weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
+                   | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
         assert len(data) == 2 + 2 * 5 + len(weights)  # the two means, the loss and R² in fifths, the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])
         assert all(0 < v <= 1 for v in s["weights"]["stable_rank"].values())
+        # every matrix's step before the lift, by role in block order: a unit polar factor has norm at most 1
+        assert s["weights"]["step_norm"].keys() == s["weights"]["stable_rank"].keys()
+        assert all(0 <= v <= 1 + 1e-3 for values in s["weights"]["step_norm"].values() for v in values)
+        assert s["weights"]["step_norm"]["ada.1"][0] > 0  # the shared projection steps from the first step
     for s in scores:
         assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["r2_caption_by_t"]) == 10 and "loss_null" not in s
 

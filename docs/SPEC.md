@@ -35,14 +35,14 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a gated state update (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a depthwise conv that writes only the meta channels (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
 
 | Component | Decision |
 |---|---|
 | Width | 768 |
-| Depth | 12 layers, the baseline for trials, not final: the model grows in depth (PLAN G1) |
+| Depth | 24 layers; the depth of a long run is open (PLAN G1) |
 | Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer |
-| Mixer | After modulation one Linear projects a value, the token's state, a forget gate and a write gate (each of width); the update is `σ(write) ⊙ silu(dwconv3×3(value)) − σ(forget) ⊙ state` (GDN2's decoupled gates in diagonal form); an output Linear of width → width writes every channel, then a branch norm and the gate |
+| Mixer | A depthwise 3×3 conv over the modulated input, then an output Linear of width → width − 128 into the meta channels, a branch norm and the gate; the conv blocks add nothing to the 128 image channels |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
 | Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
@@ -76,7 +76,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Text projection 768→width | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption, learned from there; the null tokens start as its `<bos>` and `<eos>` states | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
-| Conv block projection, depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
+| Conv block depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linear on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |
@@ -89,10 +89,10 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 ## 6. Optimizer: UsuiTrack
 
 - Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at the norm it has at its first step (Usui's `norm_bounds = (None, 1)`): each matrix lives in the ball of its init radius, set by its init (§5), with no floor and no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
-- Frame size: one rank fraction for every tracked matrix.
+- Frame size: one rank fraction for every tracked matrix. Every matrix is framed on its input side (Usui's default `side = "right"`).
 - Frames drawn at random when the optimizer is built (Usui's group key `frame_init = "random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
 - Linear LR warmup on both optimizers, then a constant lr. An anneal is a run of its own, continued from a checkpoint: Usui's lr falls by a cosine to 1e-5 over at most one epoch, the fallback's by the same factor.
-- Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`.
+- Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`, at its default betas and without weight decay.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
 
@@ -108,5 +108,5 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little), with R² = 1 − loss·t²/E, E the mean square of the clean latents. The F loss is the clean-latent error over t, so R² is the share of the latents' energy the prediction recovers from the noisy input: 0 is no better than predicting zero, 1 is exact. It falls with t by construction (more noise, less to recover), so it is read across steps at one t, not across t. Ten equal-width buckets in the records; wandb shows five (each the pooled pair).
 - Score at every eval: the loss on an eval set never trained on, with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t.
-- At every eval, of the tracked matrices: the global Frobenius norm and its ratio to the init norm, and per role (the parameter name without the block index, prefixed by the block's mixer) the stable rank `‖W‖²_F / σ²_max` over the shorter side, averaged over the role's blocks.
+- At every eval, of the tracked matrices: the global Frobenius norm and its ratio to the init norm, and per role (the parameter name without the block index, prefixed by the block's mixer) the stable rank `‖W‖²_F / σ²_max` over the shorter side, averaged over the role's blocks; and per role the norm of each matrix's step before the lift, `‖unit_polar(moment)‖`, averaged over the role's blocks.
 - Logs: plain JSONL files, the record: one line per `log_every` steps, the reads averaged over them on the GPU. The same values and the eval grid stream to wandb for live curves.

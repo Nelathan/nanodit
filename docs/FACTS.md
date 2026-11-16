@@ -117,6 +117,12 @@ Reads of the earlier models (width 512 with a final linear, then the slice reado
 - `128_2e-3_0-10_10ep`, the first run on the stream, trained at 746–846 img/s per 100-step record up to step 3700 and 847–862 from step 3800 to the end, against about 850 for `128_fixed_2e-3_b099_1k`. The slow records run past the first pass (step 2148), so a cold page cache does not explain them. The agent session's CPU test runs overlapped part of them (the suite at 22:25, about step 3400); what else ran is not recorded.
 - Every run above it drew its batches with replacement from shards 0–3 (about 200k rows); a run on the stream sees each of 550k rows once per pass. Losses do not compare across that line without saying so.
 
+## Step time at d768x24 (2026-11-16)
+
+`scripts/probe_step.py configs/128_d768x24_1ep.toml`, usuitrack `92b23bc`, batch 256 as 2 × 128: 429.5 ms per step
+(596 img/s), forward + backward 363.6 ms, UsuiTrack step 57.6 ms for 131 matrices, fallback 0.9 ms, peak 7.9 GiB; the
+GPU busy about 397 ms of the step. `log/2026-11-16-step-profile-d24.md`.
+
 ## Sweep throughput and host syncs (2026-11-02)
 
 `128_sweep_lr2e-3` and `lr4e-3` (tiny-dit `78fded7`, usuitrack `zero-init` worktree): 560–585 img/s at batch 128 as 2 × 64, so about 222 ms per step. d512/depth 12 trains at about 13.7 GFLOP per image (analytic, 3 × forward), so about 7.9 TFLOP/s; the RTX 4070 Super's bf16 tensor peak with fp32 accumulate is about 35.5 TFLOP/s (spec figure, not measured). `nvidia-smi` during `lr4e-3`: 99 W, utilization sampled at 40–84 %.

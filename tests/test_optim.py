@@ -2,6 +2,7 @@ import copy
 
 import torch
 from conftest import PAIR, open_gates
+from usuitrack.frame import rank
 
 from nanodit.data import pad_sequences
 from nanodit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
@@ -19,18 +20,7 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
     assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.0.conv_norm.weight", "blocks.1.mlp_norm.weight"} <= adam
     assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
-    assert {(g["step_rule"], g["frame_init"], g["norm_bounds"]) for g in matrix.param_groups} == {("trust", "random", (None, 1.0))}
-
-
-def test_residual_stream_output_matrices_track_their_left_side():
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
-    matrix, _ = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
-    names = {id(p): n for n, p in model.named_parameters()}
-    side = {names[id(p)]: g["side"] for g in matrix.param_groups for p in g["params"]}
-    for name in ("blocks.0.out.weight", "blocks.1.w_down.weight", "patch_embed.weight"):
-        assert side[name] == "left"
-    for name in ("blocks.1.qkv.weight", "blocks.0.w_up.weight", "ada.1.weight"):
-        assert side[name] == "auto"
+    assert [(g["side"], g["step_rule"], g["frame_init"], g["norm_bounds"]) for g in matrix.param_groups] == [("right", "trust", "random", (None, 1.0))]
 
 
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
@@ -44,9 +34,9 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     change = {n: ((model.get_parameter(n).float() - before.float()).norm() / before.float().norm()).item() for n, before in matrices.items()}
     # F = x_t at init: the loss reaches the shared projection through the gate rows, and nothing else, since the
     # patch embed fills meta channels that no gate lets into F yet; every other tracked matrix sits behind a zero
-    # gate: its gradient is exactly zero, so its random frame catches nothing and it does not move
-    framed = {n for n, p in model.named_parameters() if "frame" in optimizers[0].state.get(p, {})}
-    assert len(matrices) > 10 and framed == set(matrices)
+    # gate: its gradient is exactly zero, so its random frame (or its full space) catches nothing and it does not move
+    stepped = {n for n, p in model.named_parameters() if "moment" in optimizers[0].state.get(p, {})}
+    assert len(matrices) > 10 and stepped == set(matrices)
     assert change["ada.1.weight"] > 0 and all(c == 0 for n, c in change.items() if n != "ada.1.weight")
     # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
     # (only the first 128 channels, the ones F reads, have an upstream gradient yet)
@@ -89,7 +79,7 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
     train_step(model, optimizers, *batch(1))
     assert qkv.grad is None and not qkv.requires_grad
     assert not torch.equal(qkv, before)
-    assert optimizers[0].state[qkv]["frame"].shape[-1] == round(0.1 * (768 * 512) ** 0.5)  # rank_fraction 0.1
+    assert optimizers[0].state[qkv]["frame"].shape[-1] == rank(qkv.shape, 0.1)
     assert model.blocks[0].table.requires_grad  # fallback parameters keep their gradients
 
 

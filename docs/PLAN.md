@@ -18,7 +18,7 @@ A first frame fitted to a low-rank first gradient is not worth an `eigh`: the tr
 usuitrack's random range finder fits without one. The aim (Molegrad's too) is closed-form, a Rayleigh-quotient
 projection. `eigh` remains once per step in the frame turn: the spectra of the [r, r] tangent Grams that `turn` rotates
 by (usuitrack `frame.tangent_spectra`), one stacked, launch-bound call that syncs with the host (H1). Settle: on a
-usuitrack branch, the turn without `eigh` against the current one, by loss and `tangent_live_fraction`; merged only
+usuitrack branch, the turn without `eigh` against the current one, by loss and `grad_capture_probe`; merged only
 if it holds.
 
 ---
@@ -58,7 +58,7 @@ Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, 
 At 128 px the batch is 128 (archive 2026-11-02, batch 128), 64 × 128 ≈ 8k tokens per step, and the step budget
 follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
 unit for diffusion (t sampling adds its own gradient noise). A smaller batch may want a lower lr, and a lower rank
-fraction if `tangent_live_fraction` falls; it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
+fraction if the frame's live share falls (it was read as `tangent_live_fraction`, which the current pin no longer logs); it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
 throughput is unmeasured. Settle: when the 256 px stage is planned. At 128 px, after the sweep, going back to batch 256 is
 an option; about 140 ms of each step is fixed, so batch 256 runs at about 850 img/s against 580 (FACTS, Sweep throughput).
 
@@ -71,11 +71,10 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 
 ### C2. Warmup and the fallback lr at the chosen Usui lr
 
-*Decided* (2026-11-12): usui lr 4e-3, the best of the sweep at d768x16 over 3000 steps under the trust rule with each
-norm pinned at its init, before the ceiling (archive 2026-11-12-norm-ceiling;
-`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`: 5e-4 1.5332, 1e-3 1.5101, 2e-3 1.4933, 4e-3 1.4868, 8e-3 1.4950).
-The reference config runs 4e-3. Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at
-4e-3. Settle: config-only arms against a 4e-3 reference.
+*Decided* (2026-11-16): usui lr 2e-3. At 6000 constant-lr steps at d768x12 on the merged set it ends 0.0113 ahead of
+4e-3 (`log/2026-11-14-reference-6k-lr2e-3.md`); the curve does not say 2e-3 is the optimum, and it is carried to
+depth 24 untested there (G4). Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at 2e-3. Settle:
+config-only arms against the reference.
 
 ### C3. Timestep shift values per stage
 
@@ -159,8 +158,9 @@ SPEC §3).
 
 ### G1. How deep the long run is
 
-*Decided* (2026-11-12): width 768; the model grows in depth. Width 768 × depth 12 is the baseline for trials. Open: the
-depth of the long run, and the MLP ratio at that length. Settle: a 30-step microbench per depth for img/s and peak
+*Decided* (2026-11-12): width 768; the model grows in depth. *Decided* (2026-11-16): depth 24 at micro-batch 128 is the
+reference (`configs/128_d768x24_1ep.toml`); 16 and 32 stay candidates. Open: the depth of the long run, and the MLP
+ratio at that length. Settle: a 30-step microbench per depth for img/s and peak
 memory, then the step budget the run can afford.
 
 ### G2. Patch size
@@ -198,7 +198,8 @@ SwiGLU measured decorrelating, so shaped activations have no target here.
 ### G4. Depth scaling, if depth arms run
 
 CompleteP scales each block's branch by 1/L for lr transfer across depth, derived for AdamW. Usui's fixed-norm write
-and the per-sample gates may absorb it. Settle: only if a depth-24/32 arm is run, by lr transfer from depth 12.
+and the per-sample gates may absorb it. The depth-24 reference runs the lr chosen at depth 12, untested at 24. Settle: an lr
+arm at depth 24 against it.
 
 ### G5. Does 128 px saturate before 256?
 
@@ -248,7 +249,11 @@ modulation, then `out` (1024 → 896) into the meta channels, its sandwich norm 
 
 At d768x12 (FACTS, cross attention and conv period, 2026-11-06): conv in 1/2, 2/3 and 3/4 of the blocks all end level with the pooled-only baseline
 at 3000 steps (−0.0003, +0.0004, +0.003) and run 1.20×, 1.28× and 1.32× as fast. 3/4 is preferred: a faster model allows more layers. The conv is
-the basic form; next is how GDN2 does it, and writing all channels once the model is smart enough. adaLN stays for the conv layers.
+the basic form. adaLN stays for the conv layers.
+
+*Decided* (2026-11-16): the GDN2-style gated update (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`) is replaced by the
+basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
+into the image channels. Open: a better conv block that keeps the meta-only write, a gated conv first.
 
 ---
 

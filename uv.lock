@@ -639,7 +639,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = ">=0.29.2" },
     { name = "torchvision", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=0.29.2", index = "https://download.pytorch.org/whl/cu132" },
     { name = "transformers", specifier = ">=5.22.1" },
-    { name = "usuitrack", git = "https://github.com/Nelathan/usuitrack?rev=c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6" },
+    { name = "usuitrack", git = "https://github.com/Nelathan/usuitrack?rev=92b23bcbf830c40cbade1454e45783802e82be64" },
     { name = "wandb", specifier = ">=0.31.0" },
     { name = "webdataset", specifier = ">=1.0.2" },
 ]
@@ -1763,7 +1763,7 @@ wheels = [
 [[package]]
 name = "usuitrack"
 version = "0.1.0"
-source = { git = "https://github.com/Nelathan/usuitrack?rev=c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6#c13ed91a939e2ada033ecd94dabd4d2ab50e3cf6" }
+source = { git = "https://github.com/Nelathan/usuitrack?rev=92b23bcbf830c40cbade1454e45783802e82be64#92b23bcbf830c40cbade1454e45783802e82be64" }
 dependencies = [
     { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "torch", version = "2.15.0+cu132", source = { registry = "https://download.pytorch.org/whl/cu132" }, marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

@@ -13,7 +13,7 @@ from torch.profiler import ProfilerActivity, profile
 from nanodit.data import Stream
 from nanodit.objective import flow_loss
 from nanodit.optim import build_optimizers
-from train import Config, accumulate_gradients, build_model
+from train import Config, accumulate_gradients, build_model, compile_blocks
 
 WARMUP, STEPS, PROFILED = 40, 30, 3
 
@@ -26,8 +26,7 @@ def main(config_path: str) -> None:
     model = build_model(cfg, device, torch.bfloat16)
     stream = Stream(cfg.dataset, cfg.resolution, cfg.micro_batch, device, torch.float32, cfg.seed)
     usui, fallback = build_optimizers(model, cfg.usui_lr, cfg.beta, cfg.rank_fraction, cfg.fallback_lr)
-    for block in model.blocks:
-        block.compile()
+    compile_blocks(model)
     accumulate = cfg.batch // cfg.micro_batch
 
     def step() -> None:
@@ -47,7 +46,7 @@ def main(config_path: str) -> None:
         step()
     torch.cuda.synchronize()
     whole = (time.perf_counter() - start) / STEPS
-    print(f"step, as train.py steps without the schedule and records: {1000 * whole:.1f} ms, {cfg.batch / whole:.0f} img/s", flush=True)
+    print(f"step, as train.py steps without the schedule and records: {1000 * whole:.1f} ms, {cfg.batch / whole:.0f} img/s, peak memory {torch.cuda.max_memory_allocated() / 2**30:.1f} GiB", flush=True)
 
     phases = dict(data=0.0, forward_backward=0.0, usui_step=0.0, fallback_step=0.0)
     for _ in range(STEPS):

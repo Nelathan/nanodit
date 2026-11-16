@@ -8,7 +8,7 @@ of those pieces earn their place when each is measured?
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched 8×8 by the DiT itself into 128-d tokens
 - **Conditioning:** **EmbeddingGemma 2**: the pooled 768-d caption embedding through adaLN, and cross
   attention to its 512-d token states in the attention blocks
-- **Blocks:** three gated depthwise-conv blocks (a GDN2-style local update) for every attention block; sandwich
+- **Blocks:** three depthwise-conv blocks, writing only the meta channels, for every attention block; sandwich
   norm; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
 - **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix stays in the ball of its init norm
 - **Framework:** pure PyTorch, bf16 parameters, single GPU, no trainer framework
@@ -53,7 +53,7 @@ tests/                behaviour tests for all of the above
 ```bash
 uv sync
 uv run python -m pytest tests/
-uv run python scripts/train.py configs/128_d768x12_6k.toml
+uv run python scripts/train.py configs/128_d768x24_1ep.toml
 ```
 
 torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is a git dependency pinned to a
