@@ -119,9 +119,22 @@ Reads of the earlier models (width 512 with a final linear, then the slice reado
 
 ## Step time at d768x24 (2026-11-16)
 
-`scripts/probe_step.py configs/128_d768x24_1ep.toml`, usuitrack `92b23bc`, batch 256 as 2 × 128: 429.5 ms per step
+`scripts/probe_step.py configs/128_d768x24_1ep.toml` (at `833e619`), usuitrack `92b23bc`, batch 256 as 2 × 128: 429.5 ms per step
 (596 img/s), forward + backward 363.6 ms, UsuiTrack step 57.6 ms for 131 matrices, fallback 0.9 ms, peak 7.9 GiB; the
 GPU busy about 397 ms of the step. `log/2026-11-16-step-profile-d24.md`.
+
+## Captions of `set_128` (2026-11-17)
+
+`scripts/probe_caption_lengths.py` and `scripts/exclude_captions.py` over all 8,239,111 rows; outputs
+`/mnt/mars/ai/tiny-dit/probes/caption_{lengths,defects}_set128.json`. Token states per caption: mean 30.5, p99.9 128, max
+1996; 17 rows over 256. 2,896 rows match a defect pattern and are excluded (`excluded_keys.txt`); the longest caption
+left is 279 tokens. Tables: `log/2026-11-17-caption-outliers-and-oom.md`.
+
+## Step memory against caption length at d768x24 (2026-11-17)
+
+`scripts/probe_caption_memory.py`, batch 256: micro-batch 64 450.9 ms and peak 4.10 GiB at ordinary captions,
+5.77 GiB with a 2048-token row; micro-batch 128 453.7 ms and 7.89 GiB, out of memory with a 2048-token row. Tables,
+and padded against packed cross attention: `log/2026-11-17-caption-outliers-and-oom.md`.
 
 ## Sweep throughput and host syncs (2026-11-02)
 
