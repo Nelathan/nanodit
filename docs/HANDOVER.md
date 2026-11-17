@@ -1,22 +1,31 @@
 # Handover
 
-State on 2026-11-16, at the start of the one-epoch reference at depth 24. `PLAN.md` carries the questions,
+State on 2026-11-17: the reference `a1-ref-1ep` (one pass, micro-batch 64, σ 0.7, defective captions excluded)
+runs, started 2026-11-17 from `768745b`. The earlier 1ep run stopped on a 1996-token defective caption at micro-batch
+128. PLAN is reorganised into one group per session. `PLAN.md` carries the questions,
 `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 79 tests
-pass (`uv run python -m pytest tests/`, about 150 s on the CPU). The GPU runs `128_d768x24_1ep`.
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 81 tests
+pass (`uv run python -m pytest tests/`, about 150 s on the CPU). The GPU runs `a1-ref-1ep`.
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a
 depthwise-conv block that writes only the meta channels; cross attention to the caption's token states in every attention block (GQA, no
 RoPE); sandwich norm; adaLN-single from the pooled caption; concatenating patch embed and
 slice read-out; every Usui matrix framed on its input side and inside the ball of its init norm (a ceiling, no floor),
-usui lr 2e-3. The reference is width 768 × depth 24 at 128 px, micro-batch 128. Width 768 is decided; the depth of a
+usui lr 2e-3. The reference is width 768 × depth 24 at 128 px, micro-batch 64. Width 768 is decided; the depth of a
 long run is open (PLAN G1).
 
-No long run of this model exists yet: `128_d768x24_1ep` (one pass of `set_128`, 32,184 steps, about 4.5 h) is the
-first. Every earlier checkpoint is deleted (2026-11-16).
+No long run of this model exists yet. `a1-ref-1ep` (`configs/a1-ref-1ep.toml`, 32,173 steps, about 590 img/s, about
+4 h) runs from `768745b`, run directory `/mnt/mars/ai/tiny-dit/runs/a1-ref-1ep`, console `runs/a1-ref-1ep.out`,
+wandb run `pv4e2l91`. The plan for it: at its step-16000 checkpoint compare its score with the stopped run's at 16000
+to read σ 0.7 against 1.0 (one seed each, and the sets differ by the 2,896 excluded rows), and let it finish the pass.
+
+The stopped run `128_d768x24_1ep` (from `12c2028`, σ 1.0, micro-batch 128) ran out of memory after step 19,600 on a
+1996-token ASCII-art caption that `pad_sequences` padded its micro-batch to (`log/2026-11-17-caption-outliers-and-oom.md`).
+Its records reach step 19,600, its scores step 19,000; it keeps checkpoints at 4000, 8000, 12000 and 16000, which the
+free reads below use.
 
 ## What the trunk rests on
 
@@ -55,8 +64,8 @@ below about 0.003 in caption loss is within what one seed can say.
     Level in loss with cross plus adaLN at 6000 steps.
   - `layout` and `block_types` (F4): named block types repeated to the depth; where the attention block sits in the
     period is a config-only arm.
-- **The reference** `configs/128_d768x24_1ep.toml`: depth 24, micro-batch 128, usui lr 2e-3, Usui's beta and the
-  fallback's betas at their defaults, eval every 1000 steps, a checkpoint every 4000. Running. At depth 12 the last
+- **The reference** `configs/a1-ref-1ep.toml`, architecture a1 (SPEC §3): depth 24, micro-batch 64, σ 0.7, usui lr 2e-3, Usui's beta and the
+  fallback's betas at their defaults, eval every 1000 steps, a checkpoint every 4000. Running (above). At depth 12 the last
   reference was 1.4792 at 6000 steps (lr 2e-3, log 2026-11-14-reference-6k-lr2e-3); no depth-24 number exists yet.
 - **Step speed** (log 2026-11-16-step-profile-d24): with the usuitrack pin below the Usui step is no longer most of
   the step; what is left of its host time is usuitrack's to take (its fast-step work). Block-wise CUDA graphs were tried
@@ -69,6 +78,25 @@ below about 0.003 in caption loss is within what one seed can say.
   matrix runs in full space (4 × rank reaches its short side), `frame`. The training log reads its
   diagnostics (`grad_capture_probe`, `projected_grad_norm`) and the norm of each matrix's step before the lift
   (`step_norm/<role>`, at each eval).
+
+## The question map (2026-11-17)
+
+PLAN is grouped so that one session takes one group. Three sources were sorted into it, each kept verbatim in
+`references/`:
+- `handover-2026-11-12-residual-gating.md`, from another agent session, written against `30264af`. Its §2 mismatches
+  are mostly resolved by later work: GDN2 is gone, the prefix is re-encoded, cross attention and the lr are decided.
+  What still holds went to C1, G1, G9, G10, H1, D6–D8 and Groups J, K and M.
+- `handover-2026-11-12-attention-lock-in.md`, from a chat session that never saw the repo → Group L.
+- `gemini-thread-adaln-and-architecture.md`, a Gemini chat with unverified claims → Groups J and K, F5/F6, M2, G1,
+  G8, G10.
+
+New topic docs: `conditioning.md` (J, with F3), `prediction-target.md` (K), `attention-lock-in.md` (L),
+`residual-lanes.md` (M), `speedrun-ports.md` (F5, F6).
+
+Free reads that need no training run, each on a checkpoint of the stopped 1ep run:
+- J1: how much the adaLN's vectors vary with t.
+- J3 with L1: the cross maps for a de facto sink, and the attention maps' movement from 4000 to 16000.
+- K2: the spectrum of the token covariance; this one needs only the data.
 
 ## Branches
 
