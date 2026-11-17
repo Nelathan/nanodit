@@ -1,5 +1,5 @@
-# The trunk model at d768x24 on the merged 128 px set, one pass (8,239,111 rows at batch 256): the reference for trunk arms. Fields: scripts/train.py Config.
-name = "128_d768x24_1ep"
+# The trunk model at d768x24 on the merged 128 px set, one pass (8,236,215 rows, the set less its excluded rows, at batch 256): the reference for trunk arms, architecture a1 (SPEC §3). Fields: scripts/train.py Config.
+name = "a1-ref-1ep"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/run/media/djg/vel-ssd/tiny-dit/set_128"
@@ -9,8 +9,8 @@ width = 768
 layout = ["conv", "conv", "conv", "attn"]
 block_types = { conv = { mixer = "conv" }, attn = { mixer = "attn" } }
 batch = 256
-micro_batch = 128
-steps = 32184
+micro_batch = 64
+steps = 32173
 seed = 41
 usui_lr = 0.002
 beta = 0.95
@@ -18,7 +18,7 @@ rank_fraction = 0.1
 fallback_lr = 0.0025
 warmup = 376
 shift = 1.0
-t_sigma = 1.0
+t_sigma = 0.7
 log_every = 50
 checkpoint_every = 4000
 eval_every = 1000

@@ -36,6 +36,8 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
+Architecture **a1**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a1-ref-1ep`).
+
 Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a depthwise conv that writes only the meta channels (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
 
 | Component | Decision |

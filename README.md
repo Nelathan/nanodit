@@ -53,7 +53,7 @@ tests/                behaviour tests for all of the above
 ```bash
 uv sync
 uv run python -m pytest tests/
-uv run python scripts/train.py configs/128_d768x24_1ep.toml
+uv run python scripts/train.py configs/a1-ref-1ep.toml
 ```
 
 torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is a git dependency pinned to a
