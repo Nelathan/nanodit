@@ -36,6 +36,17 @@ arm and the dense-gradient probe. Remaining candidates, none agreed:
 - The same spectra on the continuation's checkpoints: whether the effective rank still falls with age.
 - Ways to help, if Usui is the cause: a small random component in the frame each refresh to reach the tail (zero-order
   is the extreme of this).
+- Data-limited or optimizer-limited (`references/handover-2026-11-12-residual-gating.md`, E8). *Hypothesis*: a
+  matrix's rank is capped by the effective rank of its input activations, not by Usui, since the gradient lies in
+  the span of δ ⊗ x. Test, per layer from one checkpoint: the stable rank of the input activations over a batch
+  against the stable rank of W. If W tracks just below the activations, the data and the length are the limit. If the
+  activations sit well above W, the frame rotates too slowly, and a larger rank fraction or turn is the lever.
+- Stochastic rounding as the tail-keeper (same source). *Hypothesis*: tail-direction updates fall below half a bf16
+  ulp; round-to-nearest erases them, stochastic rounding keeps them in expectation. Test: a stretch with
+  round-to-nearest from a checkpoint, watching the tail of the spectrum. A uniform rescale (the former pin; the
+  ceiling now acts only where a step grows the norm) shrinks the tail without selecting against it.
+- Since 2026-11-16 every eval logs each role's stable rank (SPEC §8), so a run carries the curve over its length;
+  the 1ep run's `score.jsonl` has it up to step 19000.
 
 ## Measurements
 

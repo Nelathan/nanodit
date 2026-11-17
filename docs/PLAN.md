@@ -51,16 +51,40 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I's last two subsets are being encoded; the merged set per aspect bucket and its stream are built (archive 2026-11-13-merged-training-set), the 128 px set waits on the encode. The bucket set is open in the topic.
 
+### B7. Defective captions in `set_128`
+
+About 2,900 of 8.24M rows (FACTS, Captions of `set_128`; `log/2026-11-17-caption-outliers-and-oom.md`): escaped
+UTF-8 bytes (410, jackyhate), captioner loops and repeats (195 matched, more with longer units), chat-template leaks
+(3), and captions that switch into Chinese mid-sentence (part of 2,297 with CJK; quoted text to render is the other
+part and is wanted). The length tail above about 256 tokens is almost all defects. *Decided* (2026-11-17): every
+row the defect patterns match is excluded from streaming (SPEC §1, `excluded_keys.txt`), quoted CJK included; no
+rewrite now; a token cut at 512 as the guard. Open: salvage, if wanted later — the escapes decode mechanically and
+need only the text re-encoded (`reencode_text.py` works per file); loops, leaks and code-switched captions would be
+rewritten following Krea 2's rules (`github.com/krea-ai/krea-2`, `docs/expansion.txt`: keep every subject,
+attribute and relation, add nothing unsupported, one paragraph, quote rendered text). Also open: whether the
+enhanced prompts and the 256 px set get the same scan before they are built. State: rows excluded, salvage open.
+
 ## Group C. LR sweep and step budget
 
 ### C1. Batch size and step budget at 256 px
 
-At 128 px the batch is 128 (archive 2026-11-02, batch 128), 64 × 128 ≈ 8k tokens per step, and the step budget
-follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
+At 128 px every reference since 2026-11-13 runs batch 256 (the configs, the 2026-11-13 and later log notes), 64 × 256 ≈
+16k tokens per step. The archive's batch 128 (2026-11-02) no longer describes what runs, and no closure records the
+return to 256. The step budget follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
 unit for diffusion (t sampling adds its own gradient noise). A smaller batch may want a lower lr, and a lower rank
 fraction if the frame's live share falls (it was read as `tangent_live_fraction`, which the current pin no longer logs); it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
-throughput is unmeasured. Settle: when the 256 px stage is planned. At 128 px, after the sweep, going back to batch 256 is
-an option; about 140 ms of each step is fixed, so batch 256 runs at about 850 img/s against 580 (FACTS, Sweep throughput).
+throughput is unmeasured. Settle: when the 256 px stage is planned.
+
+Batch 512 at 128 px (`references/handover-2026-11-12-residual-gating.md`, E4, recomputed): at d768x24 only about 59 ms of
+the 430 ms step is fixed per step, the Usui and fallback steps (FACTS, Step time at d768x24). Doubling the batch
+projects to about 630–640 img/s against 596, +6–7 % (*Hypothesis*, arithmetic on that table, assuming forward/backward
+and data scale linearly with the batch and the Usui step is per optimizer step, not per micro-batch; the latter is to
+verify). The handover's +25 % rested on
+the 140 ms fixed cost of usuitrack `zero-init`. Worth an arm only if loss per image holds at 512.
+
+At the move to 256 px (the thread in `references/gemini-thread-adaln-and-architecture.md`): how usuitrack's moment
+sees accumulated micro-batches (one gradient per optimizer step under Molegrad, or per micro-batch), and whether the
+continuation wants a short warmup so the moments re-form on the new statistics.
 
 When to add 256 px is open again (2026-11-05). On 2026-11-02 it was too early, with still no hint of a
 cat; `128_d1024x16_swpin_5ep` now follows prompts at class level (FACTS). It needs the images downloaded again and a
@@ -111,6 +135,33 @@ Moonworks Lunara renders (SPEC §8; `eval_set` in the configs, `scripts/precompu
 for an aesthetic fine-tune or as FID references. Open: when FID starts, on which features (Inception at 128 px is
 weak; FD-DINOv2 is the alternative), and against which reference set.
 
+### D6. A held-out set from the training distribution
+
+The score is on Lunara: synthetic art, out of the training distribution. Without an in-distribution holdout, a
+capacity limit cannot be told from a style gap (`references/handover-2026-11-12-residual-gating.md`, E5a). Settle: a
+few thousand rows of the merged set held out of `set_128` and scored beside Lunara. That needs a reshuffle, or rows
+that are dropped from training by key.
+
+### D7. A read of prompt following
+
+Loss does not measure prompt following: the caption-versus-null gap stayed near 0.002 at every width (FACTS, G5).
+Every token-conditioning question (J2, J3, L2) and G5 waits on a read that does. Candidates:
+- **Role-swap binding prompts**, scored per checkpoint: "a bear building a cabin" against "a cabin shaped like a
+  bear", "a red cube on a blue sphere" and its reverse (E5b). The eval grid's bear prompt is the case that motivated
+  cross attention.
+- **Caption alignment:** EmbeddingGemma 2's image embedding of the sample against the pooled caption, by cosine
+  (`topics/priming.md`, ideas ledger). The model maps images and text into one space.
+
+Settle: which read, its prompt set, and whether it runs at every eval or on checkpoints.
+
+### D8. Loss curves fitted against images seen
+
+Observation, not recorded in the repo: under Usui, models of different size train in parallel, with a gap per size
+that stays constant. If that holds, one equal-wall-clock comparison decides a size question with no crossing to wait
+for (E5d). Settle: a log-log fit with an offset term to the score curves kept in the run directories, compared only within
+one data set and eval set (the d768x16 lr arms against the d768x12 arms, the d1024x16 runs), and a check of
+whether the gaps stay constant.
+
 ---
 
 ## Group F. Model choices SPEC leaves open
@@ -139,7 +190,8 @@ reaches them only through the adaLN, which is cheap in compute. Open: whether th
 (`pooled_ada`, SPEC §3), or the adaLN takes t alone; and if it stays, whether one shared `ada` is enough or each block
 wants its own (or a per-block LoRA on the shared one). Settle: by reading how other text-to-image DiTs with cross
 attention condition their adaLN, not by an arm. At 6000 steps, cross with or without the pooled adaLN ended within
-0.002 of each other (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`).
+0.002 of each other (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`). Taken together with Group J, which asks whether
+the adaLN stays at all; the reading of other models is in `topics/conditioning.md`.
 
 ### F4. Block layout: mixers, parallel blocks, RoPE and head sharing
 
@@ -152,16 +204,49 @@ Open: where the attention block sits in the period. The trunk puts it fourth of 
 on another model found the third position best of the 3/4 layouts. Settle: one config-only arm per position (`layout`,
 SPEC §3).
 
+### F5. What ports from the modded-nanogpt speedrun?
+
+Its own topic doc: `topics/speedrun-ports.md` (a ledger of the speedrun's changes against this model: in design, a
+question, not applicable, to read). State: only the Gemini thread's list and recollection; the record history itself
+is not read. Settle: read it and sort every record into the ledger.
+
+### F6. Which MLP activation?
+
+SwiGLU at 4 × width (SPEC §3) against ReLU² at equal parameters, and a pre-activation-capped SwiGLU (MOSS-Image's
+SiTU-GLU). In `topics/speedrun-ports.md`. Settle: one arm each, read on loss and img/s.
+
 ---
 
 ## Group G. Scale and signal propagation
 
 ### G1. How deep the long run is
 
-*Decided* (2026-11-12): width 768; the model grows in depth. *Decided* (2026-11-16): depth 24 at micro-batch 128 is the
-reference (`configs/128_d768x24_1ep.toml`); 16 and 32 stay candidates. Open: the depth of the long run, and the MLP
+*Decided* (2026-11-12): width 768; the model grows in depth. *Decided* (2026-11-16): depth 24 is the
+reference (`configs/a1-ref-1ep.toml`, micro-batch 64 since 2026-11-17, H2); 16 and 32 stay candidates. Open: the depth of the long run, and the MLP
 ratio at that length. Settle: a 30-step microbench per depth for img/s and peak
 memory, then the step budget the run can afford.
+
+The aim (*Decided*, 2026-11-17): an efficient model of about 200M parameters, trained toward saturation on the order
+of Chinchilla's. In image tokens that is about 20 × 200M ≈ 4B, about 63M images at 64 tokens, eight epochs of
+`set_128` (the 204.6M of the d768x24 model is an uncommitted count, FACTS has none); whether that ratio carries over to flow matching on latents, and whether Usui moves it, is open.
+
+Raised again with the reference at depth 24 (`references/gemini-thread-adaln-and-architecture.md`,
+`references/handover-2026-11-12-residual-gating.md` E6):
+- **Size.** About 200M parameters is the size wanted. Whether it is spent as d1024 at less depth is open; depth buys
+  the conv reach. Width 768 is *Decided* (2026-11-12); a wider arm reopens it and needs a comparison per wall-clock.
+  A wider model has lower loss at once and trains slower.
+- **Equal parameters, equal wall-clock.** The handover's arms: 768 × 32 against 1024 × 16, with 2048 × 8 as a third.
+  *Hypothesis*: depth wins at 768, because the conv blocks' reach grows with depth and 640 meta channels are ample
+  workspace for a 128-d prediction.
+- **Conv reach.** It matters from 256 px on. Corner to corner, the 8 × 8 grid at 128 px takes 7 3×3 convs and the
+  16 × 16 grid at 256 px takes 15: depth 12 (9 convs) never spans it, depth 24 (18 convs) does.
+- **The handover's other predictions:** 2048 × 8 wins loss per wall-clock and loses binding (2 attention blocks, little
+  conv reach), the fix being attention in every other block; and the optimizer's per-matrix cost becomes nearly
+  depth-independent once same-shape matrices are stacked (H1).
+- **The parameter count at depth 24 is not in FACTS.** FACTS' count section predates cross attention in every
+  attention block, and no kept script counts the current model.
+- **Memory.** There is no activation checkpointing (`model.py`, `train.py`), so width and micro-batch are sized by
+  activations. The 1ep reference ran out of memory at step 19,600 (HANDOVER).
 
 ### G2. Patch size
 
@@ -205,6 +290,8 @@ arm at depth 24 against it.
 
 Open: whether 64 tokens at 128 px limit the model, and when 128 px stops paying before the move to 256 px. Loss does
 not measure prompt following (the caption-versus-null gap stayed near 0.002 at every width, FACTS); samples do.
+Observation, not recorded in a log: objects, not only the mood, appear in samples after about 10M images (on an earlier
+model).
 
 ### G7. Does the narrower timestep distribution hold at hero length and in the samples?
 
@@ -212,6 +299,9 @@ The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3
 - Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
 - Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
 - `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation at usui lr 1e-4 (archive 2026-11-05) is the first long run at σ 0.7.
+- Every reference config since the decision states `t_sigma = 1.0`: the 6000-step references on the merged set and
+  `128_d768x24_1ep` (their `config.toml` in the run directories). No run on the merged set has trained at SPEC §4's σ 0.7.
+  *Decided* (2026-11-17): the references train at σ 0.7, as SPEC states; `configs/a1-ref-1ep.toml` carries it.
 
 ### G8. What the norm ceiling leaves open
 
@@ -222,14 +312,16 @@ Open:
 - Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
-- A bound per output row instead of per matrix.
+- A bound per output row instead of per matrix. The rows of `out`, `cross_out` and `w_down` that write the 128 image
+  channels have another role than those writing meta, and share one bound with them now (the thread in
+  `references/gemini-thread-adaln-and-architecture.md`).
 - Bounds per role, and a zero-initialized matrix: Usui's bounds are multiples of the init norm, so a matrix that
   starts at zero cannot take them; none does here (§5).
 - Reading: EDM2's magnitude-preserving layers (REFERENCES, Objective).
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
 
-Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-epoch run against pretrained models, the reading, the candidates). State: open, no arm agreed; the rank 0.5 arm and the dense-gradient probe are not wanted.
+Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-epoch run against pretrained models, the reading, the candidates). State: open, no arm agreed; the rank 0.5 arm and the dense-gradient probe are not wanted. New candidates: activation rank against weight rank per layer, and stochastic rounding switched off for a stretch; the stable rank per role is now logged at every eval.
 
 ### G10. The depthwise conv, placed differently
 
@@ -255,16 +347,47 @@ the basic form. adaLN stays for the conv layers.
 basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
 into the image channels. Open: a better conv block that keeps the meta-only write, a gated conv first.
 
+Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
+- **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
+  term. *Hypothesis*: the gate carries most of its lead.
+  - Arm: the basic conv plus an output gate `σ(W y) ⊙ conv(y)`, writing meta only, against the reference.
+  - If it recovers most of the 0.0014–0.004 at close to the basic conv's speed, the forget term goes.
+  - The same gate writing all channels is the handover's second arm. With the meta-only write decided, it only
+    matters if the meta-only gate falls short (GDN2 writing the image channels added 0.0008, FACTS).
+  - Look at the samples too: no one has looked at the conv arms' samples for smudging.
+- **A 5×5 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
+  differently from two stacked 3×3s (one filter, no nonlinearity or gate between).
+- **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
+  edge. Read at 256 px and on the unseen grid, where border effects would show.
+
 ---
 
 ## Group H. Harness throughput
 
-### H1. How much of the fixed per-step cost can go?
+### H1. How much of the step's time can go?
 
-About 140 ms of each step is fixed, independent of the batch, and the step is launch-bound: the Usui step is about
-14,700 of 19,500 launches and syncs 9 times, once per `eigh` (FACTS, Sweep throughput and host syncs). The blocks
-are compiled once every Molegrad frame has fit; that cut forward/backward from ~5,400 to ~3,400 launches, a modest
-share of the step. Simple blockwise compile worked well in the past; CUDA graphs are also open.
+At d768x24 on usuitrack `92b23bc`, a 429.5 ms step breaks down as follows (FACTS, Step time at d768x24):
+- forward and backward: 363.6 ms;
+- the Usui step: 57.6 ms for 131 matrices;
+- the GPU is busy about 397 ms, so launch overhead can win at most about 33 ms.
+
+Open:
+- **The Usui step's time.** The usuitrack session reports 140 → 30 ms; the probe here measures 57.6 ms
+  synchronised, and under the profiler 101 ms of host time against 67 ms of GPU time
+  (`log/2026-11-16-step-profile-d24.md`). Settle: the same probe on the same matrices on both sides. Until then the
+  30 ms is not a fact here.
+- **Graphing at micro-batch 64.** It waits on the item above. Block-wise CUDA graphs gave nothing at micro-batch 64
+  and ran out of memory at 128 (HANDOVER).
+- **Stacking same-shape matrices** for `eigh` and the polar step in chunks sized to the memory free after backward,
+  when the activations are gone (`references/handover-2026-11-12-residual-gating.md`, E7). At depth 24 every block
+  type repeats six times. A usuitrack change.
+- **Forward and backward are now 85 % of the step.** Further speed comes from the model's kernels more than from the
+  optimizer: compile, attention, the depthwise conv, FP8 (`topics/speedrun-ports.md`).
+
+The 2026-11-02 profile below is of d768x12 on usuitrack `zero-init`: about 140 ms of each step was fixed and
+launch-bound, and the Usui step made about 14,700 of 19,500 launches and synced 9 times, once per `eigh` (FACTS, Sweep
+throughput and host syncs). The blocks are compiled once every Molegrad frame has fit; that cut forward/backward from
+~5,400 to ~3,400 launches, a modest share of the step. Simple blockwise compile worked well in the past.
 
 On the Usui-step options (2026-11-02): batching same-shape matrices and one `eigh` for all rank groups was tried before,
 but on anima the intermediates run out of memory (usuitrack is built for full finetunes on small VRAM); the diagnostics
@@ -279,8 +402,134 @@ on a free GPU: FACTS, Sweep throughput.
 
 ---
 
+### H2. The cross attention's padding
+
+`pad_sequences` pads a micro-batch to its longest caption, and the masked SDPA call runs the cutlass memory-efficient
+kernel with the mask expanded to a full bias in the backward. One 2000-token caption costs about 8× the time and 6×
+the memory of a cross-attention call, and with micro-batch 128 it ran the 1ep run out of memory (log
+2026-11-17-caption-outliers-and-oom). Packed captions through `torch.nn.attention.varlen.varlen_attn` (flash, GQA
+native, no mask) remove that cost and gain nothing on clean captions. *Decided* (2026-11-17): micro-batch 64, the same
+speed at half the peak; captions cut at 512 token states (SPEC §1), which bounds an outlier at about +10 % of a step
+(log, L 512 against 136). Open: whether packing is wanted with the tail excluded; it is the structural guard
+against any caption length, within 0.35 ms per call either way on captions without an outlier;
+to remove the outlier's whole cost the token states are packed before `cross_kv` too, not only in the attention call. A retry of a step that runs out of
+memory (the same micro-batches, after freeing the cache) is *Decided* acceptable (2026-11-17) and not built; it would only
+help against another job's memory on the shared GPU. State: open.
+
+---
+
 ## Group I. Training schemes beyond flow matching
 
 ### I1. Priming: reconstruction pretraining, then distributional post-training
 
 Its own topic doc: `topics/priming.md` (the source, the direction, the arms and their reads, what is open). State (2026-11-12): a side quest; no priming code on the trunk. Next arm: clean context tokens (t = 0, no loss) at a 1 to 25 % share. REPA only on precomputed targets of one size.
+
+---
+
+## Group J. The conditioning path
+
+Its own topic doc: `topics/conditioning.md` (the path as built, the questions, other models' conditioning as the
+Gemini thread gives it). Shares a session with F3.
+
+### J1. t at the input only, no adaLN
+
+t supplied once, into the meta channels at the patch embed, possibly re-injected every k blocks; static zero-init gates
+in place of the adaLN gates. *Hypothesis*: under x0 velocity the model takes the noisy latent and
+ships it, so only the first blocks need t, to know how carefully to touch it; the noise is overwritten fast, and deeper
+blocks clean, add coherence and the prompt. Free read first: how much the trained adaLN's six vectors vary with t
+over depth, from a checkpoint. State: the preferred direction, no arm.
+
+### J2. Joint attention instead of self then cross
+
+The token states as extra keys and values of self-attention, static, with no queries or MLP of their own; the cross
+sublayer goes, and every head attends to both. Open: the token states' own K/V projection per block, or one global
+Linear 512 → width that translates them once, after which each block's `qkv` serves both. Settle: an arm read on the
+samples and on D7. State: the preferred direction.
+
+### J3. A null key and value in cross attention
+
+An attention sink: lets a head write nothing for a query, which neither the static `cross_gate` nor, under J2, the
+self-match gives (the self-match still writes its value). Free read first: whether the cross maps already use a de
+facto sink. State: wanted, with J2 or without.
+
+### J4. The adaLN without its shift
+
+If the adaLN stays: scale and gate only, as Lumina 2 is said to do. State: open, small.
+
+### J5. Several encoder layers instead of the last
+
+Krea 2 is said to fuse several layers of its text encoder; the token states here are EmbeddingGemma 2's last hidden
+state. Needs a re-encode. Settle: read Krea 2's report and code first. State: hypothesis.
+
+### J6. A small text refiner
+
+A few unmodulated self-attention blocks over the static token states, once per sample, as Z-Image's context refiner is
+said to be. State: hypothesis; composes with J2 and J5.
+
+---
+
+## Group K. What the network predicts
+
+Its own topic doc: `topics/prediction-target.md` (the skip derived for this target, AnisoFlow, what of the thread does
+not apply).
+
+### K1. A t-dependent skip
+
+The identity on x_t is the optimal linear skip only at t = 0.5; `c(t) = 2(1 − t)²/((1 − t)² + t²)` halves the residual
+the trunk must write at both ends. Preferred form: EDM's `c_skip` at the readout, so the slice still carries x_t.
+Settle: one arm, read on the loss by t. State: derived, not run.
+
+### K2. An anisotropic target (AnisoFlow)
+
+Per-direction mixes of x0 and velocity targets, claimed to help in pixel space and not on SD-VAE latents; Primal 2x2
+tokens sit nearer pixel space. Settle: the spectrum of the 128-d token covariance first, then the paper. State: not
+read.
+
+---
+
+## Group L. Attention dynamics
+
+Its own topic doc: `topics/attention-lock-in.md` (the source's claim, the model checked against what the source
+assumed, the sensor, the backward temperature and its tests, the parked ideas).
+
+### L1. Does attention lock in early here?
+
+A sensor of attention maps on a fixed probe batch at log-spaced steps, self and cross. A partial read is possible from
+the 1ep run's checkpoints at 4000–16000. State: proposed; this comes before L2.
+
+### L2. Backward temperature on the attention scores
+
+Forward unchanged, the score gradient taken through `softmax(s / tau_b)`, values through the true weights; `tau_b = 2`
+proposed. Three equivalence tests before any run. State: proposed, waits on L1.
+
+### L3. Parked follow-ups
+
+Interleaved head attention as an early phase, competition across heads, a forward temperature schedule. State: parked
+behind L2.
+
+---
+
+## Group M. The residual stream as lanes
+
+Its own topic doc: `topics/residual-lanes.md` (the write map of the stream, the two-stream reading, Hyper-Connections
+and SimpleHC, other scratchpads). Related: G3, G10.
+
+### M1. Per-token write gates onto the slice
+
+Learned per token, initialized at the current masks. Today only the per-image adaLN gate governs the MLP's and the
+cross attention's writes to the image channels. State: parked in its source.
+
+### M2. Long skips
+
+Block i into block L − 1 − i, gated near zero, into the meta channels. State: proposed.
+
+### M3. The input re-injected
+
+The patch embed's meta projection, or x_t, added back to the values or the stream at depth (the speedrun's value
+embeddings, recalled). Shares its mechanism with J1's t re-injection. State: proposed.
+
+### M4. Mixers write the context, a separate step prints it
+
+The conv's meta-only write extended to self-attention and cross attention, so the meta lanes carry the context and only
+the per-token MLP writes the slice. A dedicated print step at the end is *Not wanted* (2026-11-17): skips (K1) carry
+x_t, not idle channels. State: proposed, no arm.

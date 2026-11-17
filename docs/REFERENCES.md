@@ -71,3 +71,24 @@ What each source establishes for this project.
   12.4M public-domain/CC0 pairs, recaptioned, S3-hosted. Alternative if real-image aesthetics or licensing matter.
   The second set of the original plan, left out of the notes; world knowledge images rather than
   text-to-image.
+
+## Sorted in 2026-11-17, not read here
+
+Known only through the sources kept in `references/` (two handovers and a Gemini thread); each is to be read before
+a number from it is relied on.
+
+- **Eyler et al., "Stuck in a Loop: Runaway credit ratcheting in attention matrices"**, Hyperstition, 2026-09-09,
+  https://hyperstition.cc/stuck-in-a-loop. Attention lock-in from the `a_ij` factor in every score gradient; NATQ
+  spreads attention and worsens loss. PLAN L, `topics/attention-lock-in.md`.
+- **Interleaved Head Attention**, Meta, arXiv 2602.21371. Pseudo-heads as learned mixes of all heads' q/k/v. PLAN L3.
+- **Zhang et al., SimpleHC**, arXiv 2611.05984. Hyper-Connections: learned gating and unconstrained mixing as separate
+  gains, fixed gates harmful, execution at 9C traffic. PLAN M, `topics/residual-lanes.md`.
+- **Zirvi, Chen et al., AnisoFlow**, https://hanshengchen.com/anisoflow/. A learned anisotropic target between x0 and
+  velocity prediction. PLAN K2, `topics/prediction-target.md`.
+- **i1: A Simple and Fully Open Recipe for Strong Text-to-Image Models**, arXiv 2606.11289. Said to drop adaLN for t
+  as tokens. PLAN J, `topics/conditioning.md`.
+- **"What Time Is It?"**, time-unconditional flow matching (no citation given). PLAN J1.
+- **Lumina-Image 2.0, Z-Image, Wan 2.1**: adaLN without shift, selective adaLN, shared FiLM, as the Gemini thread
+  gives them. PLAN J4, `topics/conditioning.md`.
+- **modded-nanogpt**, https://github.com/KellerJordan/modded-nanogpt. The speedrun's record history. PLAN F5,
+  `topics/speedrun-ports.md`.

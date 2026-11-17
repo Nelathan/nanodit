@@ -123,5 +123,8 @@ Arms run in the order metaembed, pmlp, nope, gqa3, rope25, about 15 minutes each
 - Conv carries across resolution far better than attention: trained at 128 px, the 3/4-conv model scores 0.031 better than the all-attention one on the 256 px grid, though it is 0.003 worse at 128 px. Local mixing does not depend on how many tokens there are; global attention at 256 tokens meets position offsets it never saw.
 - At 64 tokens none of NoPE, quarter RoPE or GQA costs anything, and the 256 px read keeps that order: full or partial RoPE best, NoPE worst by 0.003. Position helps a little when the grid grows, and a quarter of the frequencies carries all of it.
 - The parallel MLP buys no speed (no fusion of the two branches under `torch.compile` at this size) and loses a little: dropped.
+  A reading of why it loses (`references/gemini-thread-adaln-and-architecture.md`, *Hypothesis*): in a parallel block the MLP reads
+  the input before attention's retrieval. With attention in only one of four blocks, the sequential MLP is the first per-token
+  layer to turn the caption's and the global context into slice writes; in parallel, that waits three conv blocks.
 - Speed by regression (FACTS, step speed by layout): the quadratic term of attention is 1.78 ns per token per token of grid; conv in 3/4 has a quarter of it. Conv is 1.27× faster at 128 px and 1.66× at 1024 px; the fit projects 2.4× at 2048 px. GQA's 2–3 % does not grow with the grid: it saves projection work, not attention work. Earlier note that its saving grows was wrong.
 - Meta-only embed at one primal block per token is free and slightly ahead at both resolutions; it keeps the first 128 channels as the raw latent. Keep.
