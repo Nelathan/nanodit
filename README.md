@@ -67,8 +67,9 @@ Training reads precomputed rows, not images. The pipeline, each step a script wi
 2. `stage_fine.py`, `encode_fine.py`: Fine-T2I into aspect-bucket crops, then into the same encodings.
 3. `shuffle.py`: both datasets into one training set per resolution, one Parquet per aspect bucket in uniformly
    random row order, each image once.
-4. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
-5. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
+4. `exclude_captions.py`: the set's `excluded_keys.txt`, the rows whose captions match a defect pattern.
+5. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
+6. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
 Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is

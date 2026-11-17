@@ -1,5 +1,6 @@
 """Micro-batches streamed from a training set of `scripts/shuffle.py`: one shuffled Parquet per aspect bucket (SPEC §1)."""
 
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from torch import Tensor
 
 from .model import LATENT_CHANNELS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
 
+EXCLUDED = "excluded_keys.txt"  # in a set's directory: the keys of rows never streamed, one per line (SPEC §1)
+MAX_TOKENS = 512  # token states a caption keeps; a longer one is cut, with a warning (SPEC §1)
 BLOCK_ROW_GROUPS = 4  # rows read and reshuffled together: 4 row groups of up to 1024 rows, about 180 MB at 128 px; two per bucket in memory
 
 
@@ -35,7 +38,11 @@ def _sequences(column) -> list[Tensor]:
 
 
 def pad_sequences(sequences: list[Tensor], dtype: torch.dtype = torch.bfloat16, device: torch.device | None = None) -> tuple[Tensor, Tensor]:
-    """Token states [B, L, 512], zero past each row's end, and the mask [B, L] of the real tokens; L is the longest row, at least NULL_TOKENS."""
+    """Token states [B, L, 512], zero past each row's end, and the mask [B, L] of the real tokens; L is the longest row,
+    at least NULL_TOKENS, at most MAX_TOKENS."""
+    if any(len(s) > MAX_TOKENS for s in sequences):
+        warnings.warn(f"a caption of {max(map(len, sequences))} token states is cut to {MAX_TOKENS}", stacklevel=2)
+        sequences = [s[:MAX_TOKENS] for s in sequences]
     length = max(NULL_TOKENS, *(len(s) for s in sequences))
     tokens = torch.zeros(len(sequences), length, SEQ_DIM, dtype=dtype, device=device)
     for row, states in zip(tokens, sequences):
@@ -58,8 +65,9 @@ class Bucket:
     the rows inside each block, so rows meet different rows in every pass. The reader thread reads the next block
     while the current one is consumed; a micro-batch that runs past a block's end continues into the next."""
 
-    def __init__(self, path: Path, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, rng: np.random.Generator, reader: ThreadPoolExecutor):
+    def __init__(self, path: Path, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, rng: np.random.Generator, reader: ThreadPoolExecutor, excluded: frozenset[str]):
         self.file = pq.ParquetFile(path)
+        self.excluded = excluded
         self.column = f"latent_{resolution}"
         height, width = map(int, path.stem.split("x"))
         self.shape = (LATENT_CHANNELS, height // 2, width // 2)
@@ -84,9 +92,12 @@ class Bucket:
         return self.reader.submit(self._read, groups, torch.from_numpy(self.rng.permutation(rows)))
 
     def _read(self, groups: list[int], shuffle: Tensor) -> tuple[Tensor, Tensor, list[Tensor]]:
-        table = self.file.read_row_groups(groups, columns=[self.column, "embedding", "sequence"])
+        table = self.file.read_row_groups(groups, columns=[self.column, "embedding", "sequence", "key"])
+        keys = table["key"].to_pylist()
+        # the permutation is drawn over every row, so the order follows the seed whatever is excluded
+        order = torch.tensor([i for i in shuffle.tolist() if keys[i] not in self.excluded], dtype=torch.long)
         sequences = _sequences(table["sequence"])
-        return _bf16(table[self.column], *self.shape)[shuffle], _bf16(table["embedding"], TEXT_DIM)[shuffle], [sequences[i] for i in shuffle.tolist()]
+        return _bf16(table[self.column], *self.shape)[order], _bf16(table["embedding"], TEXT_DIM)[order], [sequences[i] for i in order.tolist()]
 
     def next(self) -> tuple[Tensor, Prompt]:
         n = len(self.x)
@@ -107,15 +118,16 @@ class Bucket:
 
 class Stream:
     """Micro-batches from a training set directory, each from one aspect bucket, the bucket drawn with probability
-    proportional to its rows, so over a pass every bucket is visited as often as it has rows. The order follows the
-    seed."""
+    proportional to its rows, so over a pass every bucket is visited as often as it has rows (excluded rows counted:
+    they are a few in millions). The order follows the seed."""
 
     def __init__(self, path: str, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, seed: int):
         self.rng = np.random.default_rng(seed)
         reader = ThreadPoolExecutor(1)
         files = sorted(Path(path).glob("*.parquet"))
         assert files, f"no bucket files in {path}"
-        self.buckets = [Bucket(f, resolution, batch, device, dtype, self.rng, reader) for f in files]
+        excluded = frozenset((Path(path) / EXCLUDED).read_text().split())
+        self.buckets = [Bucket(f, resolution, batch, device, dtype, self.rng, reader, excluded) for f in files]
         rows = np.array([b.rows for b in self.buckets], dtype=float)
         self.p = rows / rows.sum()
 

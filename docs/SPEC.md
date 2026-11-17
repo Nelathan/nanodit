@@ -11,7 +11,8 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Dataset | `jackyhate/text-to-image-2M`, the `data_512_2M` WebDataset shards (512×512 crops, ~2M pairs), and `ma-xu/fine-t2i`, all five subsets (each image scaled to cover the nearest of seven aspect buckets and centre-cropped, each row captioned by its `prompt`) |
 | Subset | all 47 shards and all of Fine-T2I; trials train on the same set as long runs |
 | Resolutions | 128 px and 256 px, each a Lanczos resize of the 512 crop. 512 px skipped for now |
-| Captions | full caption, no truncation |
+| Captions | full caption as encoded; in training and at sampling the token states are cut at 512, with a warning |
+| Excluded rows | a set's `excluded_keys.txt` lists the keys of rows that are never streamed: captions that match a defect pattern (escaped bytes, a short unit repeated 12 times or more, a leaked chat template, any CJK character, empty). The shuffle writes it empty and `scripts/exclude_captions.py` fills it |
 | Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
 | Text prefix | none: the caption is encoded as it is, for training and inference |
 | Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |

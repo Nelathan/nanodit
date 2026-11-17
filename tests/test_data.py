@@ -86,7 +86,8 @@ def mixed(tmp_path, rows):
 def test_shuffle_writes_each_bucket_once_whole_and_in_a_new_order(mixed, rows):
     out, fine = mixed
     latents, embeddings, sequences = rows
-    assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet"]  # parts and .tmp are gone
+    assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet", data.EXCLUDED]  # parts and .tmp are gone
+    assert (out / data.EXCLUDED).read_text() == ""
     square, wide = pq.read_table(out / "32x32.parquet"), pq.read_table(out / "28x36.parquet")
     assert square.column_names == ["key", "source", "caption", "embedding", "sequence", "latent_32"]  # the other latent and Fine's spare columns stay behind
     assert square.schema.field("sequence").type == wide.schema.field("sequence").type == pa.binary()  # data._sequences reads int32 offsets
@@ -149,6 +150,38 @@ def test_a_bucket_streams_every_row_once_per_pass_and_the_next_pass_in_other_blo
         assert sorted(seen) == sorted(k for k in by_latent.values() if k[0] == "k" or int(k[1:]) % 2)
         passes.append(seen)
     assert passes[0] != passes[1]
+
+
+def square_keys(out):
+    return pq.read_table(out / "32x32.parquet", columns=["key"])["key"].to_pylist()
+
+
+def test_an_excluded_row_is_never_streamed(mixed, monkeypatch):
+    out, _ = mixed
+    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 2)
+    (out / data.EXCLUDED).write_text("k3\nk7\n")
+    by_latent = keys_of(out)
+    square = next(b for b in Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0).buckets if b.shape == (2, 16, 16))
+    seen = [by_latent[bf16_bytes(row.bfloat16())] for _ in range(24) for row in square.next()[0]]  # two passes of 24 rows
+    assert sorted(seen) == sorted(2 * [k for k in square_keys(out) if k not in ("k3", "k7")])
+
+
+def test_a_bucket_streams_on_when_a_whole_block_is_excluded(mixed, monkeypatch):
+    out, _ = mixed
+    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 1)  # a block is one row group of 3 rows
+    keys = square_keys(out)
+    (out / data.EXCLUDED).write_text("\n".join(keys[:3]))  # the first row group
+    by_latent = keys_of(out)
+    square = next(b for b in Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0).buckets if b.shape == (2, 16, 16))
+    seen = [by_latent[bf16_bytes(row.bfloat16())] for _ in range(23) for row in square.next()[0]]  # two passes of 23 rows
+    assert sorted(seen) == sorted(2 * keys[3:])
+
+
+def test_a_caption_past_the_limit_is_cut_with_a_warning(monkeypatch):
+    monkeypatch.setattr(data, "MAX_TOKENS", 4)
+    with pytest.warns(UserWarning, match="cut to 4"):
+        tokens, mask = pad_sequences([torch.ones(2, SEQ_DIM), torch.ones(6, SEQ_DIM)], torch.float32)
+    assert tokens.shape == (2, 4, SEQ_DIM) and mask.sum(1).tolist() == [2, 4]
 
 
 def test_buckets_are_drawn_by_their_rows_and_a_micro_batch_is_one_bucket(mixed):
