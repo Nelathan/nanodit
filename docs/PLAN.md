@@ -115,7 +115,8 @@ Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, th
 ### D1. EMA weights
 
 Leaning no. Option on the table: render the eval grid from both raw and EMA
-weights and drop EMA if they match.
+weights and drop EMA if they match. The handbook finds a cooldown 0.4 to 1.0 % ahead of EMA in held-out loss and EMA
+ahead in FD at its largest budget (`topics/scaling.md`); A cooldown of a tenth of the pass buys 0.95 % here (log 2026-11-18-anneal3k); EMA is not measured.
 
 ### D2. Guidance scale
 
@@ -226,9 +227,10 @@ reference (`configs/a1-ref-1ep.toml`, micro-batch 64 since 2026-11-17, H2); 16 a
 ratio at that length. Settle: a 30-step microbench per depth for img/s and peak
 memory, then the step budget the run can afford.
 
-The aim (*Decided*, 2026-11-17): an efficient model of about 200M parameters, trained toward saturation on the order
-of Chinchilla's. In image tokens that is about 20 × 200M ≈ 4B, about 63M images at 64 tokens, eight epochs of
-`set_128` (the 204.6M of the d768x24 model is an uncommitted count, FACTS has none); whether that ratio carries over to flow matching on latents, and whether Usui moves it, is open.
+The aim (*Decided*, 2026-11-17): an efficient model of about 200M parameters, trained toward saturation.
+*Proposed* (2026-11-18): the handbook's compute-optimal ratio, about 50 image tokens per image parameter, as eight
+epochs at 128 px and three at 256 px (`topics/scaling.md`, The budget). Whether the ratio carries over from pixel
+space to these latents, and whether Usui moves it, is open.
 
 Raised again with the reference at depth 24 (`references/gemini-thread-adaln-and-architecture.md`,
 `references/handover-2026-11-12-residual-gating.md` E6):
@@ -243,8 +245,8 @@ Raised again with the reference at depth 24 (`references/gemini-thread-adaln-and
 - **The handover's other predictions:** 2048 × 8 wins loss per wall-clock and loses binding (2 attention blocks, little
   conv reach), the fix being attention in every other block; and the optimizer's per-matrix cost becomes nearly
   depth-independent once same-shape matrices are stacked (H1).
-- **The parameter count at depth 24 is not in FACTS.** FACTS' count section predates cross attention in every
-  attention block, and no kept script counts the current model.
+- **Shape.** The handbook's equal-compute optimum is width ÷ layers 28 to 34; d768x24 is 32. Its own topic doc:
+  `topics/scaling.md` (the handbook's numbers, what carries over, the budget in this model's terms).
 - **Memory.** There is no activation checkpointing (`model.py`, `train.py`), so width and micro-batch are sized by
   activations. The 1ep reference ran out of memory at step 19,600 (HANDOVER).
 
@@ -297,7 +299,7 @@ model).
 
 The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3000-step arms at d768x12 gave it a small, consistent edge at t 0.26 to 0.66 and a loss at t 0.16 and 0.84 (FACTS, Timestep distribution arms). Open:
 - Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
-- Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do.
+- Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do. At one pass of depth 24 σ 0.7 is ahead at every eval, 0.0012 to 0.0034 after 12000 steps, and behind at t 0.16 (log 2026-11-18-a1-ref-1ep). In the sampler the forms of the eval grid, defects included, are fixed between t 0.8 and 0.67 (log 2026-11-18-residual-writes); σ 0.7 trains fewer samples than σ 1 above t ≈ 0.69. The two grids at 16000 show no visible difference.
 - `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation at usui lr 1e-4 (archive 2026-11-05) is the first long run at σ 0.7.
 - Every reference config since the decision states `t_sigma = 1.0`: the 6000-step references on the merged set and
   `128_d768x24_1ep` (their `config.toml` in the run directories). No run on the merged set has trained at SPEC §4's σ 0.7.

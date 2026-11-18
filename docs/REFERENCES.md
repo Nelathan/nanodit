@@ -72,6 +72,16 @@ What each source establishes for this project.
   The second set of the original plan, left out of the notes; world knowledge images rather than
   text-to-image.
 
+## Scaling
+
+- **W. Chai, "How to Scale Text-to-image Models: a Handbook", 2026-11-13.**
+  https://wenhaochai.com/blogs/scaling-generative-models-101.html. Iso-FLOP ladder of pixel-space text-to-image DiTs
+  at 256 px on GPIC (arXiv 2605.30341), Muon + AdamW, batch 1024, 3.6e18 to 2.3e20 FLOPs. Held-out loss on fixed
+  noise as the metric (seed std 0.03 % against 2.0 % for FD); about 50 image tokens per image parameter, flat over
+  the range; shape optimum width ÷ layers 28 to 34; lr ∝ C^−0.5; smaller batch better down to 512; a 50 % linear
+  cooldown, ahead of EMA in loss; no loss from repetition up to about 50 passes. Its numbers and what carries over:
+  `topics/scaling.md`. Read from the page, not verified.
+
 ## Sorted in 2026-11-17, not read here
 
 Known only through the sources kept in `references/` (two handovers and a Gemini thread); each is to be read before
