@@ -1,6 +1,6 @@
 # Scaling: model size, data, schedule and eval against a compute budget
 
-Topic doc for the size and length of the long run (PLAN G1, C1, D1, D6, D8). Opened 2026-11-18 from W. Chai, "How
+Topic doc for the size and length of the long run (PLAN C1, C2, D6, D8; archive 2026-11-18-long-run-size and 2026-11-18-no-ema-no-merging). Opened 2026-11-18 from W. Chai, "How
 to Scale Text-to-image Models: a Handbook" (REFERENCES, Scaling), the first iso-FLOP study of text-to-image DiTs with
 a recipe close to this one (a matrix optimizer, held-out loss, fixed noise). Measured numbers go to FACTS, closures to
 `archive/`.
@@ -16,15 +16,15 @@ distribution), one fixed noise per image and level. Its numbers, as stated there
 | Finding | Number | Bears on |
 |---|---|---|
 | Held-out loss tracks FD and FD-DINOv2 and is far less noisy: seed std 0.03 % against 2.0 % for FD; in 20 of 60 sweeps the gap beats twice the seed noise, against 1 for FD | 4 seeds of d9 | D5, D6, the arm protocol |
-| Compute-optimal split N* ∝ C^0.50, D* ∝ C^0.50: tokens per parameter (TPP) about 50, flat over 3.6e18 to 2.3e20 FLOPs | 38 runs, fit error 0.057 % | G1 |
-| TPP depends on which noise levels the loss weighs: 40 to 72 over the weightings tried; the cleaner the level, the larger the optimal model | single-level fits | G1, the score's t grid |
-| Repetition: up to about 50 passes no measurable loss; d12 +0.18 % at 59 passes, +2.3 % at 206; larger models degrade sooner. FD keeps falling, so FD does not show it | d9, d12 | G1, the epoch count |
-| Shape at equal compute: best width ÷ image layers 28 to 34 (512 × 15, 640 × 23, 896 × 32); 768 × 44 (17) within 0.03 % at 670M; ratio 5 level with the ladder | 3 sizes | G1, G4 |
+| Compute-optimal split N* ∝ C^0.50, D* ∝ C^0.50: tokens per parameter (TPP) about 50, flat over 3.6e18 to 2.3e20 FLOPs | 38 runs, fit error 0.057 % | the long run's size |
+| TPP depends on which noise levels the loss weighs: 40 to 72 over the weightings tried; the cleaner the level, the larger the optimal model | single-level fits | the long run's size, the score's t grid |
+| Repetition: up to about 50 passes no measurable loss; d12 +0.18 % at 59 passes, +2.3 % at 206; larger models degrade sooner. FD keeps falling, so FD does not show it | d9, d12 | the epoch count |
+| Shape at equal compute: best width ÷ image layers 28 to 34 (512 × 15, 640 × 23, 896 × 32); 768 × 44 (17) within 0.03 % at 670M; ratio 5 level with the ladder | 3 sizes | the shape, G4 |
 | Learning rate: one Muon lr for all sizes per budget, falling as C^−0.5 (halved per 4× compute); the optimum is flat, ×0.5 to ×1 within 0.06 % | ×1/8 to ×4 | C2, the lr of a long run |
 | Weight decay with Muon: lr × steps × decay = 5 is best for the loss; larger decay helps FD | d11, d12 | G8 (the norm ceiling stands in for decay here) |
 | Batch at equal compute: smaller is better down to 512; doubling raises the loss up to 0.60 %; d12 512 → 1024 +0.005 %, 1024 → 2048 +0.10 %; a √2 or 2× lr does not recover 2048 | d9 to d16 | C1 |
 | Cooldown: linear over the last 50 % beats 20 % by 0.22 to 0.24 %; 90 % and 1−√ no better | d11 | the anneal (SPEC §6) |
-| Cooldown against EMA: cooldown 0.4 to 1.0 % lower held-out loss at every budget; EMA 7.5 % lower FD at 1.1e20. EMA in short runs still holds the init | equal compute | D1 |
+| Cooldown against EMA: cooldown 0.4 to 1.0 % lower held-out loss at every budget; EMA 7.5 % lower FD at 1.1e20. EMA in short runs still holds the init | equal compute | no EMA (archive) |
 | Muon against AdamW: AdamW 0.7 to 2.1 % higher loss, 16 to 32 % higher FD (pixel space; a latent-space study cited there reports the opposite) | d9 to d12 | the optimizer choice |
 | Text layers: 2 to 3 best; changing them moves the loss at most 0.10 % | d9 to d14 | J6 |
 | Throughput: one caption-length bucket per step, fused residual + RMSNorm + adaLN and q/k norm + RoPE kernels | MFU 22.9 → 37.3 % | H1, H2 |
@@ -75,7 +75,5 @@ Wall-clock is open: the 128 px rate is in log 2026-11-18-a1-ref-1ep; 256 px thro
   only when the held-out set is from the training distribution; Lunara is out of it.
 - The seed noise of a 6000-step comparison (`a1-seed42-6k` against `a1-ref-1ep`): the handbook resolves 0.03 %; the
   bound used here, about 0.003 in caption loss (about 0.2 %), was never measured.
-- The cooldown's length. A tenth of the pass, cosine, buys 0.95 % at one pass (log 2026-11-18-anneal3k), in the
-  handbook's range; its best is half the run, linear, which is not tried here.
 - Whether a longer run wants a lower lr (the C^−0.5 exponent), read by a 2× length pair once the long-run length is
   chosen.

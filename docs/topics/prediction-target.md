@@ -50,8 +50,8 @@ Reading:
 Settle: one arm against the reference, read on `loss_by_t` (SPEC §8). First read the existing runs' loss by t; the
 score grid holds it.
 
-Interaction: the training t is logit-normal (G7), so the ends carry little mass. At σ 1, which the merged-set
-references so far trained at (G7), they carry more than at SPEC's σ 0.7.
+Interaction: the training t is logit-normal (SPEC §4), so the ends carry little mass. At σ 1, which the merged-set
+references before `a1-ref-1ep` trained at, they carry more than at SPEC's σ 0.7 (archive 2026-11-18-timestep-sigma).
 
 ## K2. An anisotropic target (AnisoFlow)
 

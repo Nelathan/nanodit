@@ -43,7 +43,7 @@ Plain DiT: no text tokens in the sequence, bidirectional mixing over image token
 | Component | Decision |
 |---|---|
 | Width | 768 |
-| Depth | 24 layers; the depth of a long run is open (PLAN G1) |
+| Depth | 24 layers |
 | Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer |
 | Mixer | A depthwise 3×3 conv over the modulated input, then an output Linear of width → width − 128 into the meta channels, a branch norm and the gate; the conv blocks add nothing to the 128 image channels |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
@@ -94,15 +94,17 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 - Every tracked matrix takes Usui's trust step, so `lr` is the relative step, and its Frobenius norm is clipped at the norm it has at its first step (Usui's `norm_bounds = (None, 1)`): each matrix lives in the ball of its init radius, set by its init (§5), with no floor and no weight decay. No tracked matrix is zero-initialized (§5), so every one has an init norm.
 - Frame size: one rank fraction for every tracked matrix. Every matrix is framed on its input side (Usui's default `side = "right"`).
 - Frames drawn at random when the optimizer is built (Usui's group key `frame_init = "random"`): behind the zero-initialized gates every upstream gradient starts at zero, so a first-gradient fit has nothing to find.
-- Linear LR warmup on both optimizers, then a constant lr. An anneal is a run of its own, continued from a checkpoint: Usui's lr falls by a cosine to 1e-5 over at most one epoch, the fallback's by the same factor.
+- Linear LR warmup on both optimizers, then a constant lr. An anneal is a short run of its own, continued from a checkpoint, for eval or as post-training: Usui's lr falls by a cosine to 1e-5, the fallback's by the same factor. No EMA of the weights, no merging of checkpoints.
 - Everything that is not a 2-D Linear weight, and the adaLN tables, train on Usui's fallback, `StochasticAdamW`, at its default betas and without weight decay.
 - Weight gradients through Usui's `Molegrad` (no `G` formed for tracked matrices); batches are built by gradient accumulation over micro-batches.
 - Precision: the model's parameters and activations are bf16; both optimizers write with stochastic rounding.
 
 ## 7. Training schedule
 
-1. 128 px — LR sweep, then the main run.
-2. 256 px — continue from the 128 px checkpoint, timestep shift raised.
+About 50 image tokens per image parameter in all:
+
+1. 128 px — eight epochs.
+2. 256 px — three epochs, continued from the 128 px checkpoint, timestep shift raised.
 
 ## 8. Sampling and eval
 

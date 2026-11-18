@@ -21,6 +21,15 @@ by (usuitrack `frame.tangent_spectra`), one stacked, launch-bound call that sync
 usuitrack branch, the turn without `eigh` against the current one, by loss and `grad_capture_probe`; merged only
 if it holds.
 
+### A4. The polar step over the writers' two geometries
+
+The writers (`out`, `cross_out`, `w_down`, `conv.out`) stack rows that write the 128 image channels on rows that
+write the meta channels; the image rows read out as the prediction, the meta rows as workspace. The polar step
+orthogonalises the stacked matrix as one, as Muon on stacked heads does across heads that each have their own
+geometry: it trains, the alignment is wrong. *Hypothesis*: a polar step per row block (image, meta) fits each role.
+Related: G8's bound per output row. Settle: first whether the image rows' and the meta rows' gradients differ in
+spectrum on a checkpoint; then a usuitrack branch. State: proposed, no read.
+
 ---
 
 ## Group B. Data and conditioning
@@ -49,7 +58,7 @@ The 128 px latents were encoded from a torch bicubic antialiased resize of the 5
 
 ### B6. The data sets and the encode
 
-Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I's last two subsets are being encoded; the merged set per aspect bucket and its stream are built (archive 2026-11-13-merged-training-set), the 128 px set waits on the encode. The bucket set is open in the topic.
+Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, the 512-d token states, Fine-T2I and its buckets). State: text-to-image-2M is encoded fused at 128 and 256 px; Fine-T2I's last two subsets are being encoded; the merged set per aspect bucket and its stream are built (archive 2026-11-13-merged-training-set), the 128 px set waits on the encode. The bucket set is open in the topic. The subsets differ in caption quality (the LLaVA-captioned ones are weaker); the handbook's data recipe (equal weight per dataset, long captions only, `topics/scaling.md`) is not tried here.
 
 ### B7. Defective captions in `set_128`
 
@@ -98,7 +107,8 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 *Decided* (2026-11-16): usui lr 2e-3. At 6000 constant-lr steps at d768x12 on the merged set it ends 0.0113 ahead of
 4e-3 (`log/2026-11-14-reference-6k-lr2e-3.md`); the curve does not say 2e-3 is the optimum, and it is carried to
 depth 24 untested there (G4). Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at 2e-3. Settle:
-config-only arms against the reference.
+config-only arms against the reference. 1e-3 is not tried at depth 24 or at length; the handbook's lr falls as
+compute^−0.5 (`topics/scaling.md`), so a longer run may want it, and a short arm may not show it.
 
 ### C3. Timestep shift values per stage
 
@@ -111,12 +121,6 @@ Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, th
 ---
 
 ## Group D. Sampling and eval
-
-### D1. EMA weights
-
-Leaning no. Option on the table: render the eval grid from both raw and EMA
-weights and drop EMA if they match. The handbook finds a cooldown 0.4 to 1.0 % ahead of EMA in held-out loss and EMA
-ahead in FD at its largest budget (`topics/scaling.md`); A cooldown of a tenth of the pass buys 0.95 % here (log 2026-11-18-anneal3k); EMA is not measured.
 
 ### D2. Guidance scale
 
@@ -141,7 +145,8 @@ weak; FD-DINOv2 is the alternative), and against which reference set.
 The score is on Lunara: synthetic art, out of the training distribution. Without an in-distribution holdout, a
 capacity limit cannot be told from a style gap (`references/handover-2026-11-12-residual-gating.md`, E5a). Settle: a
 few thousand rows of the merged set held out of `set_128` and scored beside Lunara. That needs a reshuffle, or rows
-that are dropped from training by key.
+that are dropped from training by key. The rows come from the stronger Fine-T2I subsets; scored at 256 px as well as
+128 px once the 256 px stage runs.
 
 ### D7. A read of prompt following
 
@@ -220,36 +225,6 @@ SiTU-GLU). In `topics/speedrun-ports.md`. Settle: one arm each, read on loss and
 
 ## Group G. Scale and signal propagation
 
-### G1. How deep the long run is
-
-*Decided* (2026-11-12): width 768; the model grows in depth. *Decided* (2026-11-16): depth 24 is the
-reference (`configs/a1-ref-1ep.toml`, micro-batch 64 since 2026-11-17, H2); 16 and 32 stay candidates. Open: the depth of the long run, and the MLP
-ratio at that length. Settle: a 30-step microbench per depth for img/s and peak
-memory, then the step budget the run can afford.
-
-The aim (*Decided*, 2026-11-17): an efficient model of about 200M parameters, trained toward saturation.
-*Proposed* (2026-11-18): the handbook's compute-optimal ratio, about 50 image tokens per image parameter, as eight
-epochs at 128 px and three at 256 px (`topics/scaling.md`, The budget). Whether the ratio carries over from pixel
-space to these latents, and whether Usui moves it, is open.
-
-Raised again with the reference at depth 24 (`references/gemini-thread-adaln-and-architecture.md`,
-`references/handover-2026-11-12-residual-gating.md` E6):
-- **Size.** About 200M parameters is the size wanted. Whether it is spent as d1024 at less depth is open; depth buys
-  the conv reach. Width 768 is *Decided* (2026-11-12); a wider arm reopens it and needs a comparison per wall-clock.
-  A wider model has lower loss at once and trains slower.
-- **Equal parameters, equal wall-clock.** The handover's arms: 768 × 32 against 1024 × 16, with 2048 × 8 as a third.
-  *Hypothesis*: depth wins at 768, because the conv blocks' reach grows with depth and 640 meta channels are ample
-  workspace for a 128-d prediction.
-- **Conv reach.** It matters from 256 px on. Corner to corner, the 8 × 8 grid at 128 px takes 7 3×3 convs and the
-  16 × 16 grid at 256 px takes 15: depth 12 (9 convs) never spans it, depth 24 (18 convs) does.
-- **The handover's other predictions:** 2048 × 8 wins loss per wall-clock and loses binding (2 attention blocks, little
-  conv reach), the fix being attention in every other block; and the optimizer's per-matrix cost becomes nearly
-  depth-independent once same-shape matrices are stacked (H1).
-- **Shape.** The handbook's equal-compute optimum is width ÷ layers 28 to 34; d768x24 is 32. Its own topic doc:
-  `topics/scaling.md` (the handbook's numbers, what carries over, the budget in this model's terms).
-- **Memory.** There is no activation checkpointing (`model.py`, `train.py`), so width and micro-batch are sized by
-  activations. The 1ep reference ran out of memory at step 19,600 (HANDOVER).
-
 ### G2. Patch size
 
 Patch 8 gives 64 tokens at 128 px. Patch 4 gives 256: about 4× the FLOPs at the same parameters, the axis DiT
@@ -295,16 +270,6 @@ not measure prompt following (the caption-versus-null gap stayed near 0.002 at e
 Observation, not recorded in a log: objects, not only the mood, appear in samples after about 10M images (on an earlier
 model).
 
-### G7. Does the narrower timestep distribution hold at hero length and in the samples?
-
-The training t is logit-normal with σ 0.7 (SPEC §4, archive 2026-11-04). The 3000-step arms at d768x12 gave it a small, consistent edge at t 0.26 to 0.66 and a loss at t 0.16 and 0.84 (FACTS, Timestep distribution arms). Open:
-- Whether the edge survives a long run, and whether the extremes (t 0.16 and 0.84) fall behind in R² over it: the score grid carries both, every 1000 steps.
-- Whether the narrower distribution costs sample quality at the ends (high t sets the composition, low t the sharpness); R² does not say, the eval grids do. At one pass of depth 24 σ 0.7 is ahead at every eval, 0.0012 to 0.0034 after 12000 steps, and behind at t 0.16 (log 2026-11-18-a1-ref-1ep). In the sampler the forms of the eval grid, defects included, are fixed between t 0.8 and 0.67 (log 2026-11-18-residual-writes); σ 0.7 trains fewer samples than σ 1 above t ≈ 0.69. The two grids at 16000 show no visible difference.
-- `128_d1024x16_swpin_5ep` trained at σ 1 (its config predates the default), so the continuation at usui lr 1e-4 (archive 2026-11-05) is the first long run at σ 0.7.
-- Every reference config since the decision states `t_sigma = 1.0`: the 6000-step references on the merged set and
-  `128_d768x24_1ep` (their `config.toml` in the run directories). No run on the merged set has trained at SPEC §4's σ 0.7.
-  *Decided* (2026-11-17): the references train at σ 0.7, as SPEC states; `configs/a1-ref-1ep.toml` carries it.
-
 ### G8. What the norm ceiling leaves open
 
 Every Usui matrix takes the trust step inside the ball of its init norm (SPEC §6, archive 2026-11-12); this differs
@@ -320,10 +285,12 @@ Open:
 - Bounds per role, and a zero-initialized matrix: Usui's bounds are multiples of the init norm, so a matrix that
   starts at zero cannot take them; none does here (§5).
 - Reading: EDM2's magnitude-preserving layers (REFERENCES, Objective).
+- The bound binds by the end of one pass of `a1-ref-1ep` (its `score.jsonl`, `weights.norm_ratio`); what it does
+  over further epochs is not seen.
 
 ### G9. Does Usui hold back the rank the weights grow into, and can it be helped?
 
-Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-epoch run against pretrained models, the reading, the candidates). State: open, no arm agreed; the rank 0.5 arm and the dense-gradient probe are not wanted. New candidates: activation rank against weight rank per layer, and stochastic rounding switched off for a stretch; the stable rank per role is now logged at every eval.
+Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-epoch run against pretrained models, the reading, the candidates). State: open, no arm agreed; the rank 0.5 arm and the dense-gradient probe are not wanted. New candidates: activation rank against weight rank per layer, and stochastic rounding switched off for a stretch; the stable rank per role is now logged at every eval. Over one pass of `a1-ref-1ep` every block role's stable rank falls and none turns upward (log 2026-11-18-a1-ref-1ep); read again over the long run's further epochs.
 
 ### G10. The depthwise conv, placed differently
 
@@ -348,6 +315,9 @@ the basic form. adaLN stays for the conv layers.
 *Decided* (2026-11-16): the GDN2-style gated update (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`) is replaced by the
 basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
 into the image channels. Open: a better conv block that keeps the meta-only write, a gated conv first.
+*Hypothesis* (2026-11-18): the basic conv informs about locality but washes or copies it. In `a1-ref-1ep` the
+detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes), and edges in the eval grids repeat into
+neighbouring tokens (seen, not measured). The gated conv below is the arm.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
 - **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
@@ -416,7 +386,8 @@ speed at half the peak; captions cut at 512 token states (SPEC §1), which bound
 against any caption length, within 0.35 ms per call either way on captions without an outlier;
 to remove the outlier's whole cost the token states are packed before `cross_kv` too, not only in the attention call. A retry of a step that runs out of
 memory (the same micro-batches, after freeing the cache) is *Decided* acceptable (2026-11-17) and not built; it would only
-help against another job's memory on the shared GPU. State: open.
+help against another job's memory on the shared GPU. Batching by caption length, the handbook's answer, is *Not
+wanted* (2026-11-18): packing is the direction here. State: open.
 
 ---
 
@@ -446,7 +417,8 @@ over depth, from a checkpoint. State: the preferred direction, no arm.
 The token states as extra keys and values of self-attention, static, with no queries or MLP of their own; the cross
 sublayer goes, and every head attends to both. Open: the token states' own K/V projection per block, or one global
 Linear 512 → width that translates them once, after which each block's `qkv` serves both. Settle: an arm read on the
-samples and on D7. State: the preferred direction.
+samples and on D7. With joint attention, attention writes the image channels (M4 then does not apply to it). State:
+the preferred direction.
 
 ### J3. A null key and value in cross attention
 
@@ -535,3 +507,12 @@ embeddings, recalled). Shares its mechanism with J1's t re-injection. State: pro
 The conv's meta-only write extended to self-attention and cross attention, so the meta lanes carry the context and only
 the per-token MLP writes the slice. A dedicated print step at the end is *Not wanted* (2026-11-17): skips (K1) carry
 x_t, not idle channels. State: proposed, no arm.
+
+### M5. Separate lanes, the image lane apart
+
+The stream split into lanes in the manner of DeepSeek's hyper-connections: one lane of 128 for the image, three of
+768 or 512 for the workspace. No sublayer reads or writes the image lane directly; it is written only through the
+learned lane mixing. Open: whether that keeps the activations bounded. HC with a learned, unconstrained mixing
+matrix compounds its gain over depth; mHC bounds it by Sinkhorn and SimpleHC finds identity mixing as good
+(`topics/residual-lanes.md`, Background). Lanes of unequal width need a projection in the mixing, which no
+source here has. State: proposed, no arm.
