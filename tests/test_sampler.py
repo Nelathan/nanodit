@@ -71,6 +71,21 @@ def test_guidance_is_null_plus_scale_times_text_minus_null(guidance):
     assert torch.allclose(out, torch.full_like(out, 1 + 2 * guidance))
 
 
+def test_guidance_1_runs_the_conditional_branch_only():
+    class Counter(Probe):
+        rows = 0
+
+        def __call__(self, x_t, t, prompt):
+            self.rows += len(x_t)
+            return super().__call__(x_t, t, prompt)
+
+    net = Counter()
+    out = euler_sample(net, torch.zeros(2, 2, 8, 8), stub_prompt(2, 1), steps=3, guidance=1.0)
+    assert net.rows == 2 * 3  # two images, three steps, no null rows
+    reference = euler_sample(Probe(), torch.zeros(2, 2, 8, 8), stub_prompt(2, 1), steps=3, guidance=1.0 + 1e-9)  # the guided path, at guidance 1 in effect
+    assert torch.allclose(out, reference)
+
+
 def test_the_network_is_called_at_the_start_of_each_step_from_1_to_0():
     probe = Probe()
     euler_sample(probe, torch.zeros(2, 2, 8, 8), stub_prompt(2, 1), steps=4, guidance=1.0)

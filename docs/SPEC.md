@@ -109,7 +109,7 @@ About 50 image tokens per image parameter in all:
 
 ## 8. Sampling and eval
 
-- Sampler for eval: Euler, 30 steps, guidance 1, where CFG reduces to the conditional prediction. CFG is for post-training.
+- Sampler for eval: Euler, 30 steps, guidance 1: the conditional prediction alone, the null branch not run. CFG is for post-training.
 - dpmpp_2m with the beta scheduler is allowed for best-looking samples, separately from the eval grid.
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little), with R² = 1 − loss·t²/E, E the mean square of the clean latents. The F loss is the clean-latent error over t, so R² is the share of the latents' energy the prediction recovers from the noisy input: 0 is no better than predicting zero, 1 is exact. It falls with t by construction (more noise, less to recover), so it is read across steps at one t, not across t. Ten equal-width buckets in the records; wandb shows five (each the pooled pair).
