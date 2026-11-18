@@ -104,7 +104,7 @@ Consequence of the concatenated patch embed with x0 velocity: the zero gates mak
 
 About 50 image tokens per image parameter in all:
 
-1. 128 px — eight epochs.
+1. 128 px — eight epochs at batch 256.
 2. 256 px — three epochs, continued from the 128 px checkpoint, timestep shift raised.
 
 ## 8. Sampling and eval

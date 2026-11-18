@@ -45,7 +45,8 @@ convention is a shift toward noise with σ 0.8, close to the σ 0.7 here plus a 
   transfers. The exponent may: a run 4× longer would want about half the lr (*Hypothesis*; the reference's 2e-3 was
   chosen on 3000- to 6000-step arms).
 - **Batch.** Its smallest batch, 512, is twice ours. The direction (smaller wins at equal images until the step's
-  noise dominates) is the C1 question; `a1-b128-6k` and `a1-b128-lr14-6k` read it at 128 px.
+  noise dominates) held over 1.5M images at 128 px, at the full lr only, and 256 is kept for its speed (archive
+  2026-11-18-batch-256).
 - **The score's t.** Its held-out loss weighs the training distribution's quantiles; the score here weighs the shift-1
   logit-normal's (SPEC §8), whatever t the run trains on. Both are fixed grids, so both rank runs; they weigh the
   extremes differently, which by its result moves TPP.
