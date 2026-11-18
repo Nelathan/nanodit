@@ -38,16 +38,17 @@ while the lr 1.4e-3 arm, which compares against it, runs):
    Its checkpoint is deleted once the batch question is settled.
 2. `a1-b128-lr14-6k`: the same at usui lr 1.4e-3 (fallback 1.75e-3). Running.
 3. `a1-attnfirst-6k`: the attention block first in each period of four (F4), 6000 steps.
-4. `a1-seed42-6k`: the reference at seed 42, 6000 steps: the seed noise that every arm's read needs.
+4. `a1-seed42-6k`: the reference at seed 42, 6000 steps: the seed noise that every arm's read needs. It runs from a
+   worktree `../tiny-dit-seed42` at `9da2709` (`/tmp/arm_queue3.sh`, `PYTHONPATH` on the worktree's `src`), so it
+   trains on the reference's code, which does not read the held-out list. Remove the worktree when it ends.
+
+`set_128` holds out 1,000 rows since 2026-11-18 (`heldout_keys.txt`, archive 2026-11-18-heldout-set); their rows are
+`/run/media/djg/vel-ssd/tiny-dit/heldout_128_fine_flux2.parquet`. A new run from `configs/a1-ref-1ep.toml` scores
+them and renders its grid at guidance 1; a continuation of `a1-ref-1ep` drops `heldout_set` from its config.
 
 ## Waiting on a decision
 
 - **The long run's batch** (PLAN C1), after arms 1 and 2, and with the seed noise from arm 4.
-- **The in-distribution held-out set** (PLAN D6): a few thousand rows of the stronger Fine-T2I subsets kept out of
-  training by key. It must exist before the long run starts. `exclude_captions.py` rewrites the defect list on every
-  run, so the held-out keys need their own list, or that script changes.
-- **Guidance off above t ≈ 0.8** on the anneal's checkpoint, a free sampling read of whether CFG at high noise makes
-  the form defects. Proposed, not run.
 - **256 px**: the set needs `shuffle.py`'s latent cast to `large_binary` (2 GB per chunk at `binary`), then the
   build; throughput at 256 px is unmeasured.
 
