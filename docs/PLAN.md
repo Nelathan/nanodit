@@ -85,7 +85,8 @@ fraction if the frame's live share falls (it was read as `tangent_live_fraction`
 throughput is unmeasured. Settle: when the 256 px stage is planned.
 
 At 128 px batch 128 is ahead of 256 at equal images over 1.5M images, per wall-clock too, the lead shrinking (log
-2026-11-18-batch-128). Open: whether the lead holds over a pass, which decides the long run's batch.
+2026-11-18-batch-128); at lr 1.4e-3 it falls back level with 256 (log 2026-11-18-batch-128-lr14). Open: whether
+the lead holds over a pass, which decides the long run's batch.
 
 Batch 512 at 128 px (`references/handover-2026-11-12-residual-gating.md`, E4, recomputed): at d768x24 only about 59 ms of
 the 430 ms step is fixed per step, the Usui and fallback steps (FACTS, Step time at d768x24). Doubling the batch
