@@ -1,8 +1,9 @@
 # nanodit
 
-A from-scratch text-to-image diffusion transformer, trained on one RTX 4070 Super (12 GB).
-The question it answers: can a small DiT built on this season's promising pieces produce images at all, and which
-of those pieces earn their place when each is measured?
+A from-scratch text-to-image diffusion transformer, trained on one RTX 4070 Super (12 GB). Two aims: 1) a small
+model that renders prompts, trained toward saturating its size on public data in days on one consumer GPU; 2) a
+measured record of which of this season's pieces earn their place, each read by held-out loss in a paired arm, one
+seed each.
 
 - **Target:** Ostris's *x0 velocity* parameterization of rectified flow
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched 8×8 by the DiT itself into 128-d tokens
@@ -18,15 +19,30 @@ It is a research log as much as a codebase: every design choice is in `docs/SPEC
 
 ## Where it stands
 
-128 px only so far. The model, objective, sampler, data stream and training harness are built and tested; the
-architecture was settled by short paired arms (3000 to 6000 steps at width 768, depth 12, about 123M parameters). No
-long run of the current architecture exists yet; the longest run, five epochs of an earlier one, is in FACTS. The
-256 px stage and the second dataset (Fine-T2I) are not trained on yet.
+![The 16 fixed eval prompts after 9.06M images at 128 px](docs/log/2026-11-18-samples/a1-ref-1ep-anneal3k_35373.png)
 
-![16 fixed prompts after 6000 steps at 128 px](docs/log/2026-11-07-samples/arch_cross_6k.png)
+*The 16 fixed eval prompts, each from its own fixed noise: d768 × 24 (205M parameters) after 9.06M images at 128 px,
+one pass over the 8.24M-pair training set plus a cooldown of a tenth of a pass, about 4.3 hours on the one GPU. Euler,
+30 steps, guidance 4. Mood, palette, layout and lighting follow the prompt; the forms are not finished.*
 
-*The 16 fixed eval prompts after 6000 steps of batch 256 (about 35 minutes), 128 px, the cross-attention arm: mood and
-palette follow the prompt, shapes are starting. This is a trial arm, not a result.*
+One model is trained end to end: architecture **a1** (`docs/SPEC.md`), 128 px only. The 256 px stage is not trained yet.
+
+| | |
+|---|---|
+| Training set | text-to-image-2M and Fine-T2I, deduplicated: 8.24M pairs in seven aspect buckets |
+| Model | width 768, 24 blocks (18 conv, 6 attention), 191M image parameters + 13M conditioning |
+| Optimizer | UsuiTrack on the matrices, relative step 2e-3, each matrix inside the ball of its init norm; StochasticAdamW on the rest |
+| Batch | 256 images (16k tokens), constant lr after a short warmup; a cosine cooldown is its own short run |
+| Timestep | logit-normal, σ 0.7 |
+| Throughput | about 590 images/s at 128 px on an RTX 4070 Super |
+| Score | held-out loss on 1,000 Lunara pairs, never trained on, 10 fixed t with fixed noise: 1.4242 after one pass, 1.4106 after the cooldown (`docs/log/2026-11-18-*`) |
+
+**How things are decided.** The held-out loss on fixed rows, fixed noise and a fixed t grid is the metric, as in
+large-scale scaling work on text-to-image models: it is the training objective itself, comparable across runs, and
+far less noisy than sample metrics. Samples are read beside it, for what loss does not measure. A design question is
+settled by one paired arm against the reference: the same seed, data order and eval rows, one change. The next
+steps (an in-distribution held-out set, 256 px, saturating this size at about 50 image tokens per parameter) are in
+`docs/PLAN.md`.
 
 ## Layout
 
