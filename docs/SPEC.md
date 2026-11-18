@@ -13,6 +13,7 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Resolutions | 128 px and 256 px, each a Lanczos resize of the 512 crop. 512 px skipped for now |
 | Captions | full caption as encoded; in training and at sampling the token states are cut at 512, with a warning |
 | Excluded rows | a set's `excluded_keys.txt` lists the keys of rows that are never streamed: captions that match a defect pattern (escaped bytes, a short unit repeated 12 times or more, a leaked chat template, any CJK character, empty). The shuffle writes it empty and `scripts/exclude_captions.py` fills it |
+| Held-out rows | a set's `heldout_keys.txt` lists the keys of its held-out eval set, never streamed: 1,000 rows of Fine-T2I's square subset with enhanced prompts, generator FLUX.2-dev, the 1,000 with the smallest SHA-256 of their key, not among the excluded. The shuffle writes it empty and `scripts/holdout.py` fills it and writes their rows |
 | Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
 | Text prefix | none: the caption is encoded as it is, for training and inference |
 | Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |
@@ -108,10 +109,10 @@ About 50 image tokens per image parameter in all:
 
 ## 8. Sampling and eval
 
-- Sampler for eval: Euler, 30 steps, CFG. Guidance scale tuned on the grid.
+- Sampler for eval: Euler, 30 steps, guidance 1, where CFG reduces to the conditional prediction. CFG is for post-training.
 - dpmpp_2m with the beta scheduler is allowed for best-looking samples, separately from the eval grid.
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little), with R² = 1 − loss·t²/E, E the mean square of the clean latents. The F loss is the clean-latent error over t, so R² is the share of the latents' energy the prediction recovers from the noisy input: 0 is no better than predicting zero, 1 is exact. It falls with t by construction (more noise, less to recover), so it is read across steps at one t, not across t. Ten equal-width buckets in the records; wandb shows five (each the pooled pair).
-- Score at every eval: the loss on an eval set never trained on, with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t.
+- Score at every eval, on two sets never trained on: Lunara (out of the training distribution) and the set's held-out rows (§1, in it), each into its own record; a run that continues one trained on the held-out rows scores Lunara only. The score is the loss with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t.
 - At every eval, of the tracked matrices: the global Frobenius norm and its ratio to the init norm, and per role (the parameter name without the block index, prefixed by the block's mixer) the stable rank `‖W‖²_F / σ²_max` over the shorter side, averaged over the role's blocks; and per role the norm of each matrix's step before the lift, `‖unit_polar(moment)‖`, averaged over the role's blocks.
 - Logs: plain JSONL files, the record: one line per `log_every` steps, the reads averaged over them on the GPU. The same values and the eval grid stream to wandb for live curves.

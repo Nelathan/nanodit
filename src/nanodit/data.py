@@ -12,6 +12,7 @@ from torch import Tensor
 from .model import LATENT_CHANNELS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
 
 EXCLUDED = "excluded_keys.txt"  # in a set's directory: the keys of rows never streamed, one per line (SPEC §1)
+HELDOUT = "heldout_keys.txt"  # in a set's directory: the keys of its held-out eval rows, never streamed either (SPEC §1)
 MAX_TOKENS = 512  # token states a caption keeps; a longer one is cut, with a warning (SPEC §1)
 BLOCK_ROW_GROUPS = 4  # rows read and reshuffled together: 4 row groups of up to 1024 rows, about 180 MB at 128 px; two per bucket in memory
 
@@ -118,16 +119,16 @@ class Bucket:
 
 class Stream:
     """Micro-batches from a training set directory, each from one aspect bucket, the bucket drawn with probability
-    proportional to its rows, so over a pass every bucket is visited as often as it has rows (excluded rows counted:
-    they are a few in millions). The order follows the seed."""
+    proportional to its rows, so over a pass every bucket is visited as often as it has rows (excluded and held-out
+    rows counted: they are a few in millions). The order follows the seed."""
 
     def __init__(self, path: str, resolution: int, batch: int, device: torch.device, dtype: torch.dtype, seed: int):
         self.rng = np.random.default_rng(seed)
         reader = ThreadPoolExecutor(1)
         files = sorted(Path(path).glob("*.parquet"))
         assert files, f"no bucket files in {path}"
-        excluded = frozenset((Path(path) / EXCLUDED).read_text().split())
-        self.buckets = [Bucket(f, resolution, batch, device, dtype, self.rng, reader, excluded) for f in files]
+        self.excluded = frozenset((Path(path) / EXCLUDED).read_text().split() + (Path(path) / HELDOUT).read_text().split())
+        self.buckets = [Bucket(f, resolution, batch, device, dtype, self.rng, reader, self.excluded) for f in files]
         rows = np.array([b.rows for b in self.buckets], dtype=float)
         self.p = rows / rows.sum()
 

@@ -1,6 +1,7 @@
 # Scaling: model size, data, schedule and eval against a compute budget
 
-Topic doc for the size and length of the long run (PLAN C1, C2, D6, D8; archive 2026-11-18-long-run-size and 2026-11-18-no-ema-no-merging). Opened 2026-11-18 from W. Chai, "How
+Topic doc for the size and length of the long run (PLAN C1, C2, D8; archive 2026-11-18-long-run-size, 2026-11-18-no-ema-no-merging and
+2026-11-18-heldout-set). Opened 2026-11-18 from W. Chai, "How
 to Scale Text-to-image Models: a Handbook" (REFERENCES, Scaling), the first iso-FLOP study of text-to-image DiTs with
 a recipe close to this one (a matrix optimizer, held-out loss, fixed noise). Measured numbers go to FACTS, closures to
 `archive/`.
@@ -15,7 +16,7 @@ distribution), one fixed noise per image and level. Its numbers, as stated there
 
 | Finding | Number | Bears on |
 |---|---|---|
-| Held-out loss tracks FD and FD-DINOv2 and is far less noisy: seed std 0.03 % against 2.0 % for FD; in 20 of 60 sweeps the gap beats twice the seed noise, against 1 for FD | 4 seeds of d9 | D5, D6, the arm protocol |
+| Held-out loss tracks FD and FD-DINOv2 and is far less noisy: seed std 0.03 % against 2.0 % for FD; in 20 of 60 sweeps the gap beats twice the seed noise, against 1 for FD | 4 seeds of d9 | D5, the held-out set, the arm protocol |
 | Compute-optimal split N* ∝ C^0.50, D* ∝ C^0.50: tokens per parameter (TPP) about 50, flat over 3.6e18 to 2.3e20 FLOPs | 38 runs, fit error 0.057 % | the long run's size |
 | TPP depends on which noise levels the loss weighs: 40 to 72 over the weightings tried; the cleaner the level, the larger the optimal model | single-level fits | the long run's size, the score's t grid |
 | Repetition: up to about 50 passes no measurable loss; d12 +0.18 % at 59 passes, +2.3 % at 206; larger models degrade sooner. FD keeps falling, so FD does not show it | d9, d12 | the epoch count |
@@ -71,8 +72,7 @@ Wall-clock is open: the 128 px rate is in log 2026-11-18-a1-ref-1ep; 256 px thro
 
 ## Open here
 
-- The in-distribution held-out set (D6), and scoring at 256 px. The handbook's case for held-out loss over FD holds
-  only when the held-out set is from the training distribution; Lunara is out of it.
+- Scoring at 256 px, on Lunara and on the held-out rows (archive 2026-11-18-heldout-set), once the 256 px set exists.
 - The seed noise of a 6000-step comparison (`a1-seed42-6k` against `a1-ref-1ep`): the handbook resolves 0.03 %; the
   bound used here, about 0.003 in caption loss (about 0.2 %), was never measured.
 - Whether a longer run wants a lower lr (the C^−0.5 exponent), read by a 2× length pair once the long-run length is

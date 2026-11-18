@@ -11,6 +11,7 @@ from safetensors.torch import load_file, save_file
 
 from conftest import PAIR, open_gates
 from test_data import shuffle_module, write_shard
+from nanodit import data
 from nanodit.data import pad_sequences
 from nanodit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
 from nanodit.objective import flow_loss as real_flow_loss
@@ -205,6 +206,21 @@ def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
     torch.testing.assert_close(result["r2_caption_by_t"], r2_by_t)
     torch.testing.assert_close(result["r2_caption"], sum(r2_by_t) / 2)
     torch.testing.assert_close(train.score(Echo(), x, prompt, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
+
+
+def test_held_out_rows_are_scored_beside_the_eval_set_and_must_be_out_of_the_stream(train, tmp_path, monkeypatch):
+    stub_models(monkeypatch, train)
+    config = write_config(tmp_path, steps=3, eval_every=2)
+    config.write_text(config.read_text() + f'heldout_set = "{tmp_path / 'eval' / '32x32.parquet'}"\n')  # keys k0 to k4, also rows of the training set
+    with pytest.raises(AssertionError, match="training stream"):
+        train.main(str(config))
+    (tmp_path / "s" / data.HELDOUT).write_text("".join(f"k{i}\n" for i in range(5)))
+    train.main(str(config))
+    run = tmp_path / "runs" / "smoke"
+    held = [json.loads(line) for line in (run / "score_heldout.jsonl").read_text().splitlines()]
+    scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
+    assert [h["step"] for h in held] == [s["step"] for s in scores] == [2, 3]
+    assert held[0]["loss_caption"] == pytest.approx(scores[0]["loss_caption"])  # the same rows, noise and t as the eval set here
 
 
 def test_existing_run_is_not_overwritten(train, tmp_path, monkeypatch):

@@ -35,7 +35,7 @@ One model is trained end to end: architecture **a1** (`docs/SPEC.md`), 128 px on
 | Batch | 256 images (16k tokens), constant lr after a short warmup; a cosine cooldown is its own short run |
 | Timestep | logit-normal, σ 0.7 |
 | Throughput | about 590 images/s at 128 px on an RTX 4070 Super |
-| Score | held-out loss on 1,000 Lunara pairs, never trained on, 10 fixed t with fixed noise: 1.4242 after one pass, 1.4106 after the cooldown (`docs/log/2026-11-18-*`) |
+| Score | held-out loss on 1,000 Lunara pairs, never trained on (from new runs on, also on 1,000 held-out rows of the training set), 10 fixed t with fixed noise: 1.4242 after one pass, 1.4106 after the cooldown (`docs/log/2026-11-18-*`) |
 
 **How things are decided.** The held-out loss on fixed rows, fixed noise and a fixed t grid is the metric, as in
 large-scale scaling work on text-to-image models: it is the training objective itself, comparable across runs, and
@@ -84,8 +84,9 @@ Training reads precomputed rows, not images. The pipeline, each step a script wi
 3. `shuffle.py`: both datasets into one training set per resolution, one Parquet per aspect bucket in uniformly
    random row order, each image once.
 4. `exclude_captions.py`: the set's `excluded_keys.txt`, the rows whose captions match a defect pattern.
-5. `precompute_lunara.py`: the eval set every run is scored on, never trained on.
-6. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, eval grids and checkpoints to the run directory and
+5. `holdout.py`: the set's `heldout_keys.txt` and the held-out eval set, 1,000 rows of the set never streamed.
+6. `precompute_lunara.py`: the out-of-distribution eval set, never trained on.
+7. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, `score_heldout.jsonl`, eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
 Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is

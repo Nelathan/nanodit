@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -86,8 +87,8 @@ def mixed(tmp_path, rows):
 def test_shuffle_writes_each_bucket_once_whole_and_in_a_new_order(mixed, rows):
     out, fine = mixed
     latents, embeddings, sequences = rows
-    assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet", data.EXCLUDED]  # parts and .tmp are gone
-    assert (out / data.EXCLUDED).read_text() == ""
+    assert sorted(p.name for p in out.iterdir()) == ["28x36.parquet", "32x32.parquet", data.EXCLUDED, data.HELDOUT]  # parts and .tmp are gone
+    assert (out / data.EXCLUDED).read_text() == (out / data.HELDOUT).read_text() == ""
     square, wide = pq.read_table(out / "32x32.parquet"), pq.read_table(out / "28x36.parquet")
     assert square.column_names == ["key", "source", "caption", "embedding", "sequence", "latent_32"]  # the other latent and Fine's spare columns stay behind
     assert square.schema.field("sequence").type == wide.schema.field("sequence").type == pa.binary()  # data._sequences reads int32 offsets
@@ -164,6 +165,38 @@ def test_an_excluded_row_is_never_streamed(mixed, monkeypatch):
     square = next(b for b in Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0).buckets if b.shape == (2, 16, 16))
     seen = [by_latent[bf16_bytes(row.bfloat16())] for _ in range(24) for row in square.next()[0]]  # two passes of 24 rows
     assert sorted(seen) == sorted(2 * [k for k in square_keys(out) if k not in ("k3", "k7")])
+
+
+def test_a_held_out_row_is_never_streamed(mixed, monkeypatch):
+    out, _ = mixed
+    monkeypatch.setattr(data, "BLOCK_ROW_GROUPS", 2)
+    (out / data.EXCLUDED).write_text("k3\n")
+    (out / data.HELDOUT).write_text("k7\nk9\n")
+    by_latent = keys_of(out)
+    square = next(b for b in Stream(str(out), resolution=32, batch=2, device=torch.device("cpu"), dtype=torch.float32, seed=0).buckets if b.shape == (2, 16, 16))
+    seen = [by_latent[bf16_bytes(row.bfloat16())] for _ in range(23) for row in square.next()[0]]  # two passes of 23 rows
+    assert sorted(seen) == sorted(2 * [k for k in square_keys(out) if k not in ("k3", "k7", "k9")])
+
+
+def test_holdout_takes_the_rows_of_its_subset_with_the_smallest_key_hash(rows, tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import holdout
+
+    latents, embeddings, sequences = rows
+    keys = [f"{holdout.SUBSET}r{i}" if i % 4 else f"other/r{i}" for i in range(20)]
+    write_shard(tmp_path / "32x32.parquet", latents, embeddings, sequences, keys)
+    table = pq.read_table(tmp_path / "32x32.parquet")
+    sources = [holdout.SOURCE if i % 5 else "Z-Image-Turbo" for i in range(20)]
+    pq.write_table(table.set_column(1, "source", pa.array(sources)), tmp_path / "32x32.parquet", row_group_size=3)
+    (tmp_path / data.EXCLUDED).write_text(keys[1] + "\n")
+    holdout.main(str(tmp_path), "4", str(tmp_path / "held.parquet"))
+    eligible = [k for i, k in enumerate(keys) if i % 4 and i % 5 and i != 1]
+    expected = sorted(eligible, key=lambda k: hashlib.sha256(k.encode()).digest())[:4]
+    held = pq.read_table(tmp_path / "held.parquet")
+    assert held["key"].to_pylist() == expected
+    assert (tmp_path / data.HELDOUT).read_text().split() == sorted(expected)
+    x, _ = data.read_rows(str(tmp_path / "held.parquet"), 32)
+    assert torch.equal(x, latents[[keys.index(k) for k in expected]])
 
 
 def test_a_bucket_streams_on_when_a_whole_block_is_excluded(mixed, monkeypatch):

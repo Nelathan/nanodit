@@ -125,10 +125,6 @@ Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, th
 
 ## Group D. Sampling and eval
 
-### D2. Guidance scale
-
-Tuned on the eval grid.
-
 ### D4. Sampler step schedule
 
 The sampler steps a uniform t grid; training samples a shifted logit-normal t. SD3
@@ -142,14 +138,6 @@ rendered by 8 models, with aesthetic, emotion and integrity scores) gives the ch
 Moonworks Lunara renders (SPEC §8; `eval_set` in the configs, `scripts/precompute_lunara.py`). `moonworks/lunara-aesthetic` (2,000 Lunara images, refined prompts) is held back
 for an aesthetic fine-tune or as FID references. Open: when FID starts, on which features (Inception at 128 px is
 weak; FD-DINOv2 is the alternative), and against which reference set.
-
-### D6. A held-out set from the training distribution
-
-The score is on Lunara: synthetic art, out of the training distribution. Without an in-distribution holdout, a
-capacity limit cannot be told from a style gap (`references/handover-2026-11-12-residual-gating.md`, E5a). Settle: a
-few thousand rows of the merged set held out of `set_128` and scored beside Lunara. That needs a reshuffle, or rows
-that are dropped from training by key. The rows come from the stronger Fine-T2I subsets; scored at 256 px as well as
-128 px once the 256 px stage runs.
 
 ### D7. A read of prompt following
 

@@ -15,8 +15,8 @@ Two passes, so fewer than 2 x DEAL_ROWS input rows and one part are in memory. P
 gives it parts of about PART_ROWS rows, then deals every row to a uniformly random part of its bucket; pass 2
 permutes each part in memory and appends it to its bucket's file. A random part per row, then a random order inside
 each part, is a uniformly random permutation of the bucket's rows. Each file is written as .tmp and renamed when
-complete; a bucket left without rows by the dedup gets no file. The set's `excluded_keys.txt` starts empty;
-`exclude_captions.py` fills it, after every shuffle. It needs the output's size in free disk, plus one
+complete; a bucket left without rows by the dedup gets no file. The set's `excluded_keys.txt` and
+`heldout_keys.txt` start empty; `exclude_captions.py` and `holdout.py` fill them, after every shuffle. It needs the output's size in free disk, plus one
 part. New data means running it again over all FILEs.
 """
 import hashlib
@@ -31,7 +31,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from nanodit.data import EXCLUDED
+from nanodit.data import EXCLUDED, HELDOUT
 from stage_fine import BUCKETS as FINE_BUCKETS
 
 PART_ROWS = 16384  # about 1 GB of sequences and latents at 128 px, the part pass 2 holds in memory
@@ -71,6 +71,7 @@ def shuffle(files: list[str], resolution: int, out_dir: Path) -> None:
     fields = pq.read_schema(files[0])
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / EXCLUDED).write_text("")  # a new set excludes nothing yet
+    (out_dir / HELDOUT).write_text("")
     writers, schemas = {}, {}
     for (h, w), n in sorted(counts.items()):
         schema = pa.schema([fields.field(c) for c in COLUMNS] + [pa.field(latent, pa.binary(LATENT_CHANNELS * (h // 2) * (w // 2) * 2))])

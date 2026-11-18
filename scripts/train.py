@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as pq
 import torch
 import wandb
 from PIL import Image
@@ -63,6 +64,7 @@ class Config:
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
     pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
+    heldout_set: str | None = None  # the dataset's held-out rows (scripts/holdout.py), scored beside eval_set into score_heldout.jsonl; none for a run continuing one that trained on them
     anneal_to: float | None = None  # an anneal run (SPEC §6), from a checkpoint with warmup = 0: Usui's lr falls by a cosine over `steps` to this value
 
 
@@ -197,14 +199,14 @@ def wandb_scalars(record: dict, by_t: dict) -> dict:
     return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
 
 
-def wandb_scores(scores: dict) -> dict:
-    """A score record, flat: the means under `eval/`, and each by-t series as the means of neighbouring grid points,
+def wandb_scores(scores: dict, name: str) -> dict:
+    """A score record, flat: the means under `<name>/`, and each by-t series as the means of neighbouring grid points,
     the t's of one fifth of the grid's probability mass each, in one group per topic,
-    `eval_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
-    flat = {f"eval/{key}": scores[key] for key in ("loss_caption", "r2_caption")}
+    `<name>_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
+    flat = {f"{name}/{key}": scores[key] for key in ("loss_caption", "r2_caption")}
     size = SCORE_TS // WANDB_BUCKETS
     for key in ("loss_caption_by_t", "r2_caption_by_t"):
-        flat |= {f"eval_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
+        flat |= {f"{name}_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
 
 
@@ -309,6 +311,11 @@ def main(config_path: str) -> None:
     score_x, score_prompt = read_rows(cfg.eval_set, cfg.resolution)
     score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
     score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
+    if cfg.heldout_set:
+        held_keys = pq.read_table(cfg.heldout_set, columns=["key"])["key"].to_pylist()
+        assert stream.excluded.issuperset(held_keys), "the held-out rows are in the training stream"
+        held_x, held_prompt = read_rows(cfg.heldout_set, cfg.resolution)
+        held_noise = torch.randn(held_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))
 
     run_dir.mkdir(parents=True)
     shutil.copy(config_path, run_dir / "config.toml")
@@ -340,7 +347,11 @@ def main(config_path: str) -> None:
             scores = score(model, score_x, score_prompt, score_noise, score_ts, cfg.micro_batch, device)
             weights = weight_reads(model, optimizers[0])
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores | dict(weights=weights))
-            wandb.log(wandb_scores(scores) | wandb_weights(weights), step=step)
+            wandb.log(wandb_scores(scores, "eval") | wandb_weights(weights), step=step)
+            if cfg.heldout_set:
+                held = score(model, held_x, held_prompt, held_noise, score_ts, cfg.micro_batch, device)
+                append_jsonl(run_dir / "score_heldout.jsonl", dict(step=step, t=score_ts.tolist()) | held)
+                wandb.log(wandb_scores(held, "heldout"), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only
