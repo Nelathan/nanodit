@@ -84,6 +84,9 @@ unit for diffusion (t sampling adds its own gradient noise). A smaller batch may
 fraction if the frame's live share falls (it was read as `tangent_live_fraction`, which the current pin no longer logs); it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
 throughput is unmeasured. Settle: when the 256 px stage is planned.
 
+At 128 px batch 128 is ahead of 256 at equal images over 1.5M images, per wall-clock too, the lead shrinking (log
+2026-11-18-batch-128). Open: whether the lead holds over a pass, which decides the long run's batch.
+
 Batch 512 at 128 px (`references/handover-2026-11-12-residual-gating.md`, E4, recomputed): at d768x24 only about 59 ms of
 the 430 ms step is fixed per step, the Usui and fallback steps (FACTS, Step time at d768x24). Doubling the batch
 projects to about 630–640 img/s against 596, +6–7 % (*Hypothesis*, arithmetic on that table, assuming forward/backward
