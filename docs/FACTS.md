@@ -82,9 +82,22 @@ Source: the two probe scripts, 2026-10-31, 16-core CPU with other processes runn
 
 `scripts/precompute.py 128`, shards 0–3, 2026-10-31 to 11-01, 12 threads, machine shared: 8.95 / 9.51 / 12.40 / 12.74 rows/s per shard (the log's rate is cumulative), about 93 / 88 / 67 / 65 min, the later ones on a less loaded machine. Shard 0 (load ≈ 15): cumulative rate 8.11 at its low after 4k rows, 8.95 at the end (Primal encode and ST in series; 1/20.5 + 1/15.2 s per row would give 8.7); output 912 MB. Read back against the source tar: 50,000 rows, unique keys in tar order; 9 sampled rows match their caption, re-encode to the stored latent (cosine 1.00000), embedding cosine 0.999999 to a fresh encode, decode PSNR 30.0 to 39.4 dB; peak RSS 9.9 GB (a 1024-row chunk held as fp32 at 512 px).
 
-## Parameter counts (2026-11-11)
+## Parameter counts (2026-11-18)
 
-`DiT` at its defaults (cross attention off), counted from the built model: d768 × 12 122.8M, d768 × 16 162.1M, d1024 × 16 287.7M.
+`scripts/count_params.py` on the current `DiT` (cross attention in every attention block, pooled adaLN on). Image
+parameters are the blocks without their cross attention and tables, and the patch embed; the rest is conditioning.
+
+| Shape | Total | Image | width ÷ depth |
+|---|---|---|---|
+| d768 × 12 | 104.8M | 95.7M | 64 |
+| d768 × 24 | 204.6M | 191.3M | 32 |
+| d768 × 28 | 237.9M | 223.2M | 27 |
+| d768 × 32 | 271.2M | 255.1M | 24 |
+| d1024 × 16 | 245.2M | 227.3M | 64 |
+| d1024 × 20 | 304.4M | 284.1M | 51 |
+| d1024 × 24 | 363.6M | 340.9M | 43 |
+| d1024 × 28 | 422.7M | 397.6M | 37 |
+| d1024 × 32 | 481.9M | 454.4M | 32 |
 
 ## Numbers kept with their topic
 
