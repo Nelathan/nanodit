@@ -2,13 +2,14 @@
 
 State on 2026-11-18: the reference `a1-ref-1ep` has finished its pass, and its cooldown `a1-ref-1ep-anneal3k` is the
 best model (score 1.4106, the README's grid). The long run's size, the training t and the end-of-run weights are
-decided (archive 2026-11-18). A queue of four config-only 6000-step-equivalent arms runs on the GPU. `PLAN.md` carries
+decided, as are the batch, a held-out eval set from the training data and the eval grid at guidance 1 (archive
+2026-11-18). Two config-only 6000-step arms run on the GPU. `PLAN.md` carries
 the questions, `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 81 tests
-pass (`uv run python -m pytest tests/`, about 150 s on the CPU; last run before the 2026-11-18 doc-only commits).
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 86 tests
+pass (`uv run python -m pytest tests/`, about 110 s on the CPU).
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a depthwise-conv
 block that writes only the meta channels; cross attention to the caption's token states in every attention block;
@@ -31,16 +32,14 @@ Runs of 2026-11-18, all under `/mnt/mars/ai/tiny-dit/runs/`:
 
 ## The arm queue
 
-`/tmp/arm_queue.sh` then `/tmp/arm_queue2.sh` run one arm after another in the background (outside the repo; gone on
-reboot). Each is compared against `a1-ref-1ep` at the same images, each config in `configs/` until it is read (`a1-b128-6k`'s stays
-while the lr 1.4e-3 arm, which compares against it, runs):
-1. `a1-b128-6k`: read (log 2026-11-18-batch-128): batch 128 is 0.0104 ahead at equal images, the lead shrinking.
-   Its checkpoint is deleted once the batch question is settled.
-2. `a1-b128-lr14-6k`: the same at usui lr 1.4e-3 (fallback 1.75e-3). Running.
-3. `a1-attnfirst-6k`: the attention block first in each period of four (F4), 6000 steps.
-4. `a1-seed42-6k`: the reference at seed 42, 6000 steps: the seed noise that every arm's read needs. It runs from a
-   worktree `../tiny-dit-seed42` at `9da2709` (`/tmp/arm_queue3.sh`, `PYTHONPATH` on the worktree's `src`), so it
-   trains on the reference's code, which does not read the held-out list. Remove the worktree when it ends.
+Config-only arms, each compared against `a1-ref-1ep` at the same images, its config in `configs/` until it is read:
+- Batch 128 at usui lr 2e-3 and 1.4e-3: read (logs 2026-11-18-batch-128, 2026-11-18-batch-128-lr14); batch 256 is
+  kept (archive 2026-11-18-batch-256). Configs and checkpoints deleted.
+- `a1-attnfirst-6k`: the attention block first in each period of four blocks instead of last (F4), 6000 steps.
+  Running from this checkout on the committed code of `9da2709` (`/tmp/arm_queue.sh`).
+- `a1-seed42-6k`: the reference at seed 42, 6000 steps: the seed noise that every arm's read needs. It runs next from a
+  worktree `../tiny-dit-seed42` at `9da2709` (`/tmp/arm_queue3.sh`, `PYTHONPATH` on the worktree's `src`), so it
+  trains on the reference's code, which does not read the held-out list. Remove the worktree when it ends.
 
 `set_128` holds out 1,000 rows since 2026-11-18 (`heldout_keys.txt`, archive 2026-11-18-heldout-set); their rows are
 `/run/media/djg/vel-ssd/tiny-dit/heldout_128_fine_flux2.parquet`. A new run from `configs/a1-ref-1ep.toml` scores
@@ -48,7 +47,6 @@ them and renders its grid at guidance 1; a continuation of `a1-ref-1ep` drops `h
 
 ## Waiting on a decision
 
-- **The long run's batch** (PLAN C1), after arms 1 and 2, and with the seed noise from arm 4.
 - **256 px**: the set needs `shuffle.py`'s latent cast to `large_binary` (2 GB per chunk at `binary`), then the
   build; throughput at 256 px is unmeasured.
 
