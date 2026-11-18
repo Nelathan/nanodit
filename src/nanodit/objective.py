@@ -31,6 +31,23 @@ def target(x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
     return x_t - (eps - x)
 
 
+# Spatial-frequency bands of the 64 x 64 latent by the period in tokens (8 latent px): more than three tokens, beyond a
+# 3x3 conv's reach; one to three; inside one token. Edges in radial cycles per latent pixel; a period of exactly one or
+# three tokens falls in the coarser band.
+BAND_EDGES = (1 / 24, 1 / 8)
+BAND_NAMES = ("over3tok", "1to3tok", "in1tok")
+
+
+def band_energy(e: Tensor) -> Tensor:
+    """Mean square of e [B, C, H, W] in each band, summed over bands equal to the mean square of e: [B, len(BAND_NAMES)]."""
+    H, W = e.shape[-2:]
+    spectrum = torch.fft.fft2(e).abs().square().sum(1) / (H * W) ** 2 / e.shape[1]  # Parseval: sums to mean square
+    fy, fx = torch.fft.fftfreq(H, device=e.device), torch.fft.fftfreq(W, device=e.device)
+    radius = (fy[:, None].square() + fx[None, :].square()).sqrt()
+    band = torch.bucketize(radius, torch.tensor(BAND_EDGES, device=e.device))  # edges[i - 1] < radius <= edges[i]
+    return torch.stack([spectrum[:, band == i].sum(-1) for i in range(len(BAND_NAMES))], -1)
+
+
 def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
     return (out - target(x, eps, x_t)).square().flatten(1).mean(1)
 

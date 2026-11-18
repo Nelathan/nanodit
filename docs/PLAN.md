@@ -307,7 +307,7 @@ the basic form. adaLN stays for the conv layers.
 basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
 into the image channels. Open: a better conv block that keeps the meta-only write, a gated conv first.
 *Hypothesis* (2026-11-18): the basic conv informs about locality but washes or copies it. In `a1-ref-1ep` the
-detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes), and edges in the eval grids repeat into
+detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes, in that log's split: over two tokens, one to two, inside one), and edges in the eval grids repeat into
 neighbouring tokens (seen, not measured). The gated conv below is the arm.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):

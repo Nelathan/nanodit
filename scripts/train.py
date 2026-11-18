@@ -21,7 +21,7 @@ from usuitrack.polar import unit_polar
 
 from nanodit.data import Stream, pad_sequences, read_rows
 from nanodit.model import BlockType, DiT, Prompt
-from nanodit.objective import explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles
+from nanodit.objective import BAND_NAMES, band_energy, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles, target
 from nanodit.optim import build_optimizers
 from nanodit.sampler import euler_sample
 
@@ -135,23 +135,32 @@ def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, devi
 def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict:
     """The loss on fixed rows, each with its caption and fixed noise, at every t of a fixed grid: one number
     comparable across steps and runs, and its value at each t. The same for R² (`explained_variance`), per t and
-    over the grid. Keys keep the `_caption` suffix of the records that also scored the null embedding."""
-    energy, per_t = x.float().square().mean().item(), []
+    over the grid, and per band of spatial frequency (`objective.BAND_EDGES`): one minus the band's share of the clean-latent
+    error over its share of the latents' energy. Keys keep the `_caption` suffix of the records that also scored the
+    null embedding."""
+    energy, per_t, band_errors = x.float().square().mean().item(), [], []
+    band_energies = band_energy(x.float()).mean(0).tolist()
     for t_value in ts.tolist():
-        total = 0.0
+        total, bands = 0.0, 0.0
         for i in range(0, len(x), batch):
             xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
             pb = prompt.rows(i, i + batch).to(device, torch.float32)
             t = torch.full((len(xb),), t_value, device=device)
             x_t = noisy(xb, eb, t)
-            total += per_sample_loss(model(x_t, t, pb), xb, eb, x_t).sum()
+            out = model(x_t, t, pb)
+            total += per_sample_loss(out, xb, eb, x_t).sum()
+            bands += band_energy(t_value * (out - target(xb, eb, x_t))).sum(0)  # the clean estimate's error x0_hat - x
         per_t.append(float(total) / len(x))
+        band_errors.append((bands / len(x)).tolist())
     errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
+    by_band_by_t = [[1 - e / b for e, b in zip(row, band_energies)] for row in band_errors]
     return dict(
         loss_caption=sum(per_t) / len(per_t),
         loss_caption_by_t=per_t,
         r2_caption=1 - sum(errors) / len(errors) / energy,
         r2_caption_by_t=[1 - error / energy for error in errors],
+        r2_caption_by_band=[sum(col) / len(col) for col in zip(*by_band_by_t)],
+        r2_caption_by_band_by_t=by_band_by_t,
     )
 
 
@@ -204,6 +213,7 @@ def wandb_scores(scores: dict, name: str) -> dict:
     the t's of one fifth of the grid's probability mass each, in one group per topic,
     `<name>_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
     flat = {f"{name}/{key}": scores[key] for key in ("loss_caption", "r2_caption")}
+    flat |= {f"{name}/r2_caption_{band}": value for band, value in zip(BAND_NAMES, scores["r2_caption_by_band"])}
     size = SCORE_TS // WANDB_BUCKETS
     for key in ("loss_caption_by_t", "r2_caption_by_t"):
         flat |= {f"{name}_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}

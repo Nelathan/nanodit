@@ -4,8 +4,8 @@ write, as a partial prediction F_k (the read-out applied early).
 Two reads of a run's checkpoint:
 - On the eval set, at the score's 10 t, per write: the loss of F_k, the RMS of the write on the image channels, and
   the energy of the clean estimate's error x0_k - x = t·(F_k - T) in three bands of spatial frequency on the 64 x 64
-  latent: coarser than two tokens (period > 16 latent px), one to two tokens (8 to 16 px), and inside one token
-  (< 8 px), with the clean latents' energy in each band, so error over energy is the share of a band not recovered.
+  latent (`objective.BAND_EDGES`): more than three tokens (period > 24 latent px), one to three tokens (8 to 24 px), and
+  inside one token (< 8 px), with the clean latents' energy in each band, so error over energy is the share of a band not recovered.
 - On the eval prompts, sampled as the training eval samples them (Euler, CFG, the prompts' fixed noise): at four
   steps of the trajectory, the clean estimate x0_k = (1 - t)·x_t + t·F_k decoded after every write, one PNG per
   step and prompt. Rows are the attention periods, columns the writes in order (conv blocks: mixer, which writes only
@@ -30,14 +30,13 @@ from safetensors.torch import load_file
 
 from nanodit.data import read_rows
 from nanodit.model import TOKEN_DIM, Prompt, unpatchify
-from nanodit.objective import noisy, per_sample_loss, t_quantiles, target
+from nanodit.objective import BAND_NAMES, band_energy, noisy, per_sample_loss, t_quantiles, target
 from nanodit.sampler import euler_sample
 from train import SCORE_SHIFT, SCORE_TS, Config, build_model, embed_prompts, load_decoder
 
 BATCH = 16
 SAMPLE_STEPS = (3, 6, 8, 15)  # of the 30 Euler steps: t = 0.9, 0.8, 0.73, 0.5
 SAMPLE_PROMPTS = (1, 6, 9, 10, 14)  # eval prompt indices: landscape, chess, beach, cabin, sign
-BANDS = ((0, 1 / 16), (1 / 16, 1 / 8), (1 / 8, 0.75))  # radial cycles per latent pixel; 0.75 > the corner's 0.707
 
 
 class WriteCapture:
@@ -82,15 +81,6 @@ class WriteCapture:
                 for b, record in enumerate(self.blocks) for name, res, write in record["writes"]]
 
 
-def band_energy(e: torch.Tensor) -> torch.Tensor:
-    """Mean square of e [B, C, H, W] in each band of BANDS, summed over bands equal to the mean square of e: [B, len(BANDS)]."""
-    H, W = e.shape[-2:]
-    spectrum = torch.fft.fft2(e).abs().square().sum(1) / (H * W) ** 2 / e.shape[1]  # Parseval: sums to mean square
-    fy, fx = torch.fft.fftfreq(H, device=e.device), torch.fft.fftfreq(W, device=e.device)
-    radius = (fy[:, None].square() + fx[None, :].square()).sqrt()
-    return torch.stack([spectrum[:, (radius >= lo) & (radius < hi)].sum(-1) for lo, hi in BANDS], -1)
-
-
 @torch.no_grad()
 def eval_reads(model, capture, x, prompt, noise, ts, device) -> list[dict]:
     reads = []
@@ -105,11 +95,11 @@ def eval_reads(model, capture, x, prompt, noise, ts, device) -> list[dict]:
             T = target(xb, eb, x_t)
             rows = [("input", x_t, torch.zeros_like(x_t))] + capture.partials(x.shape[-2] // 8, x.shape[-1] // 8)
             for label, Fk, write in rows:
-                s = sums.setdefault(label, dict(loss=0.0, write_rms=0.0, error_bands=torch.zeros(len(BANDS), device=device)))
+                s = sums.setdefault(label, dict(loss=0.0, write_rms=0.0, error_bands=torch.zeros(len(BAND_NAMES), device=device)))
                 s["loss"] += per_sample_loss(Fk, xb, eb, x_t).sum().item()
                 s["write_rms"] += write.square().flatten(1).mean(1).sqrt().sum().item()
                 s["error_bands"] += band_energy(t_value * (Fk - T)).sum(0)
-            clean = sums.setdefault("clean", dict(bands=torch.zeros(len(BANDS), device=device)))
+            clean = sums.setdefault("clean", dict(bands=torch.zeros(len(BAND_NAMES), device=device)))
             clean["bands"] += band_energy(xb).sum(0)
         n = len(x)
         reads.append(dict(t=t_value, clean_bands=(sums.pop("clean")["bands"] / n).tolist(),
@@ -191,7 +181,7 @@ def main(run_dir: str, step: int, out_dir: str, rows: int = 256) -> None:
     noise = torch.randn(x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # the score's noise
     x, prompt, noise = x[:rows], prompt.rows(0, rows), noise[:rows]
     reads = eval_reads(model, capture, x, prompt, noise, t_quantiles(SCORE_TS, SCORE_SHIFT), device)
-    (out / "eval_reads.json").write_text(json.dumps(dict(run=run.name, step=step, rows=rows, bands=BANDS, reads=reads)))
+    (out / "eval_reads.json").write_text(json.dumps(dict(run=run.name, step=step, rows=rows, bands=BAND_NAMES, reads=reads)))
 
     prompts = (run / "eval_prompts.txt").read_text().splitlines()
     sample_reads(model, capture, load_decoder(device), embed_prompts(prompts), cfg, out, device)

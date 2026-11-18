@@ -15,7 +15,7 @@ from nanodit import data
 from nanodit.data import pad_sequences
 from nanodit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
 from nanodit.objective import flow_loss as real_flow_loss
-from nanodit.objective import noisy, t_quantiles, target
+from nanodit.objective import band_energy, noisy, t_quantiles, target
 from nanodit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
@@ -148,7 +148,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
         weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
                    | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
-        assert len(data) == 2 + 2 * 5 + len(weights)  # the two means, the loss and R² in fifths, the weight reads
+        assert len(data) == 2 + 3 + 2 * 5 + len(weights)  # the two means, R² per band, the loss and R² in fifths, the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])
@@ -191,7 +191,7 @@ def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
             return x_t * t.view(-1, 1, 1, 1) + prompt.pooled[:, :1, None, None]
 
     torch.manual_seed(0)
-    x, noise, ts = torch.randn(5, 2, 4, 4).bfloat16(), torch.randn(5, 2, 4, 4), torch.tensor([0.2, 0.7])
+    x, noise, ts = torch.randn(5, 2, 64, 64).bfloat16(), torch.randn(5, 2, 64, 64), torch.tensor([0.2, 0.7])  # the latent size: every band has energy
     prompt = random_prompt(5)
     result = train.score(Echo(), x, prompt, noise, ts, 2, torch.device("cpu"))
     by_t = []
@@ -206,6 +206,10 @@ def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
     torch.testing.assert_close(result["r2_caption_by_t"], r2_by_t)
     torch.testing.assert_close(result["r2_caption"], sum(r2_by_t) / 2)
     torch.testing.assert_close(train.score(Echo(), x, prompt, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
+    clean = band_energy(x.float()).mean(0)  # the bands' errors add up to the whole error, each weighted by its energy
+    for_each_t = [float(((1 - torch.tensor(row)) * clean).sum()) for row in result["r2_caption_by_band_by_t"]]
+    torch.testing.assert_close(for_each_t, [loss * t_value**2 for loss, t_value in zip(by_t, ts.tolist())])
+    torch.testing.assert_close(result["r2_caption_by_band"], [sum(c) / 2 for c in zip(*result["r2_caption_by_band_by_t"])])
 
 
 def test_held_out_rows_are_scored_beside_the_eval_set_and_must_be_out_of_the_stream(train, tmp_path, monkeypatch):

@@ -1,9 +1,11 @@
+import math
+
 import pytest
 import torch
 from conftest import open_gates
 
 from nanodit.model import Prompt
-from nanodit.objective import PROMPT_DROPOUT, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
+from nanodit.objective import PROMPT_DROPOUT, band_energy, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
 
 
 def test_loss_equals_velocity_error():
@@ -126,3 +128,11 @@ def test_flow_loss_samples_t_with_the_given_sigma():
     x, prompt = torch.randn(20000, 2, 8, 8), stub_null(20000, 2)
     wide, narrow = flow_loss(ZeroNet(), x, prompt, 1.0)[2], flow_loss(ZeroNet(), x, prompt, 1.0, sigma=0.5)[2]
     assert narrow.std() < 0.6 * wide.std()
+
+
+@pytest.mark.parametrize("period, band", [(4, 2), (8, 1), (16, 1), (32, 0)])  # latent px; a token is 8
+def test_a_wave_lands_in_the_band_of_its_period_in_tokens(period, band):
+    wave = torch.cos(2 * math.pi * torch.arange(64) / period).expand(1, 2, 64, 64)
+    energy = band_energy(wave)[0]
+    torch.testing.assert_close(energy.sum(), wave.square().mean())  # the bands split the mean square
+    assert energy[band] > 0.999 * energy.sum()
