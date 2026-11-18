@@ -198,8 +198,8 @@ costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the 
 
 Open: where the attention block sits in the period. The trunk puts it fourth of four, as Qwen does; an earlier ablation
 on another model found the third position best of the 3/4 layouts. Settle: one config-only arm per position (`layout`,
-SPEC §3). First of four is level with fourth at 6000 steps (log 2026-11-18-attnfirst); third of four and the middle of a
-period of three run next.
+SPEC §3). First and third of four are level with fourth at 6000 steps, within the seed noise (logs 2026-11-18-attnfirst,
+2026-11-18-attnthird); the middle of a period of three runs next.
 
 ### F5. What ports from the modded-nanogpt speedrun?
 
