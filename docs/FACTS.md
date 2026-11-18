@@ -136,6 +136,12 @@ Reads of the earlier models (width 512 with a final linear, then the slice reado
 (596 img/s), forward + backward 363.6 ms, UsuiTrack step 57.6 ms for 131 matrices, fallback 0.9 ms, peak 7.9 GiB; the
 GPU busy about 397 ms of the step. `log/2026-11-16-step-profile-d24.md`.
 
+## Seed noise at d768x24, 6000 steps (2026-11-18)
+
+`a1-seed42-6k` against `a1-ref-1ep` (seed 42 against 41; init, data order and training noise differ, the eval rows and
+their noise do not): the score differs by 0.0007 to 0.0013 at every eval from 1000 to 6000, 0.0009 at 6000, the
+sign constant. One pair, so one draw of the spread. `log/2026-11-18-seed42.md`.
+
 ## Captions of `set_128` (2026-11-17)
 
 `scripts/probe_caption_lengths.py` and `scripts/exclude_captions.py` over all 8,239,111 rows; outputs

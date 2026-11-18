@@ -74,7 +74,7 @@ Wall-clock is open: the 128 px rate is in log 2026-11-18-a1-ref-1ep; 256 px thro
 ## Open here
 
 - Scoring at 256 px, on Lunara and on the held-out rows (archive 2026-11-18-heldout-set), once the 256 px set exists.
-- The seed noise of a 6000-step comparison (`a1-seed42-6k` against `a1-ref-1ep`): the handbook resolves 0.03 %; the
-  bound used here, about 0.003 in caption loss (about 0.2 %), was never measured.
+- The seed noise of a 6000-step comparison: one pair measured, 0.001 (about 0.07 %; FACTS, Seed noise); the handbook
+  resolves 0.03 % with four seeds. A second pair would bound the spread.
 - Whether a longer run wants a lower lr (the C^−0.5 exponent), read by a 2× length pair once the long-run length is
   chosen.

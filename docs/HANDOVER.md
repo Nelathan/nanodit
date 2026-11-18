@@ -3,12 +3,12 @@
 State on 2026-11-18: the reference `a1-ref-1ep` has finished its pass, and its cooldown `a1-ref-1ep-anneal3k` is the
 best model (score 1.4106, the README's grid). The long run's size, the training t and the end-of-run weights are
 decided, as are the batch, a held-out eval set from the training data and the eval grid at guidance 1 (archive
-2026-11-18). Two config-only 6000-step arms run on the GPU. `PLAN.md` carries
+2026-11-18). Four 6000-step arms run or wait on the GPU. `PLAN.md` carries
 the questions, `FACTS.md` the measurements, `docs/log/` the run notes, `AGENTS.md` the rules.
 
 ## Where it stands
 
-`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 86 tests
+`main` is the trunk: the architecture of SPEC §3, the switches of the questions still open, and the docs. 90 tests
 pass (`uv run python -m pytest tests/`, about 110 s on the CPU).
 
 The model: every 4th block attention (GQA, RoPE on a quarter of the frequencies), the other three a depthwise-conv
@@ -35,11 +35,16 @@ Runs of 2026-11-18, all under `/mnt/mars/ai/tiny-dit/runs/`:
 Config-only arms, each compared against `a1-ref-1ep` at the same images, its config in `configs/` until it is read:
 - Batch 128 at usui lr 2e-3 and 1.4e-3: read (logs 2026-11-18-batch-128, 2026-11-18-batch-128-lr14); batch 256 is
   kept (archive 2026-11-18-batch-256). Configs and checkpoints deleted.
-- `a1-attnfirst-6k`: the attention block first in each period of four blocks instead of last (F4), 6000 steps.
-  Running from this checkout on the committed code of `9da2709` (`/tmp/arm_queue.sh`).
-- `a1-seed42-6k`: the reference at seed 42, 6000 steps: the seed noise that every arm's read needs. It runs next from a
-  worktree `../tiny-dit-seed42` at `9da2709` (`/tmp/arm_queue3.sh`, `PYTHONPATH` on the worktree's `src`), so it
-  trains on the reference's code, which does not read the held-out list. Remove the worktree when it ends.
+- `a1-attnfirst-6k`: attention first in each period of four, level with the reference (log 2026-11-18-attnfirst).
+- `a1-seed42-6k`: the reference at seed 42: 0.0009 better at 6000, the same sign at every eval (log
+  2026-11-18-seed42). Its 6000 checkpoint stays as the reference at 6000 for the band reads of the conv arms (the
+  reference kept none at 6000, and neither run logs the bands); worktree `../tiny-dit-seed42` removed.
+- `a1-gatedconv-6k`: running from worktree `../tiny-dit-gated` on `arm/gated-conv` at `fd23833`, which predates the
+  band score; its bands come from `probe_residual_writes.py` on its 6000 checkpoint. The aborted GDN2 start ran beside
+  it for about 40 s near its step 50; leave those records out of its throughput.
+- Queued behind it (`/tmp/arm_queue6.sh`): `a1-gdn2meta-6k` on `arm/gdn2-meta` (`95fe032`, with the band score) from
+  worktree `../tiny-dit-gdn2`, then `a1-attnthird-6k` (attention third of four) and `a1-attncenter3-6k` (attention in
+  the middle of a period of three, so 8 attention blocks of 24, not 6) from this checkout.
 
 `set_128` holds out 1,000 rows since 2026-11-18 (`heldout_keys.txt`, archive 2026-11-18-heldout-set); their rows are
 `/run/media/djg/vel-ssd/tiny-dit/heldout_128_fine_flux2.parquet`. A new run from `configs/a1-ref-1ep.toml` scores
