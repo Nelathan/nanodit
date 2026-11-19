@@ -199,7 +199,9 @@ costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the 
 Open: where the attention block sits in the period. The trunk puts it fourth of four, as Qwen does; an earlier ablation
 on another model found the third position best of the 3/4 layouts. Settle: one config-only arm per position (`layout`,
 SPEC §3). First and third of four are level with fourth at 6000 steps, within the seed noise (logs 2026-11-18-attnfirst,
-2026-11-18-attnthird); the middle of a period of three runs next.
+2026-11-18-attnthird). *Measured* (2026-11-19): attention in the middle of a period of three (8 attention blocks of
+24) is 0.0044 ahead at 6000 at 0.96× the step, the only arm ahead at the same wall-clock (−0.0029; log
+2026-11-19-conv-forms-and-attn-middle-of-three).
 
 ### F5. What ports from the modded-nanogpt speedrun?
 
@@ -309,6 +311,12 @@ into the image channels. Open: a better conv block that keeps the meta-only writ
 *Hypothesis* (2026-11-18): the basic conv informs about locality but washes or copies it. In `a1-ref-1ep` the
 detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes, in that log's split: over two tokens, one to two, inside one), and edges in the eval grids repeat into
 neighbouring tokens (seen, not measured). The gated conv below is the arm.
+*Measured* (2026-11-19, log 2026-11-19-conv-forms-and-attn-middle-of-three): what buys loss is a projected value and
+per-channel gates; writing all channels gains 0.0013 to 0.0019 at no cost; a form's cost is its projection's width.
+GDN2 writing all channels leads at 6000 (−0.0072 at 0.85× the step), LFM's gated conv writing all channels −0.0047 at
+0.88×; at the same wall-clock both are level with the reference at 6000.
+Arms on branch `arm/conv-designs`: a depthwise conv inside the MLP's hidden (no mixer sublayer), alone and with
+attention in the middle of three; LFM-all at half width; LFM-all with attention in the middle of three.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
 - **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
