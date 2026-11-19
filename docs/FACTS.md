@@ -142,6 +142,15 @@ GPU busy about 397 ms of the step. `log/2026-11-16-step-profile-d24.md`.
 their noise do not): the score differs by 0.0007 to 0.0013 at every eval from 1000 to 6000, 0.0009 at 6000, the
 sign constant. One pair, so one draw of the spread. `log/2026-11-18-seed42.md`.
 
+## Conv block forms at d768x24, 6000 steps (G10, 2026-11-19)
+
+Δ against `a1-ref-1ep` at 6000 (593 img/s at 220 W, 591 at 198 W), "same time" against the reference after the same
+wall-clock. Attention in the middle of three with the basic conv −0.0044, −0.0029 at the same time, 568 img/s; GDN2
+writing all channels −0.0072, −0.0012, 504; LFM's gated conv writing all channels −0.0047, −0.0001, 522; the same with
+the norm on its read and no branch norm −0.0059, −0.0014, 524; sigmoid-gated forms (slim at 384 to 768 channels, with
+a sending gate) about −0.0022; LFM without `out` +0.0033. Logs
+`2026-11-19-conv-forms-and-attn-middle-of-three.md`, `2026-11-19-conv-forms-gates-and-widths.md`.
+
 ## Captions of `set_128` (2026-11-17)
 
 `scripts/probe_caption_lengths.py` and `scripts/exclude_captions.py` over all 8,239,111 rows; outputs

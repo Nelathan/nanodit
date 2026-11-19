@@ -316,10 +316,14 @@ neighbouring tokens (seen, not measured). The gated conv below is the arm.
 per-channel gates; writing all channels gains 0.0013 to 0.0019 at no cost; a form's cost is its projection's width.
 GDN2 writing all channels leads at 6000 (−0.0072 at 0.85× the step), LFM's gated conv writing all channels −0.0047 at
 0.88×; at the same wall-clock both are level with the reference at 6000.
-Arms on branch `arm/conv-designs`: a depthwise conv inside the MLP's hidden (no mixer sublayer), alone and with
-attention in the middle of three; LFM-all at half width; LFM-all with attention in the middle of three.
-Arms on branch `arm/slim-conv`: `σ(G y) ⊙ conv(V y)` at half width; a value of 128 channels mixed by 4 kernels each,
-merged back to 128 and gated; LFM-all with one projection shared by the conv blocks of each period.
+*Measured* (2026-11-19, log 2026-11-19-conv-forms-gates-and-widths): LFM-all with the norm on its read and no branch
+norm, `out(C ⊙ norm(conv(B ⊙ v)))`, leads: −0.0059 at 6000, ahead of LFM-all at every eval from 2000 (0.0012 at 6000, inside
+the seed draw), at its speed, gaining on all three bands; −0.0014 at the same wall-clock. Slim's sigmoid-gated forms (384 to 768
+channels, with a sending gate or its gate outside the norm) stay at about −0.0022; a sigmoid gate outside the norm
+in place of LFM's C or GDN2's write gate loses about 0.003; LFM without `out` and the conv inside the MLP fall
+behind the reference by 6000. Open: whether a form's lead outweighs its step over a longer run; attention in
+the middle of three adds little to LFM-all at 6000 (−0.0053).
+Not yet run (branch `arm/slim-conv`): heads sharing a value, stacked or summed; LFM-all with one projection per period.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
 - **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
