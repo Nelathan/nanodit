@@ -307,7 +307,8 @@ the basic form. adaLN stays for the conv layers.
 
 *Decided* (2026-11-16): the GDN2-style gated update (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`) is replaced by the
 basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
-into the image channels. Open: a better conv block that keeps the meta-only write, a gated conv first.
+into the image channels. *Decided* (2026-11-19, archive 2026-11-19-conv-writes-all-channels): reversed; a conv
+block writes all channels, and its form must be gated well enough to do so. Open: which form.
 *Hypothesis* (2026-11-18): the basic conv informs about locality but washes or copies it. In `a1-ref-1ep` the
 detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes, in that log's split: over two tokens, one to two, inside one), and edges in the eval grids repeat into
 neighbouring tokens (seen, not measured). The gated conv below is the arm.
@@ -317,6 +318,8 @@ GDN2 writing all channels leads at 6000 (−0.0072 at 0.85× the step), LFM's ga
 0.88×; at the same wall-clock both are level with the reference at 6000.
 Arms on branch `arm/conv-designs`: a depthwise conv inside the MLP's hidden (no mixer sublayer), alone and with
 attention in the middle of three; LFM-all at half width; LFM-all with attention in the middle of three.
+Arms on branch `arm/slim-conv`: `σ(G y) ⊙ conv(V y)` at half width; a value of 128 channels mixed by 4 kernels each,
+merged back to 128 and gated; LFM-all with one projection shared by the conv blocks of each period.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
 - **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
