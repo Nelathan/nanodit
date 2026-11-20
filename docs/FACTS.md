@@ -151,6 +151,13 @@ the norm on its read and no branch norm −0.0059, −0.0014, 524; sigmoid-gated
 a sending gate) about −0.0022; LFM without `out` +0.0033. Logs
 `2026-11-19-conv-forms-and-attn-middle-of-three.md`, `2026-11-19-conv-forms-gates-and-widths.md`.
 
+## The gated conv with the norm on its read over one pass (2026-11-20)
+
+`a1-lfmnormread-1ep` against `a1-ref-1ep`, 32,173 steps, one seed each: 1.4199 against 1.4242, −0.0043; −0.0059 at the
+same wall-clock; ahead at all 33 evals, the mean lead 0.0040 to 0.0049 over each stretch after 6000; 524 img/s at
+198 W against 594 at 220 W. R² on the band over three tokens −0.0054 at t 0.66 and −0.0135 at 0.74; the finer bands
++0.001 to +0.003 at t 0.47 to 0.74. Log `2026-11-20-lfm-norm-read-1ep.md`.
+
 ## Captions of `set_128` (2026-11-17)
 
 `scripts/probe_caption_lengths.py` and `scripts/exclude_captions.py` over all 8,239,111 rows; outputs
