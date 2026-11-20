@@ -16,8 +16,8 @@ Reasons:
 - A pooled summary lets the network follow a prompt's class without attending to its tokens; prompt following needs
   the attention to carry the caption. *Hypothesis*: no prompt-following read exists yet to measure it.
 - The decision is taken against the measured loss. With joint attention and a sink, at 6000 steps, seed 41 (runs
-  `a2-jointsink-6k`, `a2-jointsink-nopool-6k`, `a2-jointsink-captionread-6k`; probes `scripts/probe_caption_use.py`
-  and `scripts/probe_joint_attention.py` on `arm/joint-probe` `7d8fa8f`):
+  `a2-jointsink-6k`, `a2-jointsink-nopool-6k`, `a2-jointsink-captionread-6k`; probe `scripts/probe_caption_use.py`
+  on `arm/joint-probe-a2` `7d8fa8f`, its form for a2):
 
 | Arm | Loss | Held-out | Nulling the caption, mean | at t 0.84 |
 |---|---|---|---|---|

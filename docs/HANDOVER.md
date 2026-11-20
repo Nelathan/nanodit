@@ -51,7 +51,8 @@ The power limit is 198 W (default 220 W, max 275 W); all arms since 2026-11-18 r
 
 ## Branches
 
-Not merged, each the record of an arm: `arm/joint-attn` (open, J2), `arm/joint-probe`, `arm/caption-read`,
+Not merged, each the record of an arm: `arm/joint-attn` (open, J2), `arm/caption-refiner` (open, J6), `arm/joint-probe` (the probes on
+the refiner arm), `arm/joint-probe-a2` (their form for a2), `arm/caption-read`,
 `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`, `arm/gate-outside-norm`, `arm/gdn2-lite`,
 `arm/gdn2-meta`, `arm/gated-conv`, `arm/conv-designs`, `arm/xside`, `gdn-conv`, `g2-patch16` (closed), `pinned-copy` (PLAN H1, never measured on the
 trunk), `arm/{base,finalnorm,finalr64,idfinal,noconv,slice,solver,solvermlp}` (early arms).
