@@ -13,7 +13,7 @@ from conftest import PAIR, open_gates
 from test_data import shuffle_module, write_shard
 from nanodit import data
 from nanodit.data import pad_sequences
-from nanodit.model import DiT, NULL_TOKENS, SEQ_DIM, Prompt
+from nanodit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, Prompt
 from nanodit.objective import flow_loss as real_flow_loss
 from nanodit.objective import band_energy, noisy, t_quantiles, target
 from nanodit.optim import build_optimizers
@@ -52,6 +52,7 @@ depth = 2
 width = 512
 layout = ["conv", "attn"]
 block_types = {{ conv = {{ mixer = "conv" }}, attn = {{ mixer = "attn" }} }}
+refiner_depth = 0
 batch = {batch}
 micro_batch = {micro_batch}
 steps = {steps}
@@ -178,7 +179,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
     restored = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     restored.load_state_dict(last)
-    assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
+    assert restored.blocks[0].table[list(GATE_ROWS)].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
     matrix, fallback = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     matrix.load_state_dict(usui_state)

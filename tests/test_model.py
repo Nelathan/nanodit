@@ -2,10 +2,11 @@ import copy
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from conftest import PAIR, open_gates
 from nanodit.data import pad_sequences
-from nanodit.model import BlockType, DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
+from nanodit.model import BlockType, DiT, GATE_ROWS, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
@@ -51,12 +52,14 @@ def test_output_is_the_first_channels_of_the_stream(model, prompt):
     assert torch.equal(out, unpatchify(seen["stream"][..., :TOKEN_DIM].float(), 8, 8))
 
 
-def test_gate_rows_start_at_zero_and_shift_scale_rows_do_not(model):
+def test_gate_rows_start_at_zero_and_scale_rows_do_not(model):
+    assert N_MOD == 4  # scale and gate per branch, no shift
     weight = model.ada[1].weight.view(N_MOD, 512, 512)
     table = model.blocks[0].table
+    scale_rows = [r for r in range(N_MOD) if r not in GATE_ROWS]
     for rows in (weight, table):
-        assert (rows[[2, 5]] == 0).all()
-        assert (rows[[0, 1, 3, 4]] != 0).any(dim=-1).all()
+        assert (rows[list(GATE_ROWS)] == 0).all()
+        assert (rows[scale_rows] != 0).any(dim=-1).all()
     assert (model.blocks[1].cross_gate == 0).all()
 
 
@@ -96,8 +99,8 @@ def test_gradient_reaches_every_zero_init_role(model, prompt):
         loss.backward()
         optimizer.step()
     conv_block, block = model.blocks
-    assert block.table[[2, 5]].abs().max() > 0 and block.cross_gate.abs().max() > 0
-    assert model.ada[1].weight.view(N_MOD, 512, 512)[[2, 5]].abs().max() > 0
+    assert block.table[list(GATE_ROWS)].abs().max() > 0 and block.cross_gate.abs().max() > 0
+    assert model.ada[1].weight.view(N_MOD, 512, 512)[list(GATE_ROWS)].abs().max() > 0
     assert block.qkv.weight.grad.abs().max() > 0 and conv_block.conv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
     assert block.cross_kv.weight.grad.abs().max() > 0
 
@@ -214,7 +217,7 @@ def conv_block_change(prompt, poke=None):
     edits the input, the change again."""
     model = build(layout=PAIR)
     open_gates(model)
-    model.blocks[0].table.data[5] = 0
+    model.blocks[0].table.data[GATE_ROWS[1]] = 0
     seen = {}
     model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
     x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
@@ -237,7 +240,7 @@ def test_a_small_c_makes_a_small_conv_write(prompt):
     model = build(layout=PAIR)
     open_gates(model)
     block = model.blocks[0]
-    block.table.data[5] = 0  # the MLP's gate: the change is the conv's alone
+    block.table.data[GATE_ROWS[1]] = 0  # the MLP's gate: the change is the conv's alone
     block.conv_in.weight.data[block.width:2 * block.width] *= 1e-3  # C's rows
     seen = {}
     block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
@@ -253,3 +256,93 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
+
+
+JOINT, JOINT_SINK = BlockType("attn", joint=True), BlockType("attn", joint=True, sink=True)
+
+
+@pytest.mark.parametrize("kind", [JOINT, JOINT_SINK])
+@torch.no_grad()  # flex_attention has no backward on the CPU
+def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt, kind):
+    model = build(layout=(CONV, kind))
+    open_gates(model)
+    assert not any(hasattr(b, "cross_q") or hasattr(b, "attn_norm") for b in model.blocks)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, prompt)
+    assert not torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens.flip(0))))
+    noise = torch.randn_like(prompt.tokens) * ~prompt.mask[..., None]
+    assert torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens + noise)), atol=1e-6)
+    alone = model(x[2:], t[2:], prompt.rows(2, 3)._replace(tokens=prompt.tokens[2:, :2], mask=prompt.mask[2:, :2]))
+    assert torch.allclose(base[2:], alone, atol=1e-5)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="flex_attention compiles on CUDA")
+@torch.no_grad()  # the eval sampler and the score run the compiled blocks without gradients
+def test_a_compiled_joint_block_gives_the_eager_output_without_gradients(prompt):
+    eager = build(layout=(CONV, JOINT_SINK)).cuda().bfloat16()
+    open_gates(eager)
+    compiled = copy.deepcopy(eager)
+    for block in compiled.blocks:
+        block.compile()
+    x, t, rows = torch.randn(3, 2, 64, 64).cuda(), torch.rand(3).cuda(), Prompt(*(a.cuda() for a in prompt))
+    reference, eager32 = eager(x, t, rows), copy.deepcopy(eager).float()(x, t, rows)
+    assert (compiled(x, t, rows) - reference).abs().max() <= 2 * (reference - eager32).abs().max()  # bf16's own error
+
+
+@torch.no_grad()
+def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt):
+    """The stream a constant 50 on the meta channels, every query the same vector u, positive there and zero on the
+    patch channels, and a null key along it: its logit outweighs the real keys' lse, so σ(lse − b) nearly closes each
+    head. A branch norm after `out` would scale a small write back to unit RMS; an exact zero would survive the norm,
+    so the head is nearly closed, not shut."""
+    changes = {}
+    for kind in (JOINT, JOINT_SINK):
+        model = build(layout=(CONV, kind))
+        open_gates(model)
+        block = model.blocks[1]
+        block.table.data[GATE_ROWS[1]] = 0  # the MLP's gate: the change is the attention's alone
+        model.blocks[0].table.data[list(GATE_ROWS)] = 0  # the conv block passes the stream through
+        model.patch_embed.weight.data.zero_()
+        model.patch_embed.bias.data.fill_(50.0)  # the meta channels 50 at every token, so y is positive there
+        u = torch.rand(1, block.width)
+        u[:, :TOKEN_DIM] = 0  # off the patch channels, so u · y > 0
+        block.qkv.weight.data[:block.width] = u  # every query row the same u
+        if kind.sink:
+            block.null_key.data.fill_(1.5)
+        seen = {}
+        block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
+        model(torch.randn(1, 2, 64, 64), torch.rand(1), prompt.rows(0, 1))
+        changes[kind.sink] = (seen["stream_out"] - seen["stream_in"]).abs().max()
+    assert changes[True] < 0.02 and changes[False] > 0.5
+
+
+def open_refiner(model):
+    for block in model.refiner:
+        block.attn_gate.data.fill_(0.5)
+        block.mlp_gate.data.fill_(0.5)
+
+
+@torch.no_grad()  # flex_attention has no backward on the CPU
+def test_the_caption_refiner_starts_as_the_identity_and_leaves_the_rest_of_the_init_alone(prompt):
+    plain, refined = build(layout=(CONV, JOINT_SINK)), build(layout=(CONV, JOINT_SINK), refiner_depth=2)
+    assert all(torch.equal(p, refined.state_dict()[name]) for name, p in plain.state_dict().items())
+    open_gates(plain), open_gates(refined)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    assert torch.equal(plain(x, t, prompt), refined(x, t, prompt))
+
+
+@torch.no_grad()
+def test_the_caption_refiner_mixes_a_captions_tokens_and_ignores_its_padding(prompt):
+    model = build(layout=(CONV, JOINT_SINK), refiner_depth=2)
+    open_gates(model), open_refiner(model)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, prompt)
+    noise = torch.randn_like(prompt.tokens) * ~prompt.mask[..., None]
+    assert torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens + noise)), atol=1e-6)
+    alone = model(x[2:], t[2:], Prompt(prompt.tokens[2:, :2], prompt.mask[2:, :2]))
+    assert torch.allclose(base[2:], alone, atol=1e-5)
+    text = F.rms_norm(prompt.tokens, (SEQ_DIM,))
+    refined = model.refiner[0](text, prompt.mask)
+    other = text.clone()
+    other[0, 1] = torch.randn(SEQ_DIM)  # another second token changes the first token's refined state
+    assert not torch.allclose(refined[0, 0], model.refiner[0](other, prompt.mask)[0, 0])

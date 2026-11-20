@@ -5,7 +5,7 @@ from conftest import PAIR, open_gates
 from usuitrack.frame import rank
 
 from nanodit.data import pad_sequences
-from nanodit.model import NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
+from nanodit.model import GATE_ROWS, NULL_TOKENS, SEQ_DIM, TOKEN_DIM, DiT, Prompt
 from nanodit.objective import flow_loss, noisy, target
 from nanodit.optim import build_optimizers
 
@@ -40,7 +40,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     assert change["ada.1.weight"] > 0 and all(c == 0 for n, c in change.items() if n != "ada.1.weight")
     # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
     # (only the first 128 channels, the ones F reads, have an upstream gradient yet)
-    assert abs(model.blocks[1].table[[2, 5], :TOKEN_DIM].float().abs().mean() / fallback_lr - 1) < 0.05
+    assert abs(model.blocks[1].table[list(GATE_ROWS), :TOKEN_DIM].float().abs().mean() / fallback_lr - 1) < 0.05
 
 
 def trained_model(steps=2):
