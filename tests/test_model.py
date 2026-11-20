@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from conftest import PAIR, open_gates
 from nanodit.data import pad_sequences
-from nanodit.model import BlockType, DiT, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
+from nanodit.model import BlockType, DiT, GATE_ROWS, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
 
 @pytest.mark.parametrize("size, tokens", [(128, 64), (256, 256)])
@@ -52,12 +52,14 @@ def test_output_is_the_first_channels_of_the_stream(model, prompt):
     assert torch.equal(out, unpatchify(seen["stream"][..., :TOKEN_DIM].float(), 8, 8))
 
 
-def test_gate_rows_start_at_zero_and_shift_scale_rows_do_not(model):
+def test_gate_rows_start_at_zero_and_scale_rows_do_not(model):
+    assert N_MOD == 4  # scale and gate per branch, no shift
     weight = model.ada[1].weight.view(N_MOD, 512, 512)
     table = model.blocks[0].table
+    scale_rows = [r for r in range(N_MOD) if r not in GATE_ROWS]
     for rows in (weight, table):
-        assert (rows[[2, 5]] == 0).all()
-        assert (rows[[0, 1, 3, 4]] != 0).any(dim=-1).all()
+        assert (rows[list(GATE_ROWS)] == 0).all()
+        assert (rows[scale_rows] != 0).any(dim=-1).all()
     assert (model.blocks[1].cross_gate == 0).all()
 
 
@@ -97,8 +99,8 @@ def test_gradient_reaches_every_zero_init_role(model, prompt):
         loss.backward()
         optimizer.step()
     conv_block, block = model.blocks
-    assert block.table[[2, 5]].abs().max() > 0 and block.cross_gate.abs().max() > 0
-    assert model.ada[1].weight.view(N_MOD, 512, 512)[[2, 5]].abs().max() > 0
+    assert block.table[list(GATE_ROWS)].abs().max() > 0 and block.cross_gate.abs().max() > 0
+    assert model.ada[1].weight.view(N_MOD, 512, 512)[list(GATE_ROWS)].abs().max() > 0
     assert block.qkv.weight.grad.abs().max() > 0 and conv_block.conv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
     assert block.cross_kv.weight.grad.abs().max() > 0
 
@@ -215,7 +217,7 @@ def conv_block_change(prompt, poke=None):
     edits the input, the change again."""
     model = build(layout=PAIR)
     open_gates(model)
-    model.blocks[0].table.data[5] = 0
+    model.blocks[0].table.data[GATE_ROWS[1]] = 0
     seen = {}
     model.blocks[0].register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
     x, t = torch.randn(1, 2, 64, 64), torch.rand(1)
@@ -238,7 +240,7 @@ def test_a_small_c_makes_a_small_conv_write(prompt):
     model = build(layout=PAIR)
     open_gates(model)
     block = model.blocks[0]
-    block.table.data[5] = 0  # the MLP's gate: the change is the conv's alone
+    block.table.data[GATE_ROWS[1]] = 0  # the MLP's gate: the change is the conv's alone
     block.conv_in.weight.data[block.width:2 * block.width] *= 1e-3  # C's rows
     seen = {}
     block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
@@ -289,17 +291,22 @@ def test_a_compiled_joint_block_gives_the_eager_output_without_gradients(prompt)
 
 @torch.no_grad()
 def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt):
-    """Every query made the same positive vector per head and a null key along it, logit 12 against the real keys'
-    lse of about 5, so σ(lse − b) nearly closes each head. A branch norm after `out` would scale the write back to unit
-    RMS (measured: 1.3 with one, 0.0008 without); an exact zero would survive the norm, so the head is nearly closed."""
+    """The stream a constant 50 on the meta channels, every query the same vector u, positive there and zero on the
+    patch channels, and a null key along it: its logit outweighs the real keys' lse, so σ(lse − b) nearly closes each
+    head. A branch norm after `out` would scale a small write back to unit RMS; an exact zero would survive the norm,
+    so the head is nearly closed, not shut."""
     changes = {}
     for kind in (JOINT, JOINT_SINK):
         model = build(layout=(CONV, kind))
         open_gates(model)
         block = model.blocks[1]
-        block.table.data[5] = 0  # the MLP's gate: the change is the attention's alone
-        block.table.data[0] = 50.0  # shift: y ≈ 50 in every channel, so u · y > 0 for a positive u
-        block.qkv.weight.data[:block.width] = torch.rand(1, block.width)  # every query row the same positive u
+        block.table.data[GATE_ROWS[1]] = 0  # the MLP's gate: the change is the attention's alone
+        model.blocks[0].table.data[list(GATE_ROWS)] = 0  # the conv block passes the stream through
+        model.patch_embed.weight.data.zero_()
+        model.patch_embed.bias.data.fill_(50.0)  # the meta channels 50 at every token, so y is positive there
+        u = torch.rand(1, block.width)
+        u[:, :TOKEN_DIM] = 0  # off the patch channels, so u · y > 0
+        block.qkv.weight.data[:block.width] = u  # every query row the same u
         if kind.sink:
             block.null_key.data.fill_(1.5)
         seen = {}

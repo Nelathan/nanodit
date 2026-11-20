@@ -27,7 +27,7 @@ from PIL import Image
 from safetensors.torch import load_file
 
 from nanodit.data import read_rows
-from nanodit.model import TOKEN_DIM, Prompt, unpatchify
+from nanodit.model import GATE_ROWS, N_MOD, TOKEN_DIM, Prompt, unpatchify
 from nanodit.objective import BAND_NAMES, band_energy, noisy, per_sample_loss, t_quantiles, target
 from nanodit.sampler import euler_sample
 from train import SCORE_SHIFT, SCORE_TS, Config, build_model, embed_prompts, load_decoder
@@ -42,7 +42,7 @@ class WriteCapture:
 
     def __init__(self, model):
         self.model, self.mod, self.blocks = model, None, []
-        model.ada.register_forward_hook(lambda m, i, out: setattr(self, "mod", out.view(out.shape[0], 6, -1)))
+        model.ada.register_forward_hook(lambda m, i, out: setattr(self, "mod", out.view(out.shape[0], N_MOD, -1)))
         for b, block in enumerate(model.blocks):
             block.register_forward_pre_hook(lambda m, args, b=b: self._start(b, args[0]))
             names = ["out"] if block.is_conv else ["attn_norm", "cross_norm"]
@@ -60,11 +60,11 @@ class WriteCapture:
         block, record = self.model.blocks[b], self.blocks[-1]
         mod = self.mod + block.table
         if name in ("out", "attn_norm"):
-            write = mod[:, 2, None] * out
+            write = mod[:, GATE_ROWS[0], None] * out
         elif name == "cross_norm":
             write = block.cross_gate * out
         else:
-            write = mod[:, 5, None] * out
+            write = mod[:, GATE_ROWS[1], None] * out
         record["x"] = record["x"] + write
         record["writes"].append(("conv" if name == "out" else name.removesuffix("_norm"), record["x"][..., :TOKEN_DIM].float(), write[..., :TOKEN_DIM].float()))
 

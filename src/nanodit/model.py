@@ -16,9 +16,9 @@ SEQ_DIM = 512  # the encoder's token states, before its projection to 768
 NULL_TOKENS = 2  # the empty caption's <bos> and <eos> states, the null prompt's tokens at init
 TIME_DIM = 256
 ROPE_BASE = 10000.0
-ADALN_STD = 0.02  # "small random" shift/scale rows
-N_MOD = 6  # shift, scale, gate for the token mixer (attention or conv), then for the MLP
-GATE_ROWS = (2, 5)
+ADALN_STD = 0.02  # "small random" scale rows
+N_MOD = 4  # scale and gate for the token mixer (attention or conv), then for the MLP; no shift (PLAN J4)
+GATE_ROWS = (1, 3)
 MLP_RATIO = 4  # SwiGLU hidden over the stream width
 KV_RATIO = 4  # query heads per key/value head
 ROPE_FRACTION = 0.25  # of each axis' frequencies rotate: the fast ones; the slow ones barely turn on the grid and carry no position
@@ -148,9 +148,9 @@ class Block(nn.Module):
 
     def forward(self, x: Tensor, mod: Tensor, rope: tuple[Tensor, Tensor], text: Tensor, mask: Tensor, h: int, w: int) -> Tensor:
         B, N, _ = x.shape
-        shift_a, scale_a, gate_a, shift_m, scale_m, gate_m = (mod + self.table).unbind(1)
+        scale_a, gate_a, scale_m, gate_m = (mod + self.table).unbind(1)
 
-        y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None]) + shift_a[:, None]
+        y = F.rms_norm(x, (self.width,)) * (1 + scale_a[:, None])
         if self.is_conv:
             b, c, v = self.conv_in(y).chunk(3, dim=-1)
             read = self.conv((b * v).transpose(1, 2).reshape(B, self.width, h, w)).flatten(2).transpose(1, 2)
@@ -174,7 +174,7 @@ class Block(nn.Module):
                 attn = F.scaled_dot_product_attention(q, self.cross_k_norm(k), v, attn_mask=mask[:, None, None], enable_gqa=self.kv_heads != self.heads)
                 x = x + self.cross_gate * self.cross_norm(self.cross_out(attn.transpose(1, 2).reshape(B, N, self.width)))
 
-        y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
+        y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None])
         return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
 
     def joint_read(self, q: Tensor, q_normed: Tensor, k: Tensor, v: Tensor, text: Tensor, mask: Tensor) -> Tensor:
