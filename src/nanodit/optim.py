@@ -9,7 +9,7 @@ USUI_EXCLUDED = ("table", "null")
 
 def build_optimizers(model: nn.Module, usui_lr: float, beta: float, rank_fraction: float, fallback_lr: float) -> tuple[UsuiTrack, StochasticAdamW]:
     """UsuiTrack for the 2-D Linear weights, StochasticAdamW (AdamW whose bf16 updates round stochastically)
-    for everything else (1-D, biases, tables, null embedding), at its defaults but without weight decay.
+    for everything else (1-D, biases, tables, null tokens), at its defaults but without weight decay.
     Molegrad is attached to the model (which must already be on its device), so the tracked matrices
     never get a `.grad`; it hooks the optimizer, which stays the only handle.
     Usui's defaults otherwise: the trust step, so `usui_lr` is the relative step, every matrix on its input side.

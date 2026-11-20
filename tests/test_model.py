@@ -64,7 +64,7 @@ def test_the_text_enters_at_unit_rms_whatever_its_scale(model, prompt):
     open_gates(model)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     base = model(x, t, prompt)
-    assert (model(x, t, Prompt(3 * prompt.pooled, 3 * prompt.tokens, prompt.mask)) - base).norm() < 1e-4 * base.norm()  # equal up to fp32 rounding in the norm
+    assert (model(x, t, Prompt(3 * prompt.tokens, prompt.mask)) - base).norm() < 1e-4 * base.norm()  # equal up to fp32 rounding in the norm
 
 
 def test_text_and_timestep_condition_the_network_once_trained(model, prompt):
@@ -116,7 +116,7 @@ def test_a_caption_is_the_same_alone_and_padded_in_a_batch(model, prompt):
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     batched = model(x, t, prompt)
     n = int(prompt.mask[2].sum())
-    alone = Prompt(prompt.pooled[2:], prompt.tokens[2:, :n], prompt.mask[2:, :n])
+    alone = Prompt(prompt.tokens[2:, :n], prompt.mask[2:, :n])
     assert torch.allclose(model(x[2:], t[2:], alone), batched[2:], atol=1e-5)
 
 
@@ -171,7 +171,7 @@ def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, prompt)
 
 def build(**kw):
     torch.manual_seed(0)
-    return DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512, **kw)
+    return DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512, **kw)
 
 
 CONV, ATTN = BlockType("conv"), BlockType("attn")
@@ -190,16 +190,14 @@ def test_attention_blocks_and_only_they_cross_attend():
     assert [hasattr(b, "cross_kv") for b in build(layout=PAIR).blocks] == [False, True, False, True]
 
 
-def test_a_caption_reaches_the_network_through_the_adaln_or_the_cross_attention():
+def test_a_caption_reaches_the_network_only_through_the_cross_attention():
     with pytest.raises(AssertionError):
-        build(layout=(CONV,), pooled_ada=False)
-    model = build(layout=PAIR, pooled_ada=False)
-    assert model.text_proj is None
+        build(layout=(CONV,))
+    model = build(layout=PAIR)
     open_gates(model)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     tokens, mask = pad_sequences([torch.randn(n, SEQ_DIM) for n in (5, 3, 2)], torch.float32)
-    prompt = Prompt(torch.randn(3, 768), tokens, mask)
-    assert torch.equal(model(x, t, prompt), model(x, t, prompt._replace(pooled=-prompt.pooled)))  # the pooled embedding is ignored
+    prompt = Prompt(tokens, mask)
     assert not torch.allclose(model(x, t, prompt), model(x, t, prompt._replace(tokens=prompt.tokens.flip(0))))
 
 

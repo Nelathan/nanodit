@@ -24,18 +24,18 @@ def test_target_matches_closed_form():
 
 
 def stub_null(batch, length):
-    """A null prompt for networks without tokens: pooled ones, tokens of -1, only the first token real."""
-    return Prompt(torch.ones(batch, 768), -torch.ones(batch, length, 8), (torch.arange(length) < 1).expand(batch, -1))
+    """A null prompt for networks without tokens: tokens of -1, only the first token real."""
+    return Prompt(-torch.ones(batch, length, 8), (torch.arange(length) < 1).expand(batch, -1))
 
 
 def test_prompt_dropout_rate():
     torch.manual_seed(0)
-    prompt = Prompt(torch.randn(20000, 768), torch.randn(20000, 4, 8), torch.ones(20000, 4, dtype=torch.bool))
+    prompt = Prompt(torch.randn(20000, 4, 8), torch.ones(20000, 4, dtype=torch.bool))
     null = stub_null(20000, 4)
     out = drop_prompts(prompt, null)
-    dropped = (out.pooled == null.pooled).all(dim=-1)
+    dropped = (out.tokens == null.tokens).flatten(1).all(1)
     assert abs(dropped.float().mean() - PROMPT_DROPOUT) < 0.01
-    assert torch.equal(dropped, (out.tokens == null.tokens).flatten(1).all(1)) and torch.equal(dropped, (out.mask == null.mask).all(1))  # a row is dropped whole
+    assert torch.equal(dropped, (out.mask == null.mask).all(1))  # a row is dropped whole
 
 
 def test_shift_moves_t_toward_noise():
@@ -73,12 +73,12 @@ class ZeroNet(torch.nn.Module):
 def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_the_null():
     # F = 0, so per element E[T²] = (2 - t)² + (1 - t)² for unit-normal x and ε.
     torch.manual_seed(0)
-    net, prompt = ZeroNet(), Prompt(torch.randn(4000, 768), torch.randn(4000, 3, 8), torch.ones(4000, 3, dtype=torch.bool))
+    net, prompt = ZeroNet(), Prompt(torch.randn(4000, 3, 8), torch.ones(4000, 3, dtype=torch.bool))
     loss, per_sample, t = flow_loss(net, torch.randn(4000, 2, 16, 16), prompt, shift=1.0)
     expected = ((2 - t) ** 2 + (1 - t) ** 2).mean()
     assert torch.allclose(loss, expected, rtol=0.01)
     assert torch.allclose(per_sample.mean(), loss)
-    dropped = (net.prompt.pooled == 1).all(dim=-1)
+    dropped = (net.prompt.tokens == -1).flatten(1).all(1)
     assert abs(dropped.float().mean() - PROMPT_DROPOUT) < 0.02
     assert all(torch.equal(a[~dropped], b[~dropped]) for a, b in zip(net.prompt, prompt))
 

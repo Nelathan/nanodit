@@ -11,21 +11,21 @@ from nanodit.optim import build_optimizers
 
 
 def test_split_covers_every_parameter_once_and_routes_by_role():
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     matrix, fallback = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)
     names = {id(p): n for n, p in model.named_parameters()}
     usui = {names[id(p)] for g in matrix.param_groups for p in g["params"]}
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.1.mlp_norm.weight"} <= adam
+    assert {"null_tokens", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.1.mlp_norm.weight"} <= adam
     assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "blocks.0.conv_in.weight", "patch_embed.weight"} <= usui
     assert [(g["side"], g["step_rule"], g["frame_init"], g["norm_bounds"]) for g in matrix.param_groups] == [("right", "trust", "random", (None, 1.0))]
 
 
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     fallback_lr = 1e-3
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
@@ -46,7 +46,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
 def trained_model(steps=2):
     """A depth-2 bf16 model with open gates (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
@@ -59,7 +59,7 @@ def batch(seed):
     g = torch.Generator().manual_seed(seed)
     x = torch.randn(8, 2, 32, 32, generator=g)
     tokens, mask = pad_sequences([torch.randn(2 + i % 4, SEQ_DIM, generator=g) for i in range(8)], torch.float32)
-    return x, Prompt(torch.nn.functional.normalize(torch.randn(8, 768, generator=g), dim=-1), tokens, mask)
+    return x, Prompt(tokens, mask)
 
 
 def train_step(model, optimizers, x, prompt, micro_batch=8):
@@ -85,7 +85,7 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
 
 def test_the_production_layout_trains_a_step():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).bfloat16()
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).bfloat16()
     open_gates(model)
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
     conv, cross = model.blocks[0].conv.weight.detach().clone(), model.blocks[3].cross_kv.weight.detach().clone()
@@ -98,7 +98,7 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
     grads = []
     for micro_batch in (8, 2):
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
@@ -120,7 +120,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    restored = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     for optimizer, saved in zip(resumed, state[1]):
@@ -136,7 +136,7 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
 
 def test_no_tracked_norm_grows_past_its_init_norm():
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3)

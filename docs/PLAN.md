@@ -179,16 +179,6 @@ blocks' and the final layer's shift/scale far from zero at init (FACTS, init), s
 `1 + scale` starts far from 1. A fan-in-scaled or 10× smaller init would start near
 identity.
 
-### F3. Does the pooled caption keep the adaLN alongside cross attention?
-
-Cross attention in the attention blocks is *Decided* as design (2026-11-12); the conv blocks have none, so the caption
-reaches them only through the adaLN, which is cheap in compute. Open: whether the pooled caption stays in the adaLN
-(`pooled_ada`, SPEC §3), or the adaLN takes t alone; and if it stays, whether one shared `ada` is enough or each block
-wants its own (or a per-block LoRA on the shared one). Settle: by reading how other text-to-image DiTs with cross
-attention condition their adaLN, not by an arm. At 6000 steps, cross with or without the pooled adaLN ended within
-0.002 of each other (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`). Taken together with Group J, which asks whether
-the adaLN stays at all; the reading of other models is in `topics/conditioning.md`.
-
 ### F4. Block layout: mixers, parallel blocks, RoPE and head sharing
 
 The list of 2026-11-06, in `topics/block-design.md` with the ledger: meta-only patch embed at one primal block per token, parallel
@@ -271,7 +261,7 @@ The sandwich norm was necessary against the loss spikes (2026-11-06); no arm che
 Open:
 - Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
-  point; `ada`, `time_mlp` and `text_proj` the conditioning scale; `patch_embed` the input scale).
+  point; `ada` and `time_mlp` the conditioning scale; `patch_embed` the input scale).
 - A bound per output row instead of per matrix. The rows of `out`, `cross_out` and `w_down` that write the 128 image
   channels have another role than those writing meta, and share one bound with them now (the thread in
   `references/gemini-thread-adaln-and-architecture.md`).
@@ -370,8 +360,8 @@ Its own topic doc: `topics/priming.md` (the source, the direction, the arms and 
 
 ## Group J. The conditioning path
 
-Its own topic doc: `topics/conditioning.md` (the path as built, the questions, other models' conditioning as the
-Gemini thread gives it). Shares a session with F3.
+Its own topic doc: `topics/conditioning.md` (the path as built, the questions, other models' conditioning). The adaLN
+takes t alone (archive 2026-11-20-adaln-takes-t-only).
 
 ### J1. t at the input only, no adaLN
 
@@ -379,7 +369,8 @@ t supplied once, into the meta channels at the patch embed, possibly re-injected
 in place of the adaLN gates. *Hypothesis*: under x0 velocity the model takes the noisy latent and
 ships it, so only the first blocks need t, to know how carefully to touch it; the noise is overwritten fast, and deeper
 blocks clean, add coherence and the prompt. Free read first: how much the trained adaLN's six vectors vary with t
-over depth, from a checkpoint. State: the preferred direction, no arm.
+over depth, from a checkpoint. State: parked. Krea 2 reports that dropping t conditioning underperformed its adaLN
+baseline and that t as tokens fell behind at 512 and 1024 px (`topics/conditioning.md`).
 
 ### J2. Joint attention instead of self then cross
 
@@ -397,7 +388,8 @@ facto sink. State: wanted, with J2 or without.
 
 ### J4. The adaLN without its shift
 
-If the adaLN stays: scale and gate only, as Lumina 2 is said to do. State: open, small.
+Scale and gate only, as Lumina 2 and Z-Image do (diffusers code) and Qwen-Image-2.0 (bias-free modulation). State:
+next after the caption refiner, one arm.
 
 ### J5. Several encoder layers instead of the last
 

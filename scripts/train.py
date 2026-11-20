@@ -63,7 +63,6 @@ class Config:
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
-    pooled_ada: bool = True  # the pooled caption embedding conditions the adaLN
     heldout_set: str | None = None  # the dataset's held-out rows (scripts/holdout.py), scored beside eval_set into score_heldout.jsonl; none for a run continuing one that trained on them
     anneal_to: float | None = None  # an anneal run (SPEC §6), from a checkpoint with warmup = 0: Usui's lr falls by a cosine over `steps` to this value
 
@@ -72,7 +71,7 @@ def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     """The config's DiT at its init, the null prompt from the precomputed empty caption."""
     null = load_file(cfg.null_embedding)
     layout = tuple(BlockType(**cfg.block_types[name]) for name in cfg.layout)
-    return DiT(null["null"], null["null_tokens"], cfg.depth, cfg.width, layout, cfg.pooled_ada).to(device, dtype)
+    return DiT(null["null_tokens"], cfg.depth, cfg.width, layout).to(device, dtype)
 
 
 def compile_blocks(model: DiT) -> None:
@@ -96,12 +95,11 @@ def load_checkpoint(model, optimizers, path: Path) -> int:
 
 
 def embed_prompts(prompts: list[str]) -> Prompt:
-    """The prompts as EmbeddingGemma 2 gives them (SPEC §1): the unit-norm pooled embeddings and the 512-d token states, as in the precomputed rows."""
+    """The prompts as EmbeddingGemma 2 gives them (SPEC §1): the 512-d token states, as in the precomputed rows."""
     from precompute import encode_text, load_text_encoder
 
-    pooled, sequences = encode_text(load_text_encoder("cpu"), prompts)
-    tokens, mask = pad_sequences(sequences)
-    return Prompt(pooled, tokens, mask)
+    _, sequences = encode_text(load_text_encoder("cpu"), prompts)
+    return Prompt(*pad_sequences(sequences))
 
 
 def load_decoder(device: torch.device):
@@ -114,7 +112,7 @@ def load_decoder(device: torch.device):
 def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
     """Fixed prompts, each with its own fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
     side = cfg.resolution // 2
-    n_prompts = len(prompt.pooled)
+    n_prompts = len(prompt.mask)
     noise = torch.cat([torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed + i)) for i in range(n_prompts)])
     latents = euler_sample(model, noise.to(device), prompt.to(device, torch.float32), cfg.sampler_steps, cfg.guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)

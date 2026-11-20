@@ -16,7 +16,7 @@ Notation: rectified flow, `x_t = (1 - t)·x + t·ε`, `t = 1` is pure noise, vel
 | Held-out rows | a set's `heldout_keys.txt` lists the keys of its held-out eval set, never streamed: 1,000 rows of Fine-T2I's square subset with enhanced prompts, generator FLUX.2-dev, the 1,000 with the smallest SHA-256 of their key, not among the excluded. The shuffle writes it empty and `scripts/holdout.py` fills it and writes their rows |
 | Text encoder | `google/embeddinggemma-2`, text path only (`vision_config=None`, `audio_config=None`), loaded through `sentence-transformers`, bf16 or fp32 (never fp16) |
 | Text prefix | none: the caption is encoded as it is, for training and inference |
-| Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it |
+| Embedding | mean-pooled, projected 768-d, L2-normalized as the model returns it; stored, not read by the model |
 | Token states | the encoder's 512-d states of the caption's tokens after its final norm, before the projection to 768; `<bos>` and `<eos>` dropped, unpadded |
 | VAE | `ostris/primal_vae`, variant `2x2`: 2 channels at 2× downsample, deterministic, unit-normal per image and channel, no scale/shift factors. Image sides must be multiples of 16 |
 | Precompute | latents encoded separately per resolution (a 128 px latent is not a downsampled 256 px latent) and embeddings computed once, stored bf16. Streamed per source shard or tar: download, encode, write one Parquet file per shard (key, source, caption, embedding, token states, both latents; a Fine-T2I file also its bucket), delete the download and any intermediate copy |
@@ -37,9 +37,9 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Architecture **a2**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a2-ref-1ep`).
+Architecture **a3**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a3-ref-1ep`).
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by LFM2's gated short conv, writing all channels (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by LFM2's gated short conv, writing all channels (conv-first), the fourth by self-attention. The adaLN conditioning takes the timestep alone. The caption enters only by cross attention: every attention block reads its 512-d token states.
 
 | Component | Decision |
 |---|---|
@@ -55,7 +55,7 @@ Plain DiT: no text tokens in the sequence, bidirectional mixing over image token
 | Cross attention | In every attention block, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
 | MLP | SwiGLU, hidden 4 × width |
 | Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's six shift/scale/gate vectors (mixer, MLP), plus a learned 6×width table per block; per image, not per token |
-| Conditioning vector | `c = MLP_t(sinusoid(t)) + Linear_text(rms_norm(e_text))`, the norm with no gain |
+| Conditioning vector | `c = MLP_t(sinusoid(t))` |
 | Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to it |
 | Size | Parameter counts by width and depth in FACTS |
 
@@ -67,7 +67,7 @@ Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), D
 - Loss: `‖F - T‖²`, unweighted. This is identically `‖v̂ - v‖²` with `v̂ = x_t - F`.
 - The sampler receives `v̂ = x_t - F`; any flow-matching sampler runs unchanged.
 - Timestep sampling: logit-normal with logit std 0.7, which puts more samples at mid t, where the loss is highest. Shift grows with resolution, scaled by √(token ratio) per stage.
-- Prompt dropout: 10%, replaced by a learned null embedding → classifier-free guidance at sampling. A caption with no tokens is the null prompt, in training and at sampling; the encoder warns of it and stores no token states.
+- Prompt dropout: 10%, replaced by the learned null tokens → classifier-free guidance at sampling. A caption with no tokens is the null prompt, in training and at sampling; the encoder warns of it and stores no token states.
 
 ## 5. Initialization
 
@@ -77,8 +77,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 |---|---|---|
 | Patch embed 128→(width − 128) | fan-in normal, zero bias; the first 128 channels are the raw patch, no parameters | Usui |
 | Timestep MLP | fan-in normal | Usui |
-| Text projection 768→width | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
-| Null embedding | EmbeddingGemma 2's embedding of the empty caption, learned from there; the null tokens start as its `<bos>` and `<eos>` states | fallback |
+| Null tokens | EmbeddingGemma 2's `<bos>` and `<eos>` states of the empty caption, learned from there | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
 | Conv block input Linear (B, C, v), depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |

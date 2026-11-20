@@ -54,7 +54,7 @@ def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
 
 def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     """Each row becomes the `null` prompt with probability PROMPT_DROPOUT."""
-    dropped = torch.rand(prompt.pooled.shape[0], device=prompt.pooled.device) < PROMPT_DROPOUT
+    dropped = torch.rand(prompt.mask.shape[0], device=prompt.mask.device) < PROMPT_DROPOUT
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 

@@ -1,5 +1,5 @@
-# The trunk model at d768x24 on the merged 128 px set, one pass (8,236,215 rows, the set less its excluded rows, at batch 256): the reference for trunk arms, architecture a2 (SPEC §3); its run is `a1-lfmnormread-1ep` (log 2026-11-20-lfm-norm-read-1ep). Fields: scripts/train.py Config.
-name = "a2-ref-1ep"
+# The trunk model at d768x24 on the merged 128 px set, one pass (8,236,215 rows, the set less its excluded rows, at batch 256): the reference for trunk arms, architecture a3 (SPEC §3); not run on a3, the a2 run of this config is `a1-lfmnormread-1ep` (log 2026-11-20-lfm-norm-read-1ep). Fields: scripts/train.py Config.
+name = "a3-ref-1ep"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/run/media/djg/vel-ssd/tiny-dit/set_128"

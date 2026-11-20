@@ -129,7 +129,7 @@ def stream_keys(stream, micro_batches, by_latent):
     batches = []
     for bucket in stream.draw(micro_batches):
         x, prompt = bucket.next()
-        assert x.dtype == prompt.pooled.dtype == prompt.tokens.dtype == torch.float32 and x.shape[1:] == bucket.shape
+        assert x.dtype == prompt.tokens.dtype == torch.float32 and x.shape[1:] == bucket.shape
         batches.append([by_latent[bf16_bytes(row.bfloat16())] for row in x])
     return batches
 
@@ -145,7 +145,7 @@ def test_a_bucket_streams_every_row_once_per_pass_and_the_next_pass_in_other_blo
         seen = []
         for _ in range(13):  # 26 rows
             x, prompt = square.next()
-            for row, emb, tokens, mask in zip(x, *prompt):
+            for row, tokens, mask in zip(x, *prompt):
                 seen.append(by_latent[bf16_bytes(row.bfloat16())])
                 assert mask.sum() >= 2 and not tokens[~mask].any()  # its tokens, zero past them
         assert sorted(seen) == sorted(k for k in by_latent.values() if k[0] == "k" or int(k[1:]) % 2)

@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from nanodit.data import pad_sequences
-from nanodit.model import BlockType, DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
+from nanodit.model import BlockType, DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, Prompt
 
 PAIR = (BlockType("conv"), BlockType("attn"))  # the smallest layout with every kind of matrix
 
@@ -18,12 +18,11 @@ def open_gates(model):
 @pytest.fixture
 def model():
     torch.manual_seed(0)
-    null = torch.nn.functional.normalize(torch.randn(TEXT_DIM), dim=0)
-    return DiT(null, torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    return DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
 
 
 @pytest.fixture
 def prompt():
     """Three captions of 5, 3 and 2 tokens."""
     tokens, mask = pad_sequences([torch.randn(n, SEQ_DIM) for n in (5, 3, 2)], torch.float32)
-    return Prompt(torch.nn.functional.normalize(torch.randn(3, TEXT_DIM), dim=-1), tokens, mask)
+    return Prompt(tokens, mask)

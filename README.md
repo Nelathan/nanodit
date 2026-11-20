@@ -7,8 +7,8 @@ seed each.
 
 - **Target:** Ostris's *x0 velocity* parameterization of rectified flow
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched 8×8 by the DiT itself into 128-d tokens
-- **Conditioning:** **EmbeddingGemma 2**: the pooled 768-d caption embedding through adaLN, and cross
-  attention to its 512-d token states in the attention blocks
+- **Conditioning:** the timestep through adaLN; the caption by cross attention to **EmbeddingGemma 2**'s 512-d token
+  states in the attention blocks
 - **Blocks:** three gated short-conv blocks (LFM2's), writing all channels, for every attention block; sandwich
   norm on the attention and MLP branches; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
 - **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix stays in the ball of its init norm
@@ -25,7 +25,7 @@ It is a research log as much as a codebase: every design choice is in `docs/SPEC
 one pass over the 8.24M-pair training set plus a cooldown of a tenth of a pass, about 4.3 hours on the one GPU. Euler,
 30 steps, guidance 4. Mood, palette, layout and lighting follow the prompt; the forms are not finished.*
 
-One model is trained end to end: architecture **a1**, the trunk before its conv blocks were gated, 128 px only; the trunk is now **a2** (`docs/SPEC.md`). The 256 px stage is not trained yet.
+One model is trained end to end: architecture **a1**, the trunk before its conv blocks were gated, 128 px only; the trunk is now **a3** (`docs/SPEC.md`). The 256 px stage is not trained yet.
 
 | | |
 |---|---|
@@ -69,7 +69,7 @@ tests/                behaviour tests for all of the above
 ```bash
 uv sync
 uv run python -m pytest tests/
-uv run python scripts/train.py configs/a2-ref-1ep.toml
+uv run python scripts/train.py configs/a3-ref-1ep.toml
 ```
 
 torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is a git dependency pinned to a
@@ -79,7 +79,7 @@ commit of its `lab` branch. Primal VAE loads via `diffusers` `AutoModel` with
 Training reads precomputed rows, not images. The pipeline, each step a script with its usage in its docstring:
 
 1. `precompute.py`: text-to-image-2M shards to one Parquet per shard (Primal latents at 128 and 256 px, the pooled
-   embedding, the 512-d token states).
+   embedding, which the model does not read, the 512-d token states).
 2. `stage_fine.py`, `encode_fine.py`: Fine-T2I into aspect-bucket crops, then into the same encodings.
 3. `shuffle.py`: both datasets into one training set per resolution, one Parquet per aspect bucket in uniformly
    random row order, each image once.

@@ -19,7 +19,8 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 
 from nanodit.data import _bf16
-from nanodit.model import LATENT_CHANNELS, TEXT_DIM
+from nanodit.model import LATENT_CHANNELS
+from precompute import TEXT_DIM
 from train import load_decoder
 
 EVAL = sys.argv[1]

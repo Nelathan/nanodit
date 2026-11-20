@@ -7,8 +7,8 @@ from nanodit.sampler import euler_sample
 
 
 def stub_prompt(batch, value, length=2):
-    """A prompt for networks that read the pooled embedding only: `value` everywhere."""
-    return Prompt(torch.full((batch, 768), float(value)), torch.full((batch, length, 8), float(value)), torch.ones(batch, length, dtype=torch.bool))
+    """A prompt for networks that read its first token's first value only: `value` everywhere."""
+    return Prompt(torch.full((batch, length, 8), float(value)), torch.ones(batch, length, dtype=torch.bool))
 
 
 def stub_null(batch, length):
@@ -61,7 +61,7 @@ class Probe:
 
     def __call__(self, x_t, t, prompt):
         self.t_seen.append(t.unique().tolist())
-        return (2 * prompt.pooled[:, :1] + t[:, None]).view(-1, 1, 1, 1).expand_as(x_t)
+        return (2 * prompt.tokens[:, 0, :1] + t[:, None]).view(-1, 1, 1, 1).expand_as(x_t)
 
 
 @pytest.mark.parametrize("guidance", [0.0, 1.0, 3.0])

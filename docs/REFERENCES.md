@@ -43,10 +43,13 @@ What each source establishes for this project.
 ## Architecture references
 
 - **MOSS-Image Technical Report**, arXiv 2610.23374. 5B single-stream DiT, Qwen3.5-9B text encoder, FLUX.2 VAE,
-  2×2 latent grouping → 16-px stride.
-- **Krea 2.** Single-stream 12B DiT; GQA with gated sigmoid attention, QK-norm, SwiGLU 4×, 3D axial RoPE;
-  progressive 256/512/1024 px.
+  2×2 latent grouping → 16-px stride; shared modulation, two text-only blocks. `topics/conditioning.md`.
+- **Krea 2**, https://www.krea.ai/blog/krea-2-technical-report. Single-stream 12B DiT; GQA with gated sigmoid
+  attention, QK-norm, SwiGLU 4×, 3D axial RoPE; progressive 256/512/1024 px; per-block bias in place of the
+  modulation MLP; ablates no t and t as tokens. `topics/conditioning.md`.
 - **Qwen-Image-2.0 Technical Report**, arXiv 2605.10730. MMDiT, MSRoPE, RMSNorm QK-norm, bias-free modulation, SwiGLU.
+- **diffusers** `transformer_qwenimage.py`, `transformer_lumina2.py`, `transformer_z_image.py`: the modulation of
+  Qwen-Image, Lumina 2 and Z-Image as implemented, and the latter two's context refiners. `topics/conditioning.md`.
 - **PixArt-α.** adaLN-single.
 - **CPVT** (conditional positional encoding) and **SANA** (Mix-FFN with depthwise conv, linear attention).
 
@@ -98,7 +101,6 @@ a number from it is relied on.
 - **i1: A Simple and Fully Open Recipe for Strong Text-to-Image Models**, arXiv 2606.11289. Said to drop adaLN for t
   as tokens. PLAN J, `topics/conditioning.md`.
 - **"What Time Is It?"**, time-unconditional flow matching (no citation given). PLAN J1.
-- **Lumina-Image 2.0, Z-Image, Wan 2.1**: adaLN without shift, selective adaLN, shared FiLM, as the Gemini thread
-  gives them. PLAN J4, `topics/conditioning.md`.
+- **Wan 2.1**: shared FiLM, as the Gemini thread gives it. `topics/conditioning.md`.
 - **modded-nanogpt**, https://github.com/KellerJordan/modded-nanogpt. The speedrun's record history. PLAN F5,
   `topics/speedrun-ports.md`.

@@ -31,7 +31,7 @@ def train():
 
 def random_prompt(n, generator=None):
     tokens, mask = pad_sequences([torch.randn(2 + i % 4, SEQ_DIM, generator=generator) for i in range(n)], torch.float32)
-    return Prompt(torch.nn.functional.normalize(torch.randn(n, 768, generator=generator), dim=-1), tokens, mask)
+    return Prompt(tokens, mask)
 
 
 def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4, log_every=1):
@@ -39,7 +39,7 @@ def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, mic
     for name, n in (("s", 16), ("eval", 5)):  # the training set and the eval set are both shuffled files
         write_shard(tmp_path / f"{name}_shard.parquet", torch.randn(n, 2, 16, 16).bfloat16(), torch.randn(n, 768).bfloat16(), [torch.randn(2 + i % 4, SEQ_DIM).bfloat16() for i in range(n)])
         shuffle_module().shuffle([str(tmp_path / f"{name}_shard.parquet")], 32, tmp_path / name)
-    save_file({"null": torch.randn(768), "null_tokens": torch.randn(NULL_TOKENS, SEQ_DIM)}, tmp_path / "null.safetensors")
+    save_file({"null_tokens": torch.randn(NULL_TOKENS, SEQ_DIM)}, tmp_path / "null.safetensors")
     (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
     config.write_text(f"""
@@ -176,7 +176,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert not torch.equal(first["blocks.1.qkv.weight"], last["blocks.1.qkv.weight"])  # a UsuiTrack matrix moved
 
     assert {t.dtype for t in last.values()} == {torch.bfloat16}  # the checkpoint holds the bf16 state
-    restored = DiT(torch.zeros(768), torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    restored = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     restored.load_state_dict(last)
     assert restored.blocks[0].table[[2, 5]].abs().max() > 0  # trained, not the zero init
     usui_state, adam_state = torch.load(checkpoint / "optimizer.pt")
@@ -186,9 +186,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
 
 
 def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
-    class Echo(torch.nn.Module):  # its output depends on t and on the embedding it is given
+    class Echo(torch.nn.Module):  # its output depends on t and on the prompt it is given
         def forward(self, x_t, t, prompt):
-            return x_t * t.view(-1, 1, 1, 1) + prompt.pooled[:, :1, None, None]
+            return x_t * t.view(-1, 1, 1, 1) + prompt.tokens[:, 0, :1, None, None] / 32  # a small per-row offset, so fp32 sums stay within the tolerance
 
     torch.manual_seed(0)
     x, noise, ts = torch.randn(5, 2, 64, 64).bfloat16(), torch.randn(5, 2, 64, 64), torch.tensor([0.2, 0.7])  # the latent size: every band has energy
@@ -357,7 +357,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     results = []
     for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
         torch.manual_seed(1)
-        model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         size = 8 // micro_batches
@@ -380,7 +380,7 @@ def test_micro_batches_of_different_buckets_weigh_by_their_tokens(train, monkeyp
     small, large = torch.randn(2, 2, 16, 16, generator=g), torch.randn(2, 2, 16, 32, generator=g)  # 4 and 8 tokens
     prompt = random_prompt(2, g)
     torch.manual_seed(1)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     loss, per_sample, _, _ = train.accumulate_gradients(model, FixedBatches([(small, prompt), (large, prompt)]), 2, shift=1.0, sigma=1.0)
     assert torch.allclose(loss, per_sample[:2].mean() / 3 + per_sample[2:].mean() * 2 / 3)  # the mean over every latent element
@@ -388,7 +388,7 @@ def test_micro_batches_of_different_buckets_weigh_by_their_tokens(train, monkeyp
 
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
@@ -412,7 +412,7 @@ def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(trai
 
 def test_a_resumed_run_takes_its_lr_from_the_config_not_the_checkpoint(train, tmp_path):
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
     open_gates(model)
     fresh = copy.deepcopy(model)  # Molegrad attaches to a model once
     saved = build_optimizers(model, 1e-3, 0.95, 0.1, 1e-3)

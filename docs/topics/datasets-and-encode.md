@@ -13,7 +13,7 @@ so it holds the staging, and the shuffled set goes to `/mnt/mars` afterwards. Th
 as an overnight job (2026-11-05). Candidates in REFERENCES, Data: Fine-T2I, PD12M, MONET; `moonworks/lunara-aesthetic`
 for the fine-tune set (see the FID and Lunara question in the sampling group).
 
-Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (the 768-d vector trained on now) and its token
+Per set: 128 and 256 px latents, the EmbeddingGemma 2 pooled embedding (stored, not read by the model) and its token
 sequence, encoded and staged on `/mnt/luna` (HDD, ~800 GB free), the shuffled set then copied to `/mnt/mars` (107 GB
 free on 2026-11-05). First: text-to-image-2M again, overnight. Sizes per 2M rows, from the current set: 128 px latents
 32 GB, 256 px latents 128 GB; the token sequence unpadded at 1,536 B per token (768-d bf16):

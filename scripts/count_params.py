@@ -1,6 +1,6 @@
 """Parameter counts of the DiT per role, for shapes of the current model. `image` is what a scaling law counts as N
-(the blocks' mixers and MLPs and the patch embed); `conditioning` is the timestep MLP, the text projection, the
-shared adaLN projection, the per-block tables, the cross attention and the null prompt. Built on the meta device.
+(the blocks' mixers and MLPs and the patch embed); `conditioning` is the timestep MLP, the shared adaLN projection,
+the per-block tables, the cross attention and the null prompt. Built on the meta device.
 
 usage: count_params.py WIDTHxDEPTH [WIDTHxDEPTH ...]
 """
@@ -8,14 +8,14 @@ import sys
 
 import torch
 
-from nanodit.model import NULL_TOKENS, SEQ_DIM, TEXT_DIM, DiT
+from nanodit.model import NULL_TOKENS, SEQ_DIM, DiT
 
-CONDITIONING = ("time_mlp", "text_proj", "ada", "null_", ".table", ".cross_")
+CONDITIONING = ("time_mlp", "ada", "null_", ".table", ".cross_")
 
 
 def counts(width: int, depth: int) -> dict[str, int]:
     with torch.device("meta"):
-        model = DiT(torch.zeros(TEXT_DIM), torch.zeros(NULL_TOKENS, SEQ_DIM), depth, width)
+        model = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth, width)
     split = dict(image=0, conditioning=0)
     for name, p in model.named_parameters():
         split["conditioning" if any(c in name for c in CONDITIONING) else "image"] += p.numel()

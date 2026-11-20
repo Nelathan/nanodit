@@ -27,7 +27,7 @@ def with_long_row(prompt: Prompt, length: int) -> Prompt:
     mask = prompt.mask.new_zeros(batch, tokens.shape[1])
     tokens[:, :current], mask[:, :current] = prompt.tokens, prompt.mask
     tokens[0, :length], mask[0], mask[0, :length] = torch.randn(length, dim, dtype=tokens.dtype, device=tokens.device), False, True
-    return Prompt(prompt.pooled, tokens, mask)
+    return Prompt(tokens, mask)
 
 
 def main(config_path: str, micro_batch: str, *lengths: str) -> None:

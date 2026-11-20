@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import torch
 from torch import Tensor
 
-from .model import LATENT_CHANNELS, NULL_TOKENS, SEQ_DIM, TEXT_DIM, Prompt
+from .model import LATENT_CHANNELS, NULL_TOKENS, SEQ_DIM, Prompt
 
 EXCLUDED = "excluded_keys.txt"  # in a set's directory: the keys of rows never streamed, one per line (SPEC §1)
 HELDOUT = "heldout_keys.txt"  # in a set's directory: the keys of its held-out eval rows, never streamed either (SPEC §1)
@@ -54,10 +54,10 @@ def pad_sequences(sequences: list[Tensor], dtype: torch.dtype = torch.bfloat16, 
 
 def read_rows(path: str, resolution: int) -> tuple[Tensor, Prompt]:
     """Every row of a precomputed Parquet, in file order: bf16 latents [N, 2, res/2, res/2] and their prompts."""
-    table = pq.read_table(path, columns=[f"latent_{resolution}", "embedding", "sequence"])
+    table = pq.read_table(path, columns=[f"latent_{resolution}", "sequence"])
     side = resolution // 2
     tokens, mask = pad_sequences(_sequences(table["sequence"]))
-    return _bf16(table[f"latent_{resolution}"], LATENT_CHANNELS, side, side), Prompt(_bf16(table["embedding"], TEXT_DIM), tokens, mask)
+    return _bf16(table[f"latent_{resolution}"], LATENT_CHANNELS, side, side), Prompt(tokens, mask)
 
 
 class Bucket:
@@ -77,12 +77,10 @@ class Bucket:
         self.blocks: list[list[int]] = []
         self.pending = self._read_next()
         self.latents = torch.empty(0, *self.shape, dtype=torch.bfloat16)
-        self.embeddings = torch.empty(0, TEXT_DIM, dtype=torch.bfloat16)
         self.sequences: list[Tensor] = []
         self.position = 0
         self.dtype, self.device = dtype, device
         self.x = torch.empty(batch, *self.shape, dtype=dtype, device=device)
-        self.pooled = torch.empty(batch, TEXT_DIM, dtype=dtype, device=device)
 
     def _read_next(self):
         if not self.blocks:  # a new pass
@@ -92,29 +90,27 @@ class Bucket:
         rows = sum(self.file.metadata.row_group(g).num_rows for g in groups)
         return self.reader.submit(self._read, groups, torch.from_numpy(self.rng.permutation(rows)))
 
-    def _read(self, groups: list[int], shuffle: Tensor) -> tuple[Tensor, Tensor, list[Tensor]]:
-        table = self.file.read_row_groups(groups, columns=[self.column, "embedding", "sequence", "key"])
+    def _read(self, groups: list[int], shuffle: Tensor) -> tuple[Tensor, list[Tensor]]:
+        table = self.file.read_row_groups(groups, columns=[self.column, "sequence", "key"])
         keys = table["key"].to_pylist()
         # the permutation is drawn over every row, so the order follows the seed whatever is excluded
         order = torch.tensor([i for i in shuffle.tolist() if keys[i] not in self.excluded], dtype=torch.long)
         sequences = _sequences(table["sequence"])
-        return _bf16(table[self.column], *self.shape)[order], _bf16(table["embedding"], TEXT_DIM)[order], [sequences[i] for i in order.tolist()]
+        return _bf16(table[self.column], *self.shape)[order], [sequences[i] for i in order.tolist()]
 
     def next(self) -> tuple[Tensor, Prompt]:
         n = len(self.x)
         while len(self.latents) - self.position < n:
-            latents, embeddings, sequences = self.pending.result()
+            latents, sequences = self.pending.result()
             self.latents = torch.cat([self.latents[self.position :], latents])
-            self.embeddings = torch.cat([self.embeddings[self.position :], embeddings])
             self.sequences = self.sequences[self.position :] + sequences
             self.position = 0
             self.pending = self._read_next()  # after the cat, so the reader's copies and the cat's never coexist
         rows = slice(self.position, self.position + n)
         self.x.copy_(self.latents[rows])
-        self.pooled.copy_(self.embeddings[rows])
         self.position += n
         tokens, mask = pad_sequences(self.sequences[rows])  # on the CPU, so the GPU gets one copy of each
-        return self.x, Prompt(self.pooled, tokens.to(self.device, self.dtype), mask.to(self.device))
+        return self.x, Prompt(tokens.to(self.device, self.dtype), mask.to(self.device))
 
 
 class Stream:

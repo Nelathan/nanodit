@@ -11,7 +11,6 @@ PATCH = 8
 LATENT_CHANNELS = 2
 TOKEN_DIM = LATENT_CHANNELS * PATCH * PATCH  # 128
 HEAD_DIM = 64
-TEXT_DIM = 768
 SEQ_DIM = 512  # the encoder's token states, before its projection to 768
 NULL_TOKENS = 2  # the empty caption's <bos> and <eos> states, the null prompt's tokens at init
 TIME_DIM = 256
@@ -35,17 +34,16 @@ LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("conv"), BlockType("at
 
 
 class Prompt(NamedTuple):
-    """The text side of a batch: the pooled embedding conditions the adaLN, the token states feed the cross attention."""
+    """The text side of a batch: the caption's token states, which the cross attention reads."""
 
-    pooled: Tensor  # [B, 768]
     tokens: Tensor  # [B, L, 512], zero past a caption's end, L >= NULL_TOKENS
     mask: Tensor  # [B, L] bool, true on a caption's tokens
 
     def to(self, device: torch.device, dtype: torch.dtype) -> Prompt:
-        return Prompt(self.pooled.to(device, dtype), self.tokens.to(device, dtype), self.mask.to(device))
+        return Prompt(self.tokens.to(device, dtype), self.mask.to(device))
 
     def rows(self, start: int, stop: int) -> Prompt:
-        return Prompt(self.pooled[start:stop], self.tokens[start:stop], self.mask[start:stop])
+        return Prompt(self.tokens[start:stop], self.mask[start:stop])
 
 
 def patchify(x: Tensor) -> tuple[Tensor, int, int]:
@@ -149,20 +147,17 @@ class Block(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, null_embedding: Tensor, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT,
-                 pooled_ada: bool = True):
+    def __init__(self, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT):
         """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth."""
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert layout, "a layout needs at least one block type"
         kinds = [layout[i % len(layout)] for i in range(depth)]
-        assert any(kind.mixer == "attn" for kind in kinds) or pooled_ada, "the caption must reach the network by cross attention or the adaLN"
+        assert any(kind.mixer == "attn" for kind in kinds), "the caption reaches the network only by cross attention"
         self.width = width
-        self.null_embedding = nn.Parameter(null_embedding.detach().clone().float())
         self.null_tokens = nn.Parameter(null_tokens.detach().clone().float())  # [NULL_TOKENS, 512]
         self.patch_embed = nn.Linear(TOKEN_DIM, width - TOKEN_DIM)  # fills the meta channels; the first TOKEN_DIM carry the patch unchanged
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
-        self.text_proj = nn.Linear(TEXT_DIM, width) if pooled_ada else None
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width, kind) for kind in kinds)
         self.init_weights()
@@ -187,7 +182,7 @@ class DiT(nn.Module):
         """The empty caption for `batch` rows, its tokens padded to `length`."""
         tokens = F.pad(self.null_tokens, (0, 0, 0, length - NULL_TOKENS)).expand(batch, -1, -1)
         mask = (torch.arange(length, device=tokens.device) < NULL_TOKENS).expand(batch, -1)
-        return Prompt(self.null_embedding.expand(batch, -1), tokens, mask)
+        return Prompt(tokens, mask)
 
     def forward(self, x: Tensor, t: Tensor, prompt: Prompt) -> Tensor:
         """x [B, 2, H, W] latent at noise level t [B] -> F [B, 2, H, W].
@@ -197,12 +192,10 @@ class DiT(nn.Module):
         attention over a fully masked row has no softmax."""
         empty = (~prompt.mask.any(1)).view(-1, 1)
         null = self.null_prompt(*prompt.tokens.shape[:2])
-        prompt = Prompt(torch.where(empty, null.pooled, prompt.pooled), torch.where(empty[..., None], null.tokens, prompt.tokens), torch.where(empty, null.mask, prompt.mask))
+        prompt = Prompt(torch.where(empty[..., None], null.tokens, prompt.tokens), torch.where(empty, null.mask, prompt.mask))
         dtype = self.patch_embed.weight.dtype
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype))
-        if self.text_proj is not None:
-            c = c + self.text_proj(F.rms_norm(prompt.pooled, (TEXT_DIM,)).to(dtype))
         text_tokens = F.rms_norm(prompt.tokens, (SEQ_DIM,)).to(dtype)
         mod = self.ada(c).view(-1, N_MOD, self.width)
         rope = rope_angles(h, w, x.device)

@@ -23,14 +23,14 @@ WARMUP, STEPS = 3, 8
 
 def bench(kw: dict, resolution: int, device: torch.device) -> float:
     torch.manual_seed(0)
-    model = DiT(torch.randn(768), torch.randn(NULL_TOKENS, SEQ_DIM), depth=12, width=768, **kw).to(device, torch.bfloat16)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=12, width=768, **kw).to(device, torch.bfloat16)
     for block in model.blocks:
         block.compile()
     tokens = (resolution // 16) ** 2
     batch = max(1, TOKENS_PER_BATCH // tokens)
     x = torch.randn(batch, 2, resolution // 2, resolution // 2, device=device)
     tokens, mask = pad_sequences([torch.randn(40, SEQ_DIM)] * batch, torch.bfloat16, device)
-    text = Prompt(torch.randn(batch, 768, device=device, dtype=torch.bfloat16), tokens, mask)
+    text = Prompt(tokens, mask)
     t = torch.rand(batch, device=device)
     for i in range(WARMUP + STEPS):
         if i == WARMUP:

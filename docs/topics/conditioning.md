@@ -1,6 +1,6 @@
-# The conditioning path: t, the pooled caption, the token states
+# The conditioning path: t and the token states
 
-Topic doc for PLAN Group J (J1–J4) and for F3, which it shares a session with. Opened 2026-11-17 from
+Topic doc for PLAN Group J. The adaLN takes t alone (archive 2026-11-20-adaln-takes-t-only). Opened 2026-11-17 from
 `references/gemini-thread-adaln-and-architecture.md` (the conditioning questions) and
 `references/handover-2026-11-12-residual-gating.md` §3.3 (the sink derivation). Measured numbers go to FACTS, closures to
 `archive/`.
@@ -8,7 +8,6 @@ Topic doc for PLAN Group J (J1–J4) and for F3, which it shares a session with.
 ## As built (SPEC §3, §5; `src/nanodit/model.py` at `12c2028`)
 
 - **t**: `sinusoid(t)` (256-d, fp32) → `time_mlp` (Linear 256→768, SiLU, Linear 768→768) → `c`.
-- **Pooled caption**: `text_proj(rms_norm(pooled))` added to `c` while `pooled_ada` is on (the F3 switch).
 - **adaLN-single**: `SiLU → Linear(768 → 6·768)`, one projection for the whole network (3.5M parameters), plus a
   learned `table[6, 768]` per block. It gives shift, scale and gate for the mixer and for the MLP of every block,
   conv and attention alike. It is per image, not per token. The gate rows start at zero, so every block is the
@@ -20,7 +19,7 @@ Topic doc for PLAN Group J (J1–J4) and for F3, which it shares a session with.
   projects them with its own `cross_kv`: GQA, no RoPE, its own q/k norms and branch norm, and a static per-channel
   `cross_gate` initialized to zero. The token states are **already static**: no layer updates them, and no MLP or
   query runs on them.
-- **Null prompt**: a learned null embedding plus learned `null_tokens[2, 512]`, started from EmbeddingGemma 2's
+- **Null prompt**: learned `null_tokens[2, 512]`, started from EmbeddingGemma 2's
   `<bos>` and `<eos>` states of the empty caption. A caption with no tokens maps to it, in training and at sampling.
   A real caption carries no `<bos>` or `<eos>` (SPEC §1), so no null key sits in its key set.
 
@@ -39,17 +38,15 @@ What goes and what has to replace it:
   - (c) (a), plus a learned, gated re-injection into the meta channels every k blocks (k 6–8 in the thread). It is
     the thread's "insurance" against t diluting over depth, which it says is borrowed from the modded-nanogpt
     speedrun (`topics/speedrun-ports.md`). It has the same shape as M3.
-- **The pooled caption.** J1 with `pooled_ada = false` means the caption enters only by cross attention. The switch
-  exists (F3).
 
 Two arguments for it, from the thread:
 - t carried in the stream, unlike adaLN's per-image vectors, would allow a per-token t (the thread's case: editing,
   per-token noise schedules). Per-token t as a training scheme ran and was dropped (`topics/priming.md`).
 - The thread claims that a Gemma-based encoder's pooled embedding smears the bindings the token states keep, unlike
   CLIP's. EmbeddingGemma 2 is itself a contrastively trained embedding model (mean pool, REFERENCES), so the claim is
-  doubtful as given; that the token states hold more than one vector does stand. That argues for `pooled_ada = false` (F3) whatever happens to t.
+  doubtful as given; that the token states hold more than one vector does stand.
 
-*Hypothesis* (the reason J1 is the preferred direction): the model always takes a noisy latent and
+*Hypothesis* (the reason J1 was the preferred direction; parked, PLAN J1): the model always takes a noisy latent and
 ships it, so it needs t only at the start, to know how carefully to touch the latent. The noise is overwritten fast;
 deeper blocks clean, improve coherence and add the prompt, and need no t. Even small, the adaLN may not be wanted by
 this architecture under x0 velocity.
@@ -63,7 +60,7 @@ For each block, take the six vectors and measure how much each varies with t aga
 blocks. The hypothesis predicts strong t-dependence in the first blocks and little in the deep ones. If gate and scale barely move with t, J1 costs little. If they move strongly, (c) is the variant to arm.
 
 Settle: an arm against the reference at the agreed arm length, read on `loss_by_t` at the extremes and on the eval
-grid. Paired with F3 if both are taken.
+grid.
 
 **Does the model need t at all?** The thread says yes, and cites "What Time Is It?" on time-unconditional flow
 matching (unverified, not read). One fact specific to this data: the Primal latents are unit-normal per image and
@@ -129,10 +126,11 @@ loss does. That needs D7 to be visible; at 6000 steps loss alone will likely sit
 
 ## J4. If the adaLN stays: drop its shift
 
-Lumina-Image 2.0 is said to modulate with scale and gate only, with no shift (the thread's claim, unverified). Here
+Lumina 2 and Z-Image modulate with scale and gate only, with no shift, and a tanh on the gates (diffusers code);
+Qwen-Image-2.0 removes the modulation's bias term (report). Here
 that would drop 2 of the 6 rows (`shift_a`, `shift_m`) and keep 4. The thread's reason, that velocity targets are zero-mean, does not obviously carry
 over: what the shift acts on is the normed stream, meta channels included, and that is not zero-mean by
-construction. Settle: by reading Lumina 2's code, or one arm. Moot if J1 is taken.
+construction. Settle: one arm.
 
 ## J5. Which encoder states: one layer, or several fused
 
@@ -146,17 +144,34 @@ unless they are mixed at encode time with fixed weights. *Hypothesis*, no arm. S
 
 ## J6. A text refiner before the image reads the tokens
 
-Z-Image runs a few unmodulated "context refiner" blocks over the text tokens before the main stack (the thread's
-claim, unverified); Lumina 2 and the single-stream models update the text in every layer. Here the token states are
+Lumina 2 and Z-Image run two unmodulated `context_refiner` blocks over the text tokens before the joint stack
+(diffusers code); MOSS-Image has two text-only blocks and Krea 2 bidirectional layers over the text (reports). Here the token states are
 static. A middle form: two or three small self-attention blocks over the token states, run once per sample (cached
 over sampling steps, as the K/V are), adapting the frozen encoder's states to the image model. *Hypothesis*, no arm;
 it composes with J2 and J5.
+
+## Conditioning in current models, read from their sources (2026-11-20)
+
+| Model | Source | What feeds the modulation | Form |
+|---|---|---|---|
+| Qwen-Image | diffusers | t | per block, image and text modulated apart, `Linear(dim → 6·dim)`: shift, scale, gate |
+| Qwen-Image-2.0 | report 2605.10730 | not stated | "purely multiplicative modulation", no bias term, so no shift |
+| Lumina 2 | diffusers | t | per block `Linear → 4·dim`: scale and gate, tanh on the gates; refiner unmodulated |
+| Z-Image | diffusers | t (256-d) | per block `Linear(256 → 4·dim)`: scale and gate, tanh on the gates; refiner unmodulated |
+| Krea 2 | technical report | not stated | the per-block MLP replaced by a per-block tunable bias |
+| MOSS-Image | report 2610.23374 | not stated | "shared modulation", after FLUX |
+
+- None feeds a pooled caption into its modulation.
+- Krea 2 ablates removing t conditioning (it "consistently underperformed the AdaLN baseline") and t as tokens
+  (enough at 256 px, behind at 512 and 1024 px).
+- The thread's "Qwen-Image modulates its text at t = 0" is diffusers' `zero_cond_t`, off by default and applied to
+  reference images for editing, not to text.
 
 ## Background: conditioning in other open DiTs (the thread's claims, unverified)
 
 - **Shared adaLN:** FLUX.2 (shared across double-stream blocks and across single-stream blocks); Wan 2.x (one base
   modulation MLP, per-layer biases). This is the adaLN-single pattern this model already has, from PixArt.
-- **Per-layer adaLN:** Qwen-Image (text tokens modulated at a fixed t = 0), HiDream-I1 (t plus pooled CLIP).
+- **Per-layer adaLN:** Qwen-Image (text tokens modulated at a fixed t = 0; not so, see above), HiDream-I1 (t plus pooled CLIP).
 - **AdaLN-LoRA:** Anima / Cosmos-Predict2 (rank 256).
 - **AdaRMSNorm-Zero, no shift:** Lumina-Image 2.0 (J4).
 - **Selective adaLN:** Z-Image modulates the main blocks and the noise refiner, not the context refiner.

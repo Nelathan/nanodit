@@ -84,21 +84,21 @@ Source: the two probe scripts, 2026-10-31, 16-core CPU with other processes runn
 
 ## Parameter counts (2026-11-20)
 
-`scripts/count_params.py` on the current `DiT`, architecture a2 (cross attention in every attention block, pooled adaLN
-on). Image parameters are the blocks without their cross attention and tables, and the patch embed; the rest is
+`scripts/count_params.py` on the current `DiT`, architecture a3 (cross attention in every attention block, the adaLN
+on t alone). Image parameters are the blocks without their cross attention and tables, and the patch embed; the rest is
 conditioning. Architecture a1, the basic conv: 204.6M total and 191.3M image at d768 × 24.
 
 | Shape | Total | Image | width ÷ depth |
 |---|---|---|---|
-| d768 × 12 | 121.6M | 112.5M | 64 |
-| d768 × 24 | 238.3M | 225.0M | 32 |
-| d768 × 28 | 277.1M | 262.4M | 27 |
-| d768 × 32 | 316.0M | 299.9M | 24 |
-| d1024 × 16 | 284.5M | 266.6M | 64 |
-| d1024 × 20 | 353.5M | 333.2M | 51 |
-| d1024 × 24 | 422.5M | 399.8M | 43 |
-| d1024 × 28 | 491.5M | 466.4M | 37 |
-| d1024 × 32 | 560.5M | 533.1M | 32 |
+| d768 × 12 | 121.0M | 112.5M | 64 |
+| d768 × 24 | 237.7M | 225.0M | 32 |
+| d768 × 28 | 276.5M | 262.4M | 27 |
+| d768 × 32 | 315.4M | 299.9M | 24 |
+| d1024 × 16 | 283.7M | 266.6M | 64 |
+| d1024 × 20 | 352.7M | 333.2M | 51 |
+| d1024 × 24 | 421.7M | 399.8M | 43 |
+| d1024 × 28 | 490.8M | 466.4M | 37 |
+| d1024 × 32 | 559.8M | 533.1M | 32 |
 
 ## Numbers kept with their topic
 

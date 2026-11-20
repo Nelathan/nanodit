@@ -13,8 +13,8 @@ see Decided). The stream is x [B, N, 768]. The output is read from its first 128
 
 **The conditioning vector c [B, 768], one per image.** The timestep t becomes a 256-d sinusoid (fixed features), then a learned MLP
 (`Linear 256→768`, SiLU, `Linear 768→768`), because the sinusoid is only a fixed basis and the MLP is the learned map from it into the
-space the modulation reads (the DiT standard). The pooled caption embedding (768-d, rms-normalised) goes through one `Linear 768→768`. c is the
-sum of the two.
+space the modulation reads (the DiT standard). The pooled caption embedding (768-d, rms-normalised) went through one `Linear 768→768`, added to c, until
+architecture a3 (archive 2026-11-20-adaln-takes-t-only).
 
 **The adaLN projection.** One matrix for the whole network: `SiLU`, then `Linear 768 → 6·768` (a 4608×768 weight, 3.5 M parameters), applied to c
 once per forward. Its output [B, 4608] is viewed as [B, 6, 768]: six vectors per image, shift_a, scale_a, gate_a (for the token mixer) and shift_m,
