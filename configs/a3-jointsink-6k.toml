@@ -1,5 +1,5 @@
-# a2-ref-1ep for 6000 steps with joint attention with a null key per KV head (PLAN J2, J3): an arm against `a1-lfmnormread-1ep`. Fields: scripts/train.py Config.
-name = "a2-jointsink-6k"
+# a3-ref-1ep for 6000 steps with joint attention with a null key per KV head, the null key at zero (PLAN J2, J3): the base for the conditioning arms, a rerun of `a2-jointsink-nopool-6k`. Fields: scripts/train.py Config.
+name = "a3-jointsink-6k"
 runs_dir = "/mnt/mars/ai/tiny-dit/runs"
 resolution = 128
 dataset = "/run/media/djg/vel-ssd/tiny-dit/set_128"
