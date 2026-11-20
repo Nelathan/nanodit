@@ -253,3 +253,43 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):
     expected = torch.zeros(8, 8, dtype=torch.bool)
     expected[:2, :2] = True
     assert torch.equal(moved, expected)
+
+
+JOINT, JOINT_SINK = BlockType("attn", joint=True), BlockType("attn", joint=True, sink=True)
+
+
+@pytest.mark.parametrize("kind", [JOINT, JOINT_SINK])
+@torch.no_grad()  # flex_attention has no backward on the CPU
+def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt, kind):
+    model = build(layout=(CONV, kind))
+    open_gates(model)
+    assert not any(hasattr(b, "cross_q") or hasattr(b, "attn_norm") for b in model.blocks)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, prompt)
+    assert not torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens.flip(0))))
+    noise = torch.randn_like(prompt.tokens) * ~prompt.mask[..., None]
+    assert torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens + noise)), atol=1e-6)
+    alone = model(x[2:], t[2:], prompt.rows(2, 3)._replace(tokens=prompt.tokens[2:, :2], mask=prompt.mask[2:, :2]))
+    assert torch.allclose(base[2:], alone, atol=1e-5)
+
+
+@torch.no_grad()
+def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt):
+    """Every query made the same positive vector per head and a null key along it, logit 12 against the real keys'
+    lse of about 5, so σ(lse − b) nearly closes each head. A branch norm after `out` would scale the write back to unit
+    RMS (measured: 1.3 with one, 0.0008 without); an exact zero would survive the norm, so the head is nearly closed."""
+    changes = {}
+    for kind in (JOINT, JOINT_SINK):
+        model = build(layout=(CONV, kind))
+        open_gates(model)
+        block = model.blocks[1]
+        block.table.data[5] = 0  # the MLP's gate: the change is the attention's alone
+        block.table.data[0] = 50.0  # shift: y ≈ 50 in every channel, so u · y > 0 for a positive u
+        block.qkv.weight.data[:block.width] = torch.rand(1, block.width)  # every query row the same positive u
+        if kind.sink:
+            block.null_key.data.fill_(1.5)
+        seen = {}
+        block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
+        model(torch.randn(1, 2, 64, 64), torch.rand(1), prompt.rows(0, 1))
+        changes[kind.sink] = (seen["stream_out"] - seen["stream_in"]).abs().max()
+    assert changes[True] < 0.02 and changes[False] > 0.5

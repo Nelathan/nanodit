@@ -6,6 +6,7 @@ from typing import NamedTuple
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.nn.attention.flex_attention import AuxRequest, flex_attention
 
 PATCH = 8
 LATENT_CHANNELS = 2
@@ -27,10 +28,25 @@ class BlockType(NamedTuple):
     """One block's settings. A layout is a sequence of them, repeated to the depth (SPEC §3)."""
 
     mixer: str  # "conv" or "attn"
+    joint: bool = False  # attention over [image keys, caption keys] in one softmax, no cross sublayer (PLAN J2)
+    sink: bool = False  # with joint: a learned null key per KV head, through which a head can write nothing (PLAN J3)
 
 
 MIXERS = ("conv", "attn")
 LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("conv"), BlockType("attn"))
+# flex_attention's default 128-row tiles are about 6x slower than SDPA at 64 + L keys (one 128 px image and its
+# caption); 64 x 32 tiles bring it level with self then cross attention. CUDA only.
+FLEX_TILES = dict(BLOCK_M=64, BLOCK_N=32)
+
+
+def joint_attention(q: Tensor, k: Tensor, v: Tensor, keep: Tensor) -> tuple[Tensor, Tensor]:
+    """Softmax attention of q [B, H, N, D] over k, v [B, KV, S, D] with the keys where keep [B, S] is false masked out;
+    returns the output and the natural log of each query's softmax sum, [B, H, N]."""
+    def mask_padding(score, b, h, q_index, k_index):
+        return torch.where(keep[b, k_index], score, -float("inf"))
+    out, aux = flex_attention(q, k, v, score_mod=mask_padding, enable_gqa=True, return_aux=AuxRequest(lse=True),
+                              kernel_options=FLEX_TILES if q.is_cuda else None)
+    return out, aux.lse
 
 
 class Prompt(NamedTuple):
@@ -89,7 +105,8 @@ class Block(nn.Module):
 
     def __init__(self, width: int, kind: BlockType):
         super().__init__()
-        assert kind.mixer in MIXERS, kind
+        assert kind.mixer in MIXERS and (kind.mixer == "attn" or not kind.joint) and (kind.joint or not kind.sink), kind
+        self.joint, self.sink = kind.joint, kind.sink
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
@@ -105,14 +122,20 @@ class Block(nn.Module):
             self.q_norm = nn.RMSNorm(HEAD_DIM)
             self.k_norm = nn.RMSNorm(HEAD_DIM)
             self.out = nn.Linear(width, width, bias=False)
-            self.attn_norm = nn.RMSNorm(width)
-            self.cross_q = nn.Linear(width, width, bias=False)
+            # registered in the trunk's order, so a block without `joint` draws the trunk's init at the same seed
+            if not self.joint:
+                self.attn_norm = nn.RMSNorm(width)
+                self.cross_q = nn.Linear(width, width, bias=False)
             self.cross_kv = nn.Linear(SEQ_DIM, 2 * self.kv_heads * HEAD_DIM, bias=False)
-            self.cross_q_norm = nn.RMSNorm(HEAD_DIM)
-            self.cross_k_norm = nn.RMSNorm(HEAD_DIM)
-            self.cross_out = nn.Linear(width, width, bias=False)
-            self.cross_norm = nn.RMSNorm(width)
-            self.cross_gate = nn.Parameter(torch.zeros(width))
+            if not self.joint:
+                self.cross_q_norm = nn.RMSNorm(HEAD_DIM)
+            self.cross_k_norm = nn.RMSNorm(HEAD_DIM)  # under joint its own gain is the only place the caption keys' temperature against the image keys' lives
+            if not self.joint:
+                self.cross_out = nn.Linear(width, width, bias=False)
+                self.cross_norm = nn.RMSNorm(width)
+                self.cross_gate = nn.Parameter(torch.zeros(width))
+            if self.sink:
+                self.null_key = nn.Parameter(torch.randn(self.kv_heads, HEAD_DIM))  # unit RMS, as the normed keys
         self.mlp_norm = nn.RMSNorm(width)
         self.w_gate = nn.Linear(width, hidden, bias=False)
         self.w_up = nn.Linear(width, hidden, bias=False)
@@ -133,17 +156,38 @@ class Block(nn.Module):
             q, k, v = self.qkv(y).split([self.width, kv, kv], dim=-1)
             q = q.view(B, N, self.heads, HEAD_DIM).transpose(1, 2)
             k, v = (a.view(B, N, self.kv_heads, HEAD_DIM).transpose(1, 2) for a in (k, v))
-            q, k = apply_rope(self.q_norm(q), *rope), apply_rope(self.k_norm(k), *rope)
-            attn = F.scaled_dot_product_attention(q, k, v, enable_gqa=self.kv_heads != self.heads).transpose(1, 2).reshape(B, N, self.width)
-            x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
-            y = F.rms_norm(x, (self.width,))
-            q = self.cross_q_norm(self.cross_q(y).view(B, N, self.heads, HEAD_DIM).transpose(1, 2))
-            k, v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
-            attn = F.scaled_dot_product_attention(q, self.cross_k_norm(k), v, attn_mask=mask[:, None, None], enable_gqa=self.kv_heads != self.heads)
-            x = x + self.cross_gate * self.cross_norm(self.cross_out(attn.transpose(1, 2).reshape(B, N, self.width)))
+            q_normed = self.q_norm(q)
+            q, k = apply_rope(q_normed, *rope), apply_rope(self.k_norm(k), *rope)
+            if self.joint:
+                x = x + gate_a[:, None] * self.out(self.joint_read(q, q_normed, k, v, text, mask) * torch.sigmoid(self.gate(y)))
+            else:
+                attn = F.scaled_dot_product_attention(q, k, v, enable_gqa=self.kv_heads != self.heads).transpose(1, 2).reshape(B, N, self.width)
+                x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
+                y = F.rms_norm(x, (self.width,))
+                q = self.cross_q_norm(self.cross_q(y).view(B, N, self.heads, HEAD_DIM).transpose(1, 2))
+                k, v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
+                attn = F.scaled_dot_product_attention(q, self.cross_k_norm(k), v, attn_mask=mask[:, None, None], enable_gqa=self.kv_heads != self.heads)
+                x = x + self.cross_gate * self.cross_norm(self.cross_out(attn.transpose(1, 2).reshape(B, N, self.width)))
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None]) + shift_m[:, None]
         return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
+
+    def joint_read(self, q: Tensor, q_normed: Tensor, k: Tensor, v: Tensor, text: Tensor, mask: Tensor) -> Tensor:
+        """Each head's read over [image keys, caption keys], RMS-normed per head with no gain and, with the sink,
+        scaled by the share of its mass the null key leaves: softmax with a null key of logit b and value 0 is
+        σ(lse − b) · softmax(s)V, lse over the real keys. With no branch norm after `out`, a closed head writes nothing.
+        The null key meets the query before RoPE (`q_normed`), so b does not depend on the position; it is not normed,
+        so its length sets how readily a head abstains."""
+        B, N = q.shape[0], q.shape[2]
+        text_k, text_v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
+        keep = torch.cat([mask.new_ones(B, N), mask], dim=1)
+        read, lse = joint_attention(q, torch.cat([k, self.cross_k_norm(text_k)], dim=2), torch.cat([v, text_v], dim=2), keep)
+        read = F.rms_norm(read, (HEAD_DIM,))
+        if self.sink:
+            # query head h reads KV head h // (heads / kv_heads), as enable_gqa groups them
+            null_logit = (q_normed.float().unflatten(1, (self.kv_heads, -1)) @ self.null_key[:, None, :, None].float()).flatten(1, 2).squeeze(-1)
+            read = read * torch.sigmoid(lse - HEAD_DIM**-0.5 * null_logit)[..., None].to(read.dtype)  # in fp32, as lse
+        return read.transpose(1, 2).reshape(B, N, self.width)
 
 
 class DiT(nn.Module):

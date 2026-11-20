@@ -3,7 +3,7 @@
 from torch import nn
 from usuitrack import Molegrad, StochasticAdamW, UsuiTrack
 
-# Tables and the null prompt's tokens are not shared linear maps.
+# Tables, the null prompt's tokens and the attention sink's null keys are not shared linear maps.
 USUI_EXCLUDED = ("table", "null")
 
 
