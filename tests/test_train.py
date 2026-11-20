@@ -52,6 +52,7 @@ depth = 2
 width = 512
 layout = ["conv", "attn"]
 block_types = {{ conv = {{ mixer = "conv" }}, attn = {{ mixer = "attn" }} }}
+refiner_depth = 0
 batch = {batch}
 micro_batch = {micro_batch}
 steps = {steps}

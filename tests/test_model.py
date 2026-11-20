@@ -2,6 +2,7 @@ import copy
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from conftest import PAIR, open_gates
 from nanodit.data import pad_sequences
@@ -306,3 +307,35 @@ def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt
         model(torch.randn(1, 2, 64, 64), torch.rand(1), prompt.rows(0, 1))
         changes[kind.sink] = (seen["stream_out"] - seen["stream_in"]).abs().max()
     assert changes[True] < 0.02 and changes[False] > 0.5
+
+
+def open_refiner(model):
+    for block in model.refiner:
+        block.attn_gate.data.fill_(0.5)
+        block.mlp_gate.data.fill_(0.5)
+
+
+@torch.no_grad()  # flex_attention has no backward on the CPU
+def test_the_caption_refiner_starts_as_the_identity_and_leaves_the_rest_of_the_init_alone(prompt):
+    plain, refined = build(layout=(CONV, JOINT_SINK)), build(layout=(CONV, JOINT_SINK), refiner_depth=2)
+    assert all(torch.equal(p, refined.state_dict()[name]) for name, p in plain.state_dict().items())
+    open_gates(plain), open_gates(refined)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    assert torch.equal(plain(x, t, prompt), refined(x, t, prompt))
+
+
+@torch.no_grad()
+def test_the_caption_refiner_mixes_a_captions_tokens_and_ignores_its_padding(prompt):
+    model = build(layout=(CONV, JOINT_SINK), refiner_depth=2)
+    open_gates(model), open_refiner(model)
+    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    base = model(x, t, prompt)
+    noise = torch.randn_like(prompt.tokens) * ~prompt.mask[..., None]
+    assert torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens + noise)), atol=1e-6)
+    alone = model(x[2:], t[2:], Prompt(prompt.tokens[2:, :2], prompt.mask[2:, :2]))
+    assert torch.allclose(base[2:], alone, atol=1e-5)
+    text = F.rms_norm(prompt.tokens, (SEQ_DIM,))
+    refined = model.refiner[0](text, prompt.mask)
+    other = text.clone()
+    other[0, 1] = torch.randn(SEQ_DIM)  # another second token changes the first token's refined state
+    assert not torch.allclose(refined[0, 0], model.refiner[0](other, prompt.mask)[0, 0])

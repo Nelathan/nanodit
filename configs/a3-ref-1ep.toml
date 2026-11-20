@@ -8,6 +8,7 @@ depth = 24
 width = 768
 layout = ["conv", "conv", "conv", "attn"]
 block_types = { conv = { mixer = "conv" }, attn = { mixer = "attn" } }
+refiner_depth = 0
 batch = 256
 micro_batch = 64
 steps = 32173

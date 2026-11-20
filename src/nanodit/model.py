@@ -194,9 +194,50 @@ class Block(nn.Module):
         return read.transpose(1, 2).reshape(B, N, self.width)
 
 
+@torch.no_grad()
+def fan_in_normal(m: nn.Module) -> None:
+    if isinstance(m, nn.Linear):
+        m.weight.normal_(0, m.in_features**-0.5)
+        if m.bias is not None:
+            m.bias.zero_()
+    elif isinstance(m, nn.Conv2d):
+        m.weight.normal_(0, (m.in_channels // m.groups * m.kernel_size[0] * m.kernel_size[1]) ** -0.5)
+
+
+class CaptionRefinerBlock(nn.Module):
+    """Self-attention then SwiGLU over the caption's token states alone, at their native SEQ_DIM (PLAN J6). No t and no
+    image tokens reach it; no RoPE, as the encoder's states carry their positions. Each branch ends in a norm and a
+    static per-channel gate initialised to zero, so the block starts as the identity."""
+
+    def __init__(self):
+        super().__init__()
+        self.heads = SEQ_DIM // HEAD_DIM
+        self.qkv = nn.Linear(SEQ_DIM, 3 * SEQ_DIM, bias=False)
+        self.q_norm = nn.RMSNorm(HEAD_DIM)
+        self.k_norm = nn.RMSNorm(HEAD_DIM)
+        self.out = nn.Linear(SEQ_DIM, SEQ_DIM, bias=False)
+        self.attn_norm = nn.RMSNorm(SEQ_DIM)
+        self.attn_gate = nn.Parameter(torch.zeros(SEQ_DIM))
+        self.w_gate = nn.Linear(SEQ_DIM, MLP_RATIO * SEQ_DIM, bias=False)
+        self.w_up = nn.Linear(SEQ_DIM, MLP_RATIO * SEQ_DIM, bias=False)
+        self.w_down = nn.Linear(MLP_RATIO * SEQ_DIM, SEQ_DIM, bias=False)
+        self.mlp_norm = nn.RMSNorm(SEQ_DIM)
+        self.mlp_gate = nn.Parameter(torch.zeros(SEQ_DIM))
+
+    def forward(self, x: Tensor, mask: Tensor) -> Tensor:
+        """x [B, L, SEQ_DIM], mask [B, L]: padded positions are never keys, so a real token's state does not see them."""
+        B, L, _ = x.shape
+        q, k, v = self.qkv(F.rms_norm(x, (SEQ_DIM,))).view(B, L, 3, self.heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
+        attn = F.scaled_dot_product_attention(self.q_norm(q), self.k_norm(k), v, attn_mask=mask[:, None, None])
+        x = x + self.attn_gate * self.attn_norm(self.out(attn.transpose(1, 2).reshape(B, L, SEQ_DIM)))
+        y = F.rms_norm(x, (SEQ_DIM,))
+        return x + self.mlp_gate * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
+
+
 class DiT(nn.Module):
-    def __init__(self, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT):
-        """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth."""
+    def __init__(self, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT, refiner_depth: int = 0):
+        """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth.
+        `refiner_depth` caption refiner blocks run over the token states before any block reads them (PLAN J6)."""
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert layout, "a layout needs at least one block type"
@@ -208,23 +249,25 @@ class DiT(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width, kind) for kind in kinds)
+        with torch.random.fork_rng(devices=[]):  # its construction draws, which init_weights overwrites, leave the rest's init as without it
+            self.refiner = nn.ModuleList(CaptionRefinerBlock() for _ in range(refiner_depth))
         self.init_weights()
 
     @torch.no_grad()
     def init_weights(self) -> None:
+        refiner = set(self.refiner.modules())
         for m in self.modules():
-            if isinstance(m, nn.Linear):
-                m.weight.normal_(0, m.in_features**-0.5)
-                if m.bias is not None:
-                    m.bias.zero_()
-            elif isinstance(m, nn.Conv2d):
-                m.weight.normal_(0, (m.in_channels // m.groups * m.kernel_size[0] * m.kernel_size[1]) ** -0.5)
+            if m not in refiner:
+                fan_in_normal(m)
         mod = self.ada[1]
         mod.weight.view(N_MOD, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD, self.width, self.width)
         mod.weight.view(N_MOD, self.width, self.width)[list(GATE_ROWS)] = 0
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
+        with torch.random.fork_rng(devices=[]):  # drawn apart, so the rest and every later CPU draw are as without the refiner
+            for m in self.refiner.modules():
+                fan_in_normal(m)
 
     def null_prompt(self, batch: int, length: int) -> Prompt:
         """The empty caption for `batch` rows, its tokens padded to `length`."""
@@ -245,6 +288,8 @@ class DiT(nn.Module):
         tokens, h, w = patchify(x.to(dtype))
         c = self.time_mlp(timestep_sinusoid(t).to(dtype))
         text_tokens = F.rms_norm(prompt.tokens, (SEQ_DIM,)).to(dtype)
+        for block in self.refiner:
+            text_tokens = block(text_tokens, prompt.mask)
         mod = self.ada(c).view(-1, N_MOD, self.width)
         rope = rope_angles(h, w, x.device)
 

@@ -42,6 +42,7 @@ class Config:
     width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden MLP_RATIO times it
     layout: list[str]  # block type names, repeated to the depth (SPEC §3)
     block_types: dict[str, dict]  # name -> the fields of a model.BlockType
+    refiner_depth: int  # caption refiner blocks over the token states, 0 for none (PLAN J6)
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's
@@ -71,12 +72,12 @@ def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     """The config's DiT at its init, the null prompt from the precomputed empty caption."""
     null = load_file(cfg.null_embedding)
     layout = tuple(BlockType(**cfg.block_types[name]) for name in cfg.layout)
-    return DiT(null["null_tokens"], cfg.depth, cfg.width, layout).to(device, dtype)
+    return DiT(null["null_tokens"], cfg.depth, cfg.width, layout, cfg.refiner_depth).to(device, dtype)
 
 
 def compile_blocks(model: DiT) -> None:
     """Each block compiled on its own. Call after Molegrad has swapped in its Linears, so the graphs trace them."""
-    for block in model.blocks:
+    for block in [*model.refiner, *model.blocks]:
         block.compile()
 
 
