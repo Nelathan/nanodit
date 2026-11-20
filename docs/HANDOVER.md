@@ -19,22 +19,20 @@ on the attention, cross-attention and MLP branches; adaLN-single from t alone; c
 and slice read-out; every Usui matrix framed on its input side and inside the ball of its init norm, usui lr 2e-3.
 Width 768 × depth 24 at 128 px (237.7M parameters), batch 256 as 4 × 64.
 
-Runs, under `/mnt/mars/ai/tiny-dit/runs/`:
-- `a1-lfmnormread-1ep` (`arm/lfm-forms` `5ad4c3e`): the a2 reference, 32,173 steps, 4 h 32 min at 198 W. Its
-  `config.toml` and last checkpoint (the only one kept) are migrated to a2's names and no longer load into a3;
-  `configs/a3-ref-1ep.toml` is its config on the trunk, not yet run. It scores the held-out rows (1.2536 at the end).
-- `a1-lfmnormread-6k`: the same form for 6000 steps, a2.
+Runs, under `/mnt/mars/ai/tiny-dit/runs/`. One checkpoint is kept: `a2-jointsink-nopool-6k` at 6000, migrated to
+a3's names (`null_embedding` dropped from `model.safetensors`, `pooled_ada` from its `config.toml`, the optimizer
+state deleted), for `arm/joint-attn` rebased onto a3; its load there is not yet checked. Every other run keeps its logs and config
+only; the checkpoints of the a1 and a2 runs were deleted on 2026-11-20 as no longer loading into the model.
+- `a1-lfmnormread-1ep` (`arm/lfm-forms` `5ad4c3e`): the a2 reference, 32,173 steps, 4 h 32 min at 198 W, 1.2536
+  held-out at the end. `configs/a3-ref-1ep.toml` is its config on the trunk, not yet run.
+- `a1-ref-1ep` and its cooldown `a1-ref-1ep-anneal3k` (score 1.4106, the README's grid): architecture a1.
 - `a2-joint-6k`, `a2-jointsink-6k`, `a2-jointsink-nopool-6k`, `a2-jointsink-captionread-6k`: the joint-attention
   arms (`arm/joint-attn`, `arm/caption-read`), 6000 steps; their log notes are not written yet.
-- `a1-ref-1ep` (basic conv, from `768745b`) and its cooldown `a1-ref-1ep-anneal3k` (score 1.4106, the README's grid):
-  architecture a1. Their checkpoints no longer load into the trunk; kept until the maintainer decides.
-- `a1-seed42-6k`, `a1-gatedconv-6k`: a1 checkpoints at 6000, kept for band reads; no longer load into the trunk.
 
 The power limit is 198 W (default 220 W, max 275 W); all arms since 2026-11-18 ran at 198 W.
 
 ## Waiting on a decision
 
-- The a1 checkpoints above: AGENTS deletes a checkpoint that no longer loads into the model.
 - **256 px**: the set needs `shuffle.py`'s latent cast to `large_binary` (2 GB per chunk at `binary`), then the
   build; throughput at 256 px is unmeasured.
 
