@@ -398,8 +398,12 @@ state. Needs a re-encode. Settle: read Krea 2's report and code first. State: hy
 
 ### J6. A small text refiner
 
-A few unmodulated self-attention blocks over the static token states, once per sample, as Z-Image's context refiner is
-said to be. State: hypothesis; composes with J2 and J5.
+Two unmodulated blocks, self-attention and SwiGLU, over the caption's token states alone, at their native 512 and
+before any attention block reads them; no t and no image tokens, so they run once per sample. Lumina 2 and Z-Image
+have this `context_refiner` (diffusers code); MOSS-Image and Krea 2 have text-only layers. Their encoders are decoder
+LLMs, several of whose layers are merged, which a refiner may be needed to stabilise. *Hypothesis* under test: an
+embedding model's final states, EmbeddingGemma 2's, need none. Settle: one arm against `a3-jointsink-6k`, read on loss
+and on the caption-use probe. State: arm `arm/caption-refiner`.
 
 ---
 
