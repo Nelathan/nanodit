@@ -39,11 +39,16 @@ LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("conv"), BlockType("at
 FLEX_TILES = dict(BLOCK_M=64, BLOCK_N=32)
 
 
-def joint_attention(q: Tensor, k: Tensor, v: Tensor, keep: Tensor) -> tuple[Tensor, Tensor]:
-    """Softmax attention of q [B, H, N, D] over k, v [B, KV, S, D] with the keys where keep [B, S] is false masked out;
-    returns the output and the natural log of each query's softmax sum, [B, H, N]."""
+def joint_attention(q: Tensor, k: Tensor, v: Tensor, mask: Tensor) -> tuple[Tensor, Tensor]:
+    """Softmax attention of q [B, H, N, D] over k, v [B, KV, N + L, D], the N image keys then the L caption keys, with
+    the caption keys where mask [B, L] is false masked out; returns the output and the natural log of each query's
+    softmax sum, [B, H, N]."""
+    N = q.shape[2]
+
+    # reads the caller's mask as is: a mask built in the compiled graph (a cat) is inlined into the score_mod, which
+    # inductor fails to lower under no_grad (torch 2.15)
     def mask_padding(score, b, h, q_index, k_index):
-        return torch.where(keep[b, k_index], score, -float("inf"))
+        return torch.where((k_index < N) | mask[b, (k_index - N).clamp(0, mask.shape[1] - 1)], score, -float("inf"))
     out, aux = flex_attention(q, k, v, score_mod=mask_padding, enable_gqa=True, return_aux=AuxRequest(lse=True),
                               kernel_options=FLEX_TILES if q.is_cuda else None)
     return out, aux.lse
@@ -180,8 +185,7 @@ class Block(nn.Module):
         so its length sets how readily a head abstains."""
         B, N = q.shape[0], q.shape[2]
         text_k, text_v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
-        keep = torch.cat([mask.new_ones(B, N), mask], dim=1)
-        read, lse = joint_attention(q, torch.cat([k, self.cross_k_norm(text_k)], dim=2), torch.cat([v, text_v], dim=2), keep)
+        read, lse = joint_attention(q, torch.cat([k, self.cross_k_norm(text_k)], dim=2), torch.cat([v, text_v], dim=2), mask)
         read = F.rms_norm(read, (HEAD_DIM,))
         if self.sink:
             # query head h reads KV head h // (heads / kv_heads), as enable_gqa groups them

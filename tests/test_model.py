@@ -273,6 +273,19 @@ def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt, kind)
     assert torch.allclose(base[2:], alone, atol=1e-5)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="flex_attention compiles on CUDA")
+@torch.no_grad()  # the eval sampler and the score run the compiled blocks without gradients
+def test_a_compiled_joint_block_gives_the_eager_output_without_gradients(prompt):
+    eager = build(layout=(CONV, JOINT_SINK)).cuda().bfloat16()
+    open_gates(eager)
+    compiled = copy.deepcopy(eager)
+    for block in compiled.blocks:
+        block.compile()
+    x, t, rows = torch.randn(3, 2, 64, 64).cuda(), torch.rand(3).cuda(), Prompt(*(a.cuda() for a in prompt))
+    reference, eager32 = eager(x, t, rows), copy.deepcopy(eager).float()(x, t, rows)
+    assert (compiled(x, t, rows) - reference).abs().max() <= 2 * (reference - eager32).abs().max()  # bf16's own error
+
+
 @torch.no_grad()
 def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt):
     """Every query made the same positive vector per head and a null key along it, logit 12 against the real keys'
