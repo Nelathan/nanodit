@@ -37,24 +37,25 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Architecture **a3**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a3-ref-1ep`).
+Architecture **a4**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a4-ref-1ep`).
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by LFM2's gated short conv, writing all channels (conv-first), the fourth by self-attention. The adaLN conditioning takes the timestep alone. The caption enters only by cross attention: every attention block reads its 512-d token states.
+DiT over image tokens; the caption's tokens are keys, never queries or stream positions. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by LFM2's gated short conv, writing all channels (conv-first), the third by joint attention. The adaLN conditioning takes the timestep alone. The caption enters only through the attention blocks, which read its 512-d token states after a caption refiner.
 
 | Component | Decision |
 |---|---|
 | Width | 768 |
 | Depth | 24 layers |
-| Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer |
+| Layout | A sequence of block types, repeated to the depth: conv, conv, attention, conv, so the 3rd, 7th, … block is attention and the last a conv. A block type names its mixer |
 | Mixer | LFM2's gated short conv: one Linear width → 3 × width from the modulated input gives B, C and v; a depthwise 3×3 conv over the token grid reads B ⊙ v; its read, RMS-normed without a gain, times C, goes through an output Linear width → width and the gate into all channels. No branch norm, so a small C makes a small write |
-| Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
+| Attention | Joint: the image tokens' queries read, in one softmax, the image keys and the caption's keys and values (a Linear 512 → key/value heads, its own k norm, no RoPE; padding masked). GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim). Each head's read is RMS-normed without a gain |
+| Sink | A learned null key per key/value head with value 0, met by the query before RoPE: a head with logit b on it writes σ(lse − b) times its normed read, so it can write nothing |
+| Caption refiner | Two blocks over the caption's token states alone, at their native 512, before any attention block reads them: self-attention (8 heads of 64, QK RMSNorm, no RoPE, padding masked) then SwiGLU (hidden 4 × 512), each branch with a branch norm and a zero-initialised per-channel gate; no t and no image tokens, so they run once per sample |
 | QK norm | RMSNorm on Q and K |
-| Branch norm | Sandwich norm (LFM3) on the attention, cross-attention and MLP branches: an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so such a branch adds at most the gate times a vector of unit RMS before the gains. The conv branch has its norm on the read instead (Mixer) |
+| Branch norm | Sandwich norm (LFM3) on the MLP branch: an RMSNorm with a learned gain on its output, before its gate and the residual add, so it adds at most the gate times a vector of unit RMS before the gain. The mixers have their norm before the output Linear instead, so a small read makes a small write: the conv's on its read (Mixer), attention's per head (Attention) |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
 | Position | 2D axial RoPE on the first quarter of the frequencies per axis, the rest position-free; the convs carry local position |
-| Cross attention | In every attention block, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
 | MLP | SwiGLU, hidden 4 × width |
-| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's six shift/scale/gate vectors (mixer, MLP), plus a learned 6×width table per block; per image, not per token |
+| Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's four scale/gate vectors (mixer, MLP), plus a learned 4×width table per block; per image, not per token. No shift: a branch reads `rms_norm(x) · (1 + scale)` |
 | Conditioning vector | `c = MLP_t(sinusoid(t))` |
 | Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to it |
 | Size | Parameter counts by width and depth in FACTS |
@@ -78,16 +79,18 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Patch embed 128→(width − 128) | fan-in normal, zero bias; the first 128 channels are the raw patch, no parameters | Usui |
 | Timestep MLP | fan-in normal | Usui |
 | Null tokens | EmbeddingGemma 2's `<bos>` and `<eos>` states of the empty caption, learned from there | fallback |
-| Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
+| Q, K, V (fused, GQA), the caption's k, v, the refiner's Linears | fan-in normal | Usui |
+| Null keys | zero | fallback |
 | Conv block input Linear (B, C, v), depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |
-| adaLN shift / scale rows (and the cross-attention gate, a vector of zeros on the fallback) | small random | Usui, with the shared projection; tables on the fallback |
+| adaLN scale rows | small random | Usui, with the shared projection; tables on the fallback |
 | adaLN **gate** rows (shared projection and per-block table) | zero | Usui, with the shared projection; tables on the fallback |
+| Refiner gates | zero | fallback |
 | Branch-norm gains, QK-RMSNorm gains, biases | ones / zero | fallback |
 
-Consequence of the concatenated patch embed with x0 velocity: the zero gates make every block the identity, so `F = x_t` and `v̂ = 0` at step 0. The loss reaches the shared adaLN projection and the gate rows at once; the patch embed's meta channels are read by no gate yet, so it and the blocks behind the gates follow as the gates open.
+Consequence of the concatenated patch embed with x0 velocity: the zero gates make every block and every refiner block the identity, so `F = x_t` and `v̂ = 0` at step 0. The loss reaches the shared adaLN projection and the gate rows at once; the patch embed's meta channels are read by no gate yet, so it and the blocks behind the gates follow as the gates open.
 
 ## 6. Optimizer: UsuiTrack
 
@@ -112,6 +115,6 @@ About 50 image tokens per image parameter in all:
 - dpmpp_2m with the beta scheduler is allowed for best-looking samples, separately from the eval grid.
 - Eval grid: 16 fixed prompts, each with its own fixed noise, one 4×4 grid every N steps.
 - Loss logged bucketed by t (averaged loss stays flat and says little), with R² = 1 − loss·t²/E, E the mean square of the clean latents. The F loss is the clean-latent error over t, so R² is the share of the latents' energy the prediction recovers from the noisy input: 0 is no better than predicting zero, 1 is exact. It falls with t by construction (more noise, less to recover), so it is read across steps at one t, not across t. Ten equal-width buckets in the records; wandb shows five (each the pooled pair).
-- Score at every eval, on two sets never trained on: Lunara (out of the training distribution) and the set's held-out rows (§1, in it), each into its own record; a run that continues one trained on the held-out rows scores Lunara only. The score is the loss with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t; and R² per band of spatial frequency on the latent, by the period in tokens: over three tokens (beyond a 3×3 conv's reach), one to three, inside one token, each its error's share over its share of the latents' energy, per t and over the grid.
+- Score at every eval, on two sets never trained on, each into its own record: the set's held-out rows (§1, in the training distribution), the eval, at the training resolution; and Lunara (out of it) at 256 px, whatever the training resolution. The score is the loss with each row's caption, every row at the same 10 t (the midpoints of equal-probability bins of the shift-1 logit-normal, whatever t the run trains on) with its own fixed noise. One loss and one R², and each value at each t; and R² per band of spatial frequency on the latent, by the period in tokens: over three tokens (beyond a 3×3 conv's reach), one to three, inside one token, each its error's share over its share of the latents' energy, per t and over the grid.
 - At every eval, of the tracked matrices: the global Frobenius norm and its ratio to the init norm, and per role (the parameter name without the block index, prefixed by the block's mixer) the stable rank `‖W‖²_F / σ²_max` over the shorter side, averaged over the role's blocks; and per role the norm of each matrix's step before the lift, `‖unit_polar(moment)‖`, averaged over the role's blocks.
 - Logs: plain JSONL files, the record: one line per `log_every` steps, the reads averaged over them on the GPU. The same values and the eval grid stream to wandb for live curves.

@@ -5,14 +5,31 @@ from nanodit.data import pad_sequences
 from nanodit.model import BlockType, DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, Prompt
 
 PAIR = (BlockType("conv"), BlockType("attn"))  # the smallest layout with every kind of matrix
+needs_cuda = pytest.mark.cuda
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "cuda: takes gradients through the model, so it runs on CUDA")
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        if item.get_closest_marker("cuda") and not torch.cuda.is_available():
+            item.add_marker(pytest.mark.skip(reason="flex_attention has no backward on the CPU"))
+
+
+@pytest.fixture(autouse=True)
+def autograd_only_on_cuda(request):
+    """flex_attention refuses parameters that require grad on the CPU, so a test runs without autograd unless it is
+    marked `cuda`."""
+    with torch.set_grad_enabled(request.node.get_closest_marker("cuda") is not None):
+        yield
 
 
 def open_gates(model):
     """Opens the zero-initialised gates, so every block's output reaches F and every matrix gets a gradient."""
     for block in model.blocks:
         block.table.data[list(GATE_ROWS)] = 0.5
-        if not block.is_conv and not block.joint:
-            block.cross_gate.data.fill_(0.5)
 
 
 @pytest.fixture

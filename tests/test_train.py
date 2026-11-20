@@ -5,12 +5,14 @@ import math
 import shutil
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import torch
 from safetensors.torch import load_file, save_file
 
 from conftest import PAIR, open_gates
-from test_data import shuffle_module, write_shard
+from test_data import bf16_bytes, shuffle_module, write_shard
 from nanodit import data
 from nanodit.data import pad_sequences
 from nanodit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, Prompt
@@ -19,6 +21,7 @@ from nanodit.objective import band_energy, noisy, t_quantiles, target
 from nanodit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
+pytestmark = pytest.mark.cuda  # train.main and the accumulation take gradients through the model on CUDA
 
 
 @pytest.fixture(scope="module")
@@ -37,8 +40,12 @@ def random_prompt(n, generator=None):
 def write_config(tmp_path, steps, eval_every, checkpoint_every=100, batch=4, micro_batch=4, log_every=1):
     torch.manual_seed(0)
     for name, n in (("s", 16), ("eval", 5)):  # the training set and the eval set are both shuffled files
-        write_shard(tmp_path / f"{name}_shard.parquet", torch.randn(n, 2, 16, 16).bfloat16(), torch.randn(n, 768).bfloat16(), [torch.randn(2 + i % 4, SEQ_DIM).bfloat16() for i in range(n)])
+        keys = [f"{name}{i}" for i in range(n)]
+        write_shard(tmp_path / f"{name}_shard.parquet", torch.randn(n, 2, 16, 16).bfloat16(), torch.randn(n, 768).bfloat16(), [torch.randn(2 + i % 4, SEQ_DIM).bfloat16() for i in range(n)], keys)
         shuffle_module().shuffle([str(tmp_path / f"{name}_shard.parquet")], 32, tmp_path / name)
+    (tmp_path / "s" / data.HELDOUT).write_text("".join(f"eval{i}\n" for i in range(5)))  # the eval rows are the set's held-out rows
+    pq.write_table(pa.table({"sequence": [bf16_bytes(torch.randn(3, SEQ_DIM).bfloat16()) for _ in range(3)],  # the other distribution, at 64 px
+                             "latent_64": pa.array([bf16_bytes(torch.randn(2, 32, 32).bfloat16()) for _ in range(3)], pa.binary(2 * 32 * 32 * 2))}), tmp_path / "lunara.parquet")
     save_file({"null_tokens": torch.randn(NULL_TOKENS, SEQ_DIM)}, tmp_path / "null.safetensors")
     (tmp_path / "prompts.txt").write_text("a red apple\na blue car\na cat\n")
     config = tmp_path / "config.toml"  # eval_prompts resolves next to it
@@ -52,7 +59,6 @@ depth = 2
 width = 512
 layout = ["conv", "attn"]
 block_types = {{ conv = {{ mixer = "conv" }}, attn = {{ mixer = "attn" }} }}
-refiner_depth = 0
 batch = {batch}
 micro_batch = {micro_batch}
 steps = {steps}
@@ -71,6 +77,8 @@ eval_seed = 42
 guidance = 2.0
 sampler_steps = 2
 eval_set = "{tmp_path / 'eval' / '32x32.parquet'}"
+lunara_set = "{tmp_path / 'lunara.parquet'}"
+lunara_resolution = 64
 wandb_project = "test"
 """)
     return config
@@ -141,15 +149,18 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
     assert [s["step"] for s in scores] == [2, 3]  # every eval_every, and the last step: not only the checkpoints
     assert all(s["t"] == pytest.approx(t_quantiles(10, 1.0).tolist()) for s in scores)  # the shift-1 grid, though the run trains at shift 1.5
-    logged = [(step, data) for step, data in sent if "eval/loss_caption" in data]
+    lunara = [json.loads(line) for line in (run / "score_lunara.jsonl").read_text().splitlines()]
+    assert [s["step"] for s in lunara] == [2, 3] and all("weights" not in s for s in lunara)
+    logged = [(step, data) for step, data in sent if "eval/loss" in data]
     assert [step for step, _ in logged] == [2, 3]
-    for (_, data), s in zip(logged, scores):  # the means, and each by-t series in fifths
-        assert data["eval/r2_caption"] == s["r2_caption"] and data["eval/loss_caption"] == s["loss_caption"]
-        assert data["eval_r2_caption_by_t/q0.2-0.4"] == pytest.approx((s["r2_caption_by_t"][2] + s["r2_caption_by_t"][3]) / 2)
+    for (_, data), s, o in zip(logged, scores, lunara):  # the means, and each by-t series in fifths
+        assert data["eval/r2"] == s["r2"] and data["eval/loss"] == s["loss"]
+        assert data["eval_r2_by_t/q0.2-0.4"] == pytest.approx((s["r2_by_t"][2] + s["r2_by_t"][3]) / 2)
+        assert data["eval/lunara_loss"] == o["loss"] and data["eval_lunara_r2_by_t/q0.2-0.4"] == pytest.approx((o["r2_by_t"][2] + o["r2_by_t"][3]) / 2)
         weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
                    | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
-        assert len(data) == 2 + 3 + 2 * 5 + len(weights)  # the two means, R² per band, the loss and R² in fifths, the weight reads
+        assert len(data) == 2 * (2 + 3 + 2 * 5) + len(weights)  # per score set the two means, R² per band, the loss and R² in fifths; the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])
@@ -159,7 +170,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
         assert all(0 <= v <= 1 + 1e-3 for values in s["weights"]["step_norm"].values() for v in values)
         assert s["weights"]["step_norm"]["ada.1"][0] > 0  # the shared projection steps from the first step
     for s in scores:
-        assert len(s["t"]) == len(s["loss_caption_by_t"]) == len(s["r2_caption_by_t"]) == 10 and "loss_null" not in s
+        assert len(s["t"]) == len(s["loss_by_t"]) == len(s["r2_by_t"]) == 10
 
     evals = [json.loads(line) for line in (run / "eval.jsonl").read_text().splitlines()]
     assert [e["step"] for e in evals] == [2, 3]  # every eval_every, and the last step
@@ -200,32 +211,25 @@ def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
         t = torch.full((5,), t_value)
         x_t = noisy(x.float(), noise, t)
         by_t.append(float((Echo()(x_t, t, prompt) - target(x.float(), noise, x_t)).square().mean()))
-    torch.testing.assert_close(result["loss_caption_by_t"], by_t)
-    torch.testing.assert_close(result["loss_caption"], sum(by_t) / 2)
+    torch.testing.assert_close(result["loss_by_t"], by_t)
+    torch.testing.assert_close(result["loss"], sum(by_t) / 2)
     energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
     r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
-    torch.testing.assert_close(result["r2_caption_by_t"], r2_by_t)
-    torch.testing.assert_close(result["r2_caption"], sum(r2_by_t) / 2)
+    torch.testing.assert_close(result["r2_by_t"], r2_by_t)
+    torch.testing.assert_close(result["r2"], sum(r2_by_t) / 2)
     torch.testing.assert_close(train.score(Echo(), x, prompt, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
     clean = band_energy(x.float()).mean(0)  # the bands' errors add up to the whole error, each weighted by its energy
-    for_each_t = [float(((1 - torch.tensor(row)) * clean).sum()) for row in result["r2_caption_by_band_by_t"]]
+    for_each_t = [float(((1 - torch.tensor(row)) * clean).sum()) for row in result["r2_by_band_by_t"]]
     torch.testing.assert_close(for_each_t, [loss * t_value**2 for loss, t_value in zip(by_t, ts.tolist())])
-    torch.testing.assert_close(result["r2_caption_by_band"], [sum(c) / 2 for c in zip(*result["r2_caption_by_band_by_t"])])
+    torch.testing.assert_close(result["r2_by_band"], [sum(c) / 2 for c in zip(*result["r2_by_band_by_t"])])
 
 
-def test_held_out_rows_are_scored_beside_the_eval_set_and_must_be_out_of_the_stream(train, tmp_path, monkeypatch):
+def test_the_eval_rows_must_be_out_of_the_stream(train, tmp_path, monkeypatch):
     stub_models(monkeypatch, train)
     config = write_config(tmp_path, steps=3, eval_every=2)
-    config.write_text(config.read_text() + f'heldout_set = "{tmp_path / 'eval' / '32x32.parquet'}"\n')  # keys k0 to k4, also rows of the training set
+    (tmp_path / "s" / data.HELDOUT).write_text("eval0\n")
     with pytest.raises(AssertionError, match="training stream"):
         train.main(str(config))
-    (tmp_path / "s" / data.HELDOUT).write_text("".join(f"k{i}\n" for i in range(5)))
-    train.main(str(config))
-    run = tmp_path / "runs" / "smoke"
-    held = [json.loads(line) for line in (run / "score_heldout.jsonl").read_text().splitlines()]
-    scores = [json.loads(line) for line in (run / "score.jsonl").read_text().splitlines()]
-    assert [h["step"] for h in held] == [s["step"] for s in scores] == [2, 3]
-    assert held[0]["loss_caption"] == pytest.approx(scores[0]["loss_caption"])  # the same rows, noise and t as the eval set here
 
 
 def test_existing_run_is_not_overwritten(train, tmp_path, monkeypatch):
@@ -335,7 +339,7 @@ class FixedBatches:
 
 class FixedBucket:
     def __init__(self, x, prompt):
-        self.x, self.prompt, self.shape = x, prompt, tuple(x.shape[1:])
+        self.x, self.prompt, self.shape = x.cuda(), prompt.to("cuda", torch.float32), tuple(x.shape[1:])
 
     def next(self):
         return self.x, self.prompt
@@ -358,7 +362,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     results = []
     for micro_batches in (1, 4):  # the same 8 samples as one batch, and as 4 micro-batches of 2
         torch.manual_seed(1)
-        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         size = 8 // micro_batches
@@ -369,7 +373,7 @@ def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train,
     assert per4.shape == t4.shape == (8,)
     # bf16 batches the same samples differently, so equal only up to rounding; a lost or doubled
     # micro-batch would be off by tens of percent
-    assert torch.allclose(per1, per4, rtol=0.02) and torch.equal(t1, t4)
+    assert torch.allclose(per1, per4, rtol=0.02) and torch.allclose(t1, t4)  # t from a mean, whose CUDA reduction order follows the split
     assert torch.allclose(loss1, loss4, rtol=0.02)
     for full, accumulated in zip(grads1, grads4):
         assert full.abs().max() > 0 and (full.float() - accumulated.float()).norm() < 0.03 * full.float().norm()
@@ -381,7 +385,7 @@ def test_micro_batches_of_different_buckets_weigh_by_their_tokens(train, monkeyp
     small, large = torch.randn(2, 2, 16, 16, generator=g), torch.randn(2, 2, 16, 32, generator=g)  # 4 and 8 tokens
     prompt = random_prompt(2, g)
     torch.manual_seed(1)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
     open_gates(model)
     loss, per_sample, _, _ = train.accumulate_gradients(model, FixedBatches([(small, prompt), (large, prompt)]), 2, shift=1.0, sigma=1.0)
     assert torch.allclose(loss, per_sample[:2].mean() / 3 + per_sample[2:].mean() * 2 / 3)  # the mean over every latent element
@@ -389,7 +393,7 @@ def test_micro_batches_of_different_buckets_weigh_by_their_tokens(train, monkeyp
 
 def test_bf16_model_trains_with_finite_loss_stays_bf16_and_its_updates_land(train):
     torch.manual_seed(0)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)

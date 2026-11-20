@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from conftest import PAIR, open_gates
+from conftest import PAIR, needs_cuda, open_gates
 from nanodit.data import pad_sequences
 from nanodit.model import BlockType, DiT, GATE_ROWS, HEAD_DIM, N_MOD, NULL_TOKENS, Prompt, SEQ_DIM, TOKEN_DIM, apply_rope, patchify, rope_angles, unpatchify
 
@@ -60,7 +60,6 @@ def test_gate_rows_start_at_zero_and_scale_rows_do_not(model):
     for rows in (weight, table):
         assert (rows[list(GATE_ROWS)] == 0).all()
         assert (rows[scale_rows] != 0).any(dim=-1).all()
-    assert (model.blocks[1].cross_gate == 0).all()
 
 
 def test_the_text_enters_at_unit_rms_whatever_its_scale(model, prompt):
@@ -90,16 +89,18 @@ def test_bf16_network_takes_fp32_inputs_and_returns_fp32_close_to_the_fp32_netwo
     assert (out - reference).norm() < 0.02 * reference.norm()  # measured 0.007
 
 
+@needs_cuda
 def test_gradient_reaches_every_zero_init_role(model, prompt):
+    model, prompt = model.cuda(), prompt.to("cuda", torch.float32)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
+    x, t = torch.randn(3, 2, 64, 64, device="cuda"), torch.rand(3, device="cuda")
     for _ in range(4):
         loss = (model(x, t, prompt) - 1).square().mean()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
     conv_block, block = model.blocks
-    assert block.table[list(GATE_ROWS)].abs().max() > 0 and block.cross_gate.abs().max() > 0
+    assert block.table[list(GATE_ROWS)].abs().max() > 0
     assert model.ada[1].weight.view(N_MOD, 512, 512)[list(GATE_ROWS)].abs().max() > 0
     assert block.qkv.weight.grad.abs().max() > 0 and conv_block.conv.weight.grad.abs().max() > 0  # behind the gates, reached once they opened
     assert block.cross_kv.weight.grad.abs().max() > 0
@@ -165,10 +166,7 @@ def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, prompt)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     base = model(x, t, prompt)
     for block in model.blocks:
-        block.w_down.weight.data *= 1e3
-        if not block.is_conv:  # the conv block has no branch norm; its norm sits on the read
-            block.out.weight.data *= 1e3
-            block.cross_out.weight.data *= 1e3
+        block.w_down.weight.data *= 1e3  # the mixers have no branch norm: the conv's sits on its read, attention's per head
     assert torch.allclose(model(x, t, prompt), base, atol=1e-3)  # the post-norm removes the weights' scale
 
 
@@ -185,15 +183,11 @@ def test_the_layout_repeats_to_the_depth_and_the_last_repeat_is_cut_short(layout
     assert [int(b.is_conv) for b in build(layout=layout).blocks] == convs
 
 
-def test_the_default_layout_puts_attention_in_every_fourth_block():
-    assert [int(b.is_conv) for b in build().blocks] == [1, 1, 1, 0]
+def test_the_default_layout_puts_attention_third_of_every_four_blocks():
+    assert [int(b.is_conv) for b in build().blocks] == [1, 1, 0, 1]
 
 
-def test_attention_blocks_and_only_they_cross_attend():
-    assert [hasattr(b, "cross_kv") for b in build(layout=PAIR).blocks] == [False, True, False, True]
-
-
-def test_a_caption_reaches_the_network_only_through_the_cross_attention():
+def test_a_caption_reaches_the_network_only_through_attention():
     with pytest.raises(AssertionError):
         build(layout=(CONV,))
     model = build(layout=PAIR)
@@ -207,7 +201,7 @@ def test_a_caption_reaches_the_network_only_through_the_cross_attention():
 def test_attention_uses_grouped_key_value_heads_and_a_quarter_of_the_rotary_frequencies():
     block = build(layout=(CONV, ATTN)).blocks[1]
     assert (block.heads, block.kv_heads) == (8, 2) and block.qkv.weight.shape == (512 + 2 * 2 * HEAD_DIM, 512)
-    assert block.cross_kv.weight.shape == (2 * 2 * HEAD_DIM, SEQ_DIM)  # the cross attention shares the grouping
+    assert block.cross_kv.weight.shape == (2 * 2 * HEAD_DIM, SEQ_DIM)  # the caption's keys share the grouping
     cos, sin = rope_angles(4, 4)
     assert sin[:, :4].abs().max() > 0 and sin[:, 4:16].eq(0).all() and sin[:, 16:20].abs().max() > 0 and sin[:, 20:].eq(0).all()  # 4 of 16 per axis
 
@@ -258,15 +252,10 @@ def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):
     assert torch.equal(moved, expected)
 
 
-JOINT, JOINT_SINK = BlockType("attn", joint=True), BlockType("attn", joint=True, sink=True)
-
-
-@pytest.mark.parametrize("kind", [JOINT, JOINT_SINK])
-@torch.no_grad()  # flex_attention has no backward on the CPU
-def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt, kind):
-    model = build(layout=(CONV, kind))
+@torch.no_grad()
+def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt):
+    model = build(layout=PAIR)
     open_gates(model)
-    assert not any(hasattr(b, "cross_q") or hasattr(b, "attn_norm") for b in model.blocks)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     base = model(x, t, prompt)
     assert not torch.allclose(base, model(x, t, prompt._replace(tokens=prompt.tokens.flip(0))))
@@ -279,7 +268,7 @@ def test_joint_attention_reads_the_caption_and_ignores_its_padding(prompt, kind)
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="flex_attention compiles on CUDA")
 @torch.no_grad()  # the eval sampler and the score run the compiled blocks without gradients
 def test_a_compiled_joint_block_gives_the_eager_output_without_gradients(prompt):
-    eager = build(layout=(CONV, JOINT_SINK)).cuda().bfloat16()
+    eager = build(layout=PAIR).cuda().bfloat16()
     open_gates(eager)
     compiled = copy.deepcopy(eager)
     for block in compiled.blocks:
@@ -293,11 +282,11 @@ def test_a_compiled_joint_block_gives_the_eager_output_without_gradients(prompt)
 def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt):
     """The stream a constant 50 on the meta channels, every query the same vector u, positive there and zero on the
     patch channels, and a null key along it: its logit outweighs the real keys' lse, so σ(lse − b) nearly closes each
-    head. A branch norm after `out` would scale a small write back to unit RMS; an exact zero would survive the norm,
-    so the head is nearly closed, not shut."""
+    head, where the null key at zero leaves it open. A branch norm after `out` would scale a small write back to unit
+    RMS; an exact zero would survive the norm, so the head is nearly closed, not shut."""
     changes = {}
-    for kind in (JOINT, JOINT_SINK):
-        model = build(layout=(CONV, kind))
+    for along in (False, True):
+        model = build(layout=PAIR)
         open_gates(model)
         block = model.blocks[1]
         block.table.data[GATE_ROWS[1]] = 0  # the MLP's gate: the change is the attention's alone
@@ -307,12 +296,12 @@ def test_a_head_whose_null_key_outweighs_every_key_writes_next_to_nothing(prompt
         u = torch.rand(1, block.width)
         u[:, :TOKEN_DIM] = 0  # off the patch channels, so u · y > 0
         block.qkv.weight.data[:block.width] = u  # every query row the same u
-        if kind.sink:
+        if along:
             block.null_key.data.fill_(1.5)
         seen = {}
         block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
         model(torch.randn(1, 2, 64, 64), torch.rand(1), prompt.rows(0, 1))
-        changes[kind.sink] = (seen["stream_out"] - seen["stream_in"]).abs().max()
+        changes[along] = (seen["stream_out"] - seen["stream_in"]).abs().max()
     assert changes[True] < 0.02 and changes[False] > 0.5
 
 
@@ -322,18 +311,15 @@ def open_refiner(model):
         block.mlp_gate.data.fill_(0.5)
 
 
-@torch.no_grad()  # flex_attention has no backward on the CPU
-def test_the_caption_refiner_starts_as_the_identity_and_leaves_the_rest_of_the_init_alone(prompt):
-    plain, refined = build(layout=(CONV, JOINT_SINK)), build(layout=(CONV, JOINT_SINK), refiner_depth=2)
-    assert all(torch.equal(p, refined.state_dict()[name]) for name, p in plain.state_dict().items())
-    open_gates(plain), open_gates(refined)
-    x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
-    assert torch.equal(plain(x, t, prompt), refined(x, t, prompt))
+@torch.no_grad()
+def test_the_caption_refiner_starts_as_the_identity(prompt):
+    text = F.rms_norm(prompt.tokens, (SEQ_DIM,))
+    assert all(torch.equal(block(text, prompt.mask), text) for block in build().refiner)
 
 
 @torch.no_grad()
 def test_the_caption_refiner_mixes_a_captions_tokens_and_ignores_its_padding(prompt):
-    model = build(layout=(CONV, JOINT_SINK), refiner_depth=2)
+    model = build(layout=PAIR)
     open_gates(model), open_refiner(model)
     x, t = torch.randn(3, 2, 64, 64), torch.rand(3)
     base = model(x, t, prompt)

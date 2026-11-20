@@ -1,5 +1,5 @@
 """Score a finished run's checkpoint on a joined eval set at another resolution: how a position code, trained at 128 px,
-carries to a bigger token grid. Same caption loss and noise rule as the training score; appends to RUN_DIR/score_<res>.jsonl.
+carries to a bigger token grid. Same loss and noise rule as the training score; appends to RUN_DIR/score_<res>.jsonl.
 The eval set is the fused shard of `precompute_lunara.py`, which holds both resolutions.
 
 usage: score_checkpoint.py RUN_DIR STEP EVAL_SET RESOLUTION
@@ -30,7 +30,7 @@ def main(run_dir: str, step: int, eval_set: str, resolution: int) -> None:
     ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
     scores = score(model, x, prompt, noise, ts, BATCH, device)
     append_jsonl(run / f"score_{resolution}.jsonl", dict(step=step, t=ts.tolist()) | scores)
-    print(f"{run.name} step {step} at {resolution}: caption loss {scores['loss_caption']:.4f}", flush=True)
+    print(f"{run.name} step {step} at {resolution}: loss {scores['loss']:.4f}", flush=True)
 
 
 if __name__ == "__main__":

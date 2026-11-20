@@ -7,10 +7,10 @@ seed each.
 
 - **Target:** Ostris's *x0 velocity* parameterization of rectified flow
 - **Latents:** Ostris's **Primal VAE** (2x2 variant), patched 8×8 by the DiT itself into 128-d tokens
-- **Conditioning:** the timestep through adaLN; the caption by cross attention to **EmbeddingGemma 2**'s 512-d token
-  states in the attention blocks
+- **Conditioning:** the timestep through adaLN; the caption as extra keys in the attention blocks' joint attention,
+  **EmbeddingGemma 2**'s 512-d token states after a two-block caption refiner
 - **Blocks:** three gated short-conv blocks (LFM2's), writing all channels, for every attention block; sandwich
-  norm on the attention and MLP branches; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
+  norm on the MLP branch; a concatenating patch embed and a slice read-out, so the residual stream carries the working latent
 - **Optimizer:** **UsuiTrack**: the learning rate is a relative step, and each matrix stays in the ball of its init norm
 - **Framework:** pure PyTorch, bf16 parameters, single GPU, no trainer framework
 
@@ -25,7 +25,7 @@ It is a research log as much as a codebase: every design choice is in `docs/SPEC
 one pass over the 8.24M-pair training set plus a cooldown of a tenth of a pass, about 4.3 hours on the one GPU. Euler,
 30 steps, guidance 4. Mood, palette, layout and lighting follow the prompt; the forms are not finished.*
 
-One model is trained end to end: architecture **a1**, the trunk before its conv blocks were gated, 128 px only; the trunk is now **a3** (`docs/SPEC.md`). The 256 px stage is not trained yet.
+One model is trained end to end: architecture **a1**, the trunk before its conv blocks were gated, 128 px only; the trunk is now **a4** (`docs/SPEC.md`). The 256 px stage is not trained yet.
 
 | | |
 |---|---|
@@ -35,7 +35,7 @@ One model is trained end to end: architecture **a1**, the trunk before its conv 
 | Batch | 256 images (16k tokens), constant lr after a short warmup; a cosine cooldown is its own short run |
 | Timestep | logit-normal, σ 0.7 |
 | Throughput | about 590 images/s at 128 px on an RTX 4070 Super |
-| Score | held-out loss on 1,000 Lunara pairs, never trained on (from new runs on, also on 1,000 held-out rows of the training set), 10 fixed t with fixed noise: 1.4242 after one pass, 1.4106 after the cooldown (`docs/log/2026-11-18-*`) |
+| Score | loss on 1,000 Lunara pairs, never trained on (from a4 on, at 256 px, and the eval on 1,000 held-out rows of the training set), 10 fixed t with fixed noise: 1.4242 after one pass, 1.4106 after the cooldown (`docs/log/2026-11-18-*`) |
 
 **How things are decided.** The held-out loss on fixed rows, fixed noise and a fixed t grid is the metric, as in
 large-scale scaling work on text-to-image models: it is the training objective itself, comparable across runs, and
@@ -69,7 +69,7 @@ tests/                behaviour tests for all of the above
 ```bash
 uv sync
 uv run python -m pytest tests/
-uv run python scripts/train.py configs/a3-ref-1ep.toml
+uv run python scripts/train.py configs/a4-ref-1ep.toml
 ```
 
 torch 2.15 comes from the PyTorch cu132 index. UsuiTrack is a git dependency pinned to a
@@ -86,7 +86,7 @@ Training reads precomputed rows, not images. The pipeline, each step a script wi
 4. `exclude_captions.py`: the set's `excluded_keys.txt`, the rows whose captions match a defect pattern.
 5. `holdout.py`: the set's `heldout_keys.txt` and the held-out eval set, 1,000 rows of the set never streamed.
 6. `precompute_lunara.py`: the out-of-distribution eval set, never trained on.
-7. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl`, `score_heldout.jsonl`, eval grids and checkpoints to the run directory and
+7. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl` (held-out rows), `score_lunara.jsonl` (Lunara at 256 px), eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
 Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is

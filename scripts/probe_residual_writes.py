@@ -8,10 +8,10 @@ Two reads of a run's checkpoint:
   inside one token (< 8 px), with the clean latents' energy in each band, so error over energy is the share of a band not recovered.
 - On the eval prompts, sampled as the training eval samples them (Euler, CFG, the prompts' fixed noise): at four
   steps of the trajectory, the clean estimate x0_k = (1 - t)·x_t + t·F_k decoded after every write, one PNG per
-  step and prompt. Rows are the attention periods, columns the writes in order (conv blocks: mixer, then MLP; the attention block: self-attention, cross attention, MLP). And per prompt the clean
+  step and prompt. Rows are the attention periods, columns the writes in order (each block: its mixer, then its MLP). And per prompt the clean
   estimate of the whole network at every sampler step, to see at which t the forms are fixed.
 
-The writes are taken by hooks on each branch norm's output (the conv block's `out`, which has none), times its gate, and re-added in bf16 in the model's order;
+The writes are taken by hooks on the mixer's `out` (no branch norm follows it) and the MLP's branch norm, times their gates, and re-added in bf16 in the model's order;
 the sum is checked against each block's output.
 
 usage: probe_residual_writes.py RUN_DIR STEP OUT_DIR [ROWS]
@@ -45,8 +45,7 @@ class WriteCapture:
         model.ada.register_forward_hook(lambda m, i, out: setattr(self, "mod", out.view(out.shape[0], N_MOD, -1)))
         for b, block in enumerate(model.blocks):
             block.register_forward_pre_hook(lambda m, args, b=b: self._start(b, args[0]))
-            names = ["out"] if block.is_conv else ["attn_norm", "cross_norm"]
-            for name in [*names, "mlp_norm"]:
+            for name in ("out", "mlp_norm"):
                 getattr(block, name).register_forward_hook(lambda m, i, out, b=b, name=name: self._write(b, name, out))
             block.register_forward_hook(lambda m, args, out, b=b: self._check(b, out))
 
@@ -59,14 +58,10 @@ class WriteCapture:
     def _write(self, b: int, name: str, out) -> None:
         block, record = self.model.blocks[b], self.blocks[-1]
         mod = self.mod + block.table
-        if name in ("out", "attn_norm"):
-            write = mod[:, GATE_ROWS[0], None] * out
-        elif name == "cross_norm":
-            write = block.cross_gate * out
-        else:
-            write = mod[:, GATE_ROWS[1], None] * out
+        write = mod[:, GATE_ROWS[0] if name == "out" else GATE_ROWS[1], None] * out
         record["x"] = record["x"] + write
-        record["writes"].append(("conv" if name == "out" else name.removesuffix("_norm"), record["x"][..., :TOKEN_DIM].float(), write[..., :TOKEN_DIM].float()))
+        label = ("conv" if block.is_conv else "attn") if name == "out" else "mlp"
+        record["writes"].append((label, record["x"][..., :TOKEN_DIM].float(), write[..., :TOKEN_DIM].float()))
 
     def _check(self, b: int, out) -> None:
         assert torch.equal(self.blocks[-1]["x"], out), f"block {b}: the re-added writes do not give the block's output"

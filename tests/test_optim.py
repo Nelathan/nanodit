@@ -1,7 +1,7 @@
 import copy
 
 import torch
-from conftest import PAIR, open_gates
+from conftest import PAIR, needs_cuda, open_gates
 from usuitrack.frame import rank
 
 from nanodit.data import pad_sequences
@@ -18,14 +18,15 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_tokens", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.1.mlp_norm.weight"} <= adam
+    assert {"null_tokens", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.null_key", "blocks.0.conv.weight", "blocks.1.mlp_norm.weight"} <= adam
     assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "blocks.0.conv_in.weight", "patch_embed.weight"} <= usui
     assert [(g["side"], g["step_rule"], g["frame_init"], g["norm_bounds"]) for g in matrix.param_groups] == [("right", "trust", "random", (None, 1.0))]
 
 
+@needs_cuda
 def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     torch.manual_seed(0)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda().bfloat16()
     fallback_lr = 1e-3
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, fallback_lr)
     tracked = {id(p) for g in optimizers[0].param_groups for p in g["params"]}
@@ -37,7 +38,9 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
     # gate: its gradient is exactly zero, so its random frame (or its full space) catches nothing and it does not move
     stepped = {n for n, p in model.named_parameters() if "moment" in optimizers[0].state.get(p, {})}
     assert len(matrices) > 10 and stepped == set(matrices)
-    assert change["ada.1.weight"] > 0 and all(c == 0 for n, c in change.items() if n != "ada.1.weight")
+    # on CUDA a matrix with a zero gradient still moves by up to 3e-5 of its norm (measured, the same before the
+    # caption refiner and joint attention; exactly 0 on the CPU): two orders below the shared projection's step
+    assert change["ada.1.weight"] > 5e-4 and all(c < 1e-4 for n, c in change.items() if n != "ada.1.weight")
     # AdamW's first step is lr times the gradient's sign, up to bf16 rounding
     # (only the first 128 channels, the ones F reads, have an upstream gradient yet)
     assert abs(model.blocks[1].table[list(GATE_ROWS), :TOKEN_DIM].float().abs().mean() / fallback_lr - 1) < 0.05
@@ -46,7 +49,7 @@ def test_the_first_step_moves_only_what_the_zero_gates_leave_a_gradient():
 def trained_model(steps=2):
     """A depth-2 bf16 model with open gates (so every matrix gets a gradient), stepped `steps` times."""
     torch.manual_seed(0)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
@@ -59,7 +62,7 @@ def batch(seed):
     g = torch.Generator().manual_seed(seed)
     x = torch.randn(8, 2, 32, 32, generator=g)
     tokens, mask = pad_sequences([torch.randn(2 + i % 4, SEQ_DIM, generator=g) for i in range(8)], torch.float32)
-    return x, Prompt(tokens, mask)
+    return x.cuda(), Prompt(tokens, mask).to("cuda", torch.float32)
 
 
 def train_step(model, optimizers, x, prompt, micro_batch=8):
@@ -71,6 +74,7 @@ def train_step(model, optimizers, x, prompt, micro_batch=8):
         optimizer.zero_grad()
 
 
+@needs_cuda
 def test_tracked_matrices_have_no_gradient_and_still_move():
     model, optimizers = trained_model(steps=0)
     qkv = model.blocks[1].qkv.weight
@@ -83,26 +87,28 @@ def test_tracked_matrices_have_no_gradient_and_still_move():
     assert model.blocks[0].table.requires_grad  # fallback parameters keep their gradients
 
 
+@needs_cuda
 def test_the_production_layout_trains_a_step():
     torch.manual_seed(0)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).bfloat16()
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=4, width=512).cuda().bfloat16()
     open_gates(model)
     optimizers = build_optimizers(model, 3e-3, 0.95, 0.1, 1e-3)
-    conv, cross = model.blocks[0].conv.weight.detach().clone(), model.blocks[3].cross_kv.weight.detach().clone()
+    conv, caption = model.blocks[0].conv.weight.detach().clone(), model.blocks[2].cross_kv.weight.detach().clone()
     train_step(model, optimizers, *batch(0))
-    assert not torch.equal(model.blocks[0].conv.weight, conv) and not torch.equal(model.blocks[3].cross_kv.weight, cross)
+    assert not torch.equal(model.blocks[0].conv.weight, conv) and not torch.equal(model.blocks[2].cross_kv.weight, caption)
 
 
+@needs_cuda
 def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
     x, prompt = batch(0)
     grads = []
     for micro_batch in (8, 2):
         torch.manual_seed(1)
-        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+        model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
         open_gates(model)
         build_optimizers(model.bfloat16(), 3e-3, 0.95, 0.1, 1e-3)
         torch.manual_seed(2)  # t, ε and dropout draws differ with the split, so fix the inputs instead
-        t, eps = torch.rand(8), torch.randn_like(x)
+        t, eps = torch.rand(8, device="cuda"), torch.randn_like(x)
         for i in range(0, 8, micro_batch):
             sl = slice(i, i + micro_batch)
             x_t = noisy(x[sl], eps[sl], t[sl])
@@ -114,13 +120,14 @@ def test_accumulated_micro_batches_give_the_full_batch_fallback_gradient():
     assert grads[0].abs().max() > 0 and (grads[0].float() - grads[1].float()).norm() < 0.03 * grads[0].float().norm()  # measured 0.003
 
 
+@needs_cuda
 def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
     model, optimizers = trained_model()
     state = copy.deepcopy((model.state_dict(), [o.state_dict() for o in optimizers]))  # state_dict() aliases live tensors
     torch.manual_seed(5)
     train_step(model, optimizers, *batch(1))  # the uninterrupted run
 
-    restored = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).bfloat16()
+    restored = DiT(torch.zeros(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda().bfloat16()
     restored.load_state_dict(state[0])
     resumed = build_optimizers(restored, 3e-3, 0.95, 0.1, 1e-3)
     for optimizer, saved in zip(resumed, state[1]):
@@ -134,9 +141,10 @@ def test_checkpoint_round_trip_continues_exactly_where_training_left_off():
         assert torch.equal(a, b), name  # the stochastic rounding draws repeat under the same seed
 
 
+@needs_cuda
 def test_no_tracked_norm_grows_past_its_init_norm():
     torch.manual_seed(0)
-    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR)
+    model = DiT(torch.randn(NULL_TOKENS, SEQ_DIM), depth=2, width=512, layout=PAIR).cuda()
     open_gates(model)
     model.bfloat16()
     optimizers = build_optimizers(model, 5e-2, 0.95, 0.1, 1e-3)

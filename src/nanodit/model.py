@@ -17,10 +17,11 @@ NULL_TOKENS = 2  # the empty caption's <bos> and <eos> states, the null prompt's
 TIME_DIM = 256
 ROPE_BASE = 10000.0
 ADALN_STD = 0.02  # "small random" scale rows
-N_MOD = 4  # scale and gate for the token mixer (attention or conv), then for the MLP; no shift (PLAN J4)
+N_MOD = 4  # scale and gate for the token mixer (attention or conv), then for the MLP
 GATE_ROWS = (1, 3)
 MLP_RATIO = 4  # SwiGLU hidden over the stream width
 KV_RATIO = 4  # query heads per key/value head
+REFINER_DEPTH = 2  # caption refiner blocks over the token states
 ROPE_FRACTION = 0.25  # of each axis' frequencies rotate: the fast ones; the slow ones barely turn on the grid and carry no position
 
 
@@ -28,14 +29,12 @@ class BlockType(NamedTuple):
     """One block's settings. A layout is a sequence of them, repeated to the depth (SPEC §3)."""
 
     mixer: str  # "conv" or "attn"
-    joint: bool = False  # attention over [image keys, caption keys] in one softmax, no cross sublayer (PLAN J2)
-    sink: bool = False  # with joint: a learned null key per KV head, through which a head can write nothing (PLAN J3)
 
 
 MIXERS = ("conv", "attn")
-LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("conv"), BlockType("attn"))
+LAYOUT = (BlockType("conv"), BlockType("conv"), BlockType("attn"), BlockType("conv"))
 # flex_attention's default 128-row tiles are about 6x slower than SDPA at 64 + L keys (one 128 px image and its
-# caption); 64 x 32 tiles bring it level with self then cross attention. CUDA only.
+# caption); 64 x 32 tiles bring it level with SDPA's self then cross attention there. CUDA only.
 FLEX_TILES = dict(BLOCK_M=64, BLOCK_N=32)
 
 
@@ -55,7 +54,7 @@ def joint_attention(q: Tensor, k: Tensor, v: Tensor, mask: Tensor) -> tuple[Tens
 
 
 class Prompt(NamedTuple):
-    """The text side of a batch: the caption's token states, which the cross attention reads."""
+    """The text side of a batch: the caption's token states, which the attention blocks read as keys."""
 
     tokens: Tensor  # [B, L, 512], zero past a caption's end, L >= NULL_TOKENS
     mask: Tensor  # [B, L] bool, true on a caption's tokens
@@ -104,14 +103,13 @@ def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
 
 class Block(nn.Module):
     """A conv block mixes tokens by LFM2's gated short conv, a depthwise 3x3 conv over the token grid between two
-    per-channel gates, and writes all channels. An attention block mixes with gated grouped-query
-    attention, then reads the caption's token states through a cross attention, grouped-query and without RoPE, that
-    takes no adaLN, only a zero-initialised gate per channel."""
+    per-channel gates, and writes all channels. An attention block mixes with gated grouped-query joint attention:
+    the image tokens' queries read the image keys (RoPE) and the caption's keys (no RoPE) in one softmax, beside a
+    learned null key per KV head through which a head can write nothing."""
 
     def __init__(self, width: int, kind: BlockType):
         super().__init__()
-        assert kind.mixer in MIXERS and (kind.mixer == "attn" or not kind.joint) and (kind.joint or not kind.sink), kind
-        self.joint, self.sink = kind.joint, kind.sink
+        assert kind.mixer in MIXERS, kind
         self.width, self.heads, hidden = width, width // HEAD_DIM, MLP_RATIO * width
         self.kv_heads = max(1, self.heads // KV_RATIO)
         assert self.heads % self.kv_heads == 0
@@ -127,20 +125,9 @@ class Block(nn.Module):
             self.q_norm = nn.RMSNorm(HEAD_DIM)
             self.k_norm = nn.RMSNorm(HEAD_DIM)
             self.out = nn.Linear(width, width, bias=False)
-            # registered in the trunk's order, so a block without `joint` draws the trunk's init at the same seed
-            if not self.joint:
-                self.attn_norm = nn.RMSNorm(width)
-                self.cross_q = nn.Linear(width, width, bias=False)
-            self.cross_kv = nn.Linear(SEQ_DIM, 2 * self.kv_heads * HEAD_DIM, bias=False)
-            if not self.joint:
-                self.cross_q_norm = nn.RMSNorm(HEAD_DIM)
-            self.cross_k_norm = nn.RMSNorm(HEAD_DIM)  # under joint its own gain is the only place the caption keys' temperature against the image keys' lives
-            if not self.joint:
-                self.cross_out = nn.Linear(width, width, bias=False)
-                self.cross_norm = nn.RMSNorm(width)
-                self.cross_gate = nn.Parameter(torch.zeros(width))
-            if self.sink:
-                self.null_key = nn.Parameter(torch.zeros(self.kv_heads, HEAD_DIM))  # b = 0 at init: a head's openness starts as σ(lse); draws no RNG, so the init matches the joint arm's
+            self.cross_kv = nn.Linear(SEQ_DIM, 2 * self.kv_heads * HEAD_DIM, bias=False)  # the caption's keys and values
+            self.cross_k_norm = nn.RMSNorm(HEAD_DIM)  # its gain is the only place the caption keys' temperature against the image keys' lives
+            self.null_key = nn.Parameter(torch.zeros(self.kv_heads, HEAD_DIM))  # b = 0 at init: a head's openness starts as σ(lse)
         self.mlp_norm = nn.RMSNorm(width)
         self.w_gate = nn.Linear(width, hidden, bias=False)
         self.w_up = nn.Linear(width, hidden, bias=False)
@@ -163,23 +150,13 @@ class Block(nn.Module):
             k, v = (a.view(B, N, self.kv_heads, HEAD_DIM).transpose(1, 2) for a in (k, v))
             q_normed = self.q_norm(q)
             q, k = apply_rope(q_normed, *rope), apply_rope(self.k_norm(k), *rope)
-            if self.joint:
-                x = x + gate_a[:, None] * self.out(self.joint_read(q, q_normed, k, v, text, mask) * torch.sigmoid(self.gate(y)))
-            else:
-                attn = F.scaled_dot_product_attention(q, k, v, enable_gqa=self.kv_heads != self.heads).transpose(1, 2).reshape(B, N, self.width)
-                x = x + gate_a[:, None] * self.attn_norm(self.out(attn * torch.sigmoid(self.gate(y))))
-                y = F.rms_norm(x, (self.width,))
-                q = self.cross_q_norm(self.cross_q(y).view(B, N, self.heads, HEAD_DIM).transpose(1, 2))
-                k, v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
-                attn = F.scaled_dot_product_attention(q, self.cross_k_norm(k), v, attn_mask=mask[:, None, None], enable_gqa=self.kv_heads != self.heads)
-                x = x + self.cross_gate * self.cross_norm(self.cross_out(attn.transpose(1, 2).reshape(B, N, self.width)))
+            x = x + gate_a[:, None] * self.out(self.joint_read(q, q_normed, k, v, text, mask) * torch.sigmoid(self.gate(y)))
 
         y = F.rms_norm(x, (self.width,)) * (1 + scale_m[:, None])
         return x + gate_m[:, None] * self.mlp_norm(self.w_down(F.silu(self.w_gate(y)) * self.w_up(y)))
 
     def joint_read(self, q: Tensor, q_normed: Tensor, k: Tensor, v: Tensor, text: Tensor, mask: Tensor) -> Tensor:
-        """Each head's read over [image keys, caption keys], RMS-normed per head with no gain and, with the sink,
-        scaled by the share of its mass the null key leaves: softmax with a null key of logit b and value 0 is
+        """Each head's read over [image keys, caption keys], RMS-normed per head with no gain and scaled by the share of its mass the null key leaves: softmax with a null key of logit b and value 0 is
         σ(lse − b) · softmax(s)V, lse over the real keys. With no branch norm after `out`, a closed head writes nothing.
         The null key meets the query before RoPE (`q_normed`), so b does not depend on the position; it is not normed,
         so its length sets how readily a head abstains."""
@@ -187,10 +164,9 @@ class Block(nn.Module):
         text_k, text_v = self.cross_kv(text).view(B, -1, 2, self.kv_heads, HEAD_DIM).permute(2, 0, 3, 1, 4)
         read, lse = joint_attention(q, torch.cat([k, self.cross_k_norm(text_k)], dim=2), torch.cat([v, text_v], dim=2), mask)
         read = F.rms_norm(read, (HEAD_DIM,))
-        if self.sink:
-            # query head h reads KV head h // (heads / kv_heads), as enable_gqa groups them
-            null_logit = (q_normed.float().unflatten(1, (self.kv_heads, -1)) @ self.null_key[:, None, :, None].float()).flatten(1, 2).squeeze(-1)
-            read = read * torch.sigmoid(lse - HEAD_DIM**-0.5 * null_logit)[..., None].to(read.dtype)  # in fp32, as lse
+        # query head h reads KV head h // (heads / kv_heads), as enable_gqa groups them
+        null_logit = (q_normed.float().unflatten(1, (self.kv_heads, -1)) @ self.null_key[:, None, :, None].float()).flatten(1, 2).squeeze(-1)
+        read = read * torch.sigmoid(lse - HEAD_DIM**-0.5 * null_logit)[..., None].to(read.dtype)  # in fp32, as lse
         return read.transpose(1, 2).reshape(B, N, self.width)
 
 
@@ -205,8 +181,8 @@ def fan_in_normal(m: nn.Module) -> None:
 
 
 class CaptionRefinerBlock(nn.Module):
-    """Self-attention then SwiGLU over the caption's token states alone, at their native SEQ_DIM (PLAN J6). No t and no
-    image tokens reach it; no RoPE, as the encoder's states carry their positions. Each branch ends in a norm and a
+    """Self-attention then SwiGLU over the caption's token states alone, at their native SEQ_DIM. No t and no
+    image tokens reach it, so it runs once per sample; no RoPE, as the encoder's states carry their positions. Each branch ends in a norm and a
     static per-channel gate initialised to zero, so the block starts as the identity."""
 
     def __init__(self):
@@ -235,39 +211,33 @@ class CaptionRefinerBlock(nn.Module):
 
 
 class DiT(nn.Module):
-    def __init__(self, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT, refiner_depth: int = 0):
-        """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth.
-        `refiner_depth` caption refiner blocks run over the token states before any block reads them (PLAN J6)."""
+    def __init__(self, null_tokens: Tensor, depth: int, width: int, layout: tuple[BlockType, ...] = LAYOUT):
+        """`layout` repeats to `depth` blocks, the last repeat cut short when it does not divide the depth. The caption
+        refiner runs over the token states before any block reads them."""
         super().__init__()
         assert null_tokens.shape == (NULL_TOKENS, SEQ_DIM), null_tokens.shape
         assert layout, "a layout needs at least one block type"
         kinds = [layout[i % len(layout)] for i in range(depth)]
-        assert any(kind.mixer == "attn" for kind in kinds), "the caption reaches the network only by cross attention"
+        assert any(kind.mixer == "attn" for kind in kinds), "the caption reaches the network only through attention"
         self.width = width
         self.null_tokens = nn.Parameter(null_tokens.detach().clone().float())  # [NULL_TOKENS, 512]
         self.patch_embed = nn.Linear(TOKEN_DIM, width - TOKEN_DIM)  # fills the meta channels; the first TOKEN_DIM carry the patch unchanged
         self.time_mlp = nn.Sequential(nn.Linear(TIME_DIM, width), nn.SiLU(), nn.Linear(width, width))
         self.ada = nn.Sequential(nn.SiLU(), nn.Linear(width, N_MOD * width))
         self.blocks = nn.ModuleList(Block(width, kind) for kind in kinds)
-        with torch.random.fork_rng(devices=[]):  # its construction draws, which init_weights overwrites, leave the rest's init as without it
-            self.refiner = nn.ModuleList(CaptionRefinerBlock() for _ in range(refiner_depth))
+        self.refiner = nn.ModuleList(CaptionRefinerBlock() for _ in range(REFINER_DEPTH))
         self.init_weights()
 
     @torch.no_grad()
     def init_weights(self) -> None:
-        refiner = set(self.refiner.modules())
         for m in self.modules():
-            if m not in refiner:
-                fan_in_normal(m)
+            fan_in_normal(m)
         mod = self.ada[1]
         mod.weight.view(N_MOD, self.width, self.width)[:] = ADALN_STD * torch.randn(N_MOD, self.width, self.width)
         mod.weight.view(N_MOD, self.width, self.width)[list(GATE_ROWS)] = 0
         for table in [b.table for b in self.blocks]:
             table.normal_(0, ADALN_STD)
             table[list(GATE_ROWS)] = 0
-        with torch.random.fork_rng(devices=[]):  # drawn apart, so the rest and every later CPU draw are as without the refiner
-            for m in self.refiner.modules():
-                fan_in_normal(m)
 
     def null_prompt(self, batch: int, length: int) -> Prompt:
         """The empty caption for `batch` rows, its tokens padded to `length`."""
@@ -279,8 +249,8 @@ class DiT(nn.Module):
         """x [B, 2, H, W] latent at noise level t [B] -> F [B, 2, H, W].
         The network runs in the parameters' dtype (bf16 in training); x and the prompt are cast on the way in
         and F comes back fp32, so the objective and the sampler never see the network's dtype. t stays
-        fp32 up to the sinusoid, whose phases need the precision. A caption with no tokens is the null prompt: cross
-        attention over a fully masked row has no softmax."""
+        fp32 up to the sinusoid, whose phases need the precision. A caption with no tokens is the null prompt, so the
+        refiner never attends over a fully masked row."""
         empty = (~prompt.mask.any(1)).view(-1, 1)
         null = self.null_prompt(*prompt.tokens.shape[:2])
         prompt = Prompt(torch.where(empty[..., None], null.tokens, prompt.tokens), torch.where(empty, null.mask, prompt.mask))

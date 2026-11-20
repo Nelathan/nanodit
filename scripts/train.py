@@ -28,7 +28,7 @@ from nanodit.sampler import euler_sample
 T_BUCKETS = 10
 SCORE_TS = 10  # the score's t grid: equal-probability bins of the shift-1 logit-normal, whatever t the run trains on (SPEC §8)
 SCORE_SHIFT = 1.0
-WANDB_BUCKETS = 5  # wandb shows 5 buckets: the train.jsonl and score.jsonl series have 10
+WANDB_BUCKETS = 5  # wandb shows 5 buckets: the train.jsonl and score jsonl series have 10
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,6 @@ class Config:
     width: int  # the residual stream; heads of HEAD_DIM, the MLP hidden MLP_RATIO times it
     layout: list[str]  # block type names, repeated to the depth (SPEC §3)
     block_types: dict[str, dict]  # name -> the fields of a model.BlockType
-    refiner_depth: int  # caption refiner blocks over the token states, 0 for none (PLAN J6)
     batch: int
     micro_batch: int  # batch is built by accumulating batch / micro_batch of these
     steps: int  # steps this run takes, after init_from's
@@ -60,11 +59,12 @@ class Config:
     eval_seed: int  # prompt i's noise takes seed eval_seed + i
     guidance: float
     sampler_steps: int
-    eval_set: str  # a precomputed Parquet never trained on, scored at every checkpoint
+    eval_set: str  # the dataset's held-out rows (scripts/holdout.py), out of the stream, scored at every checkpoint into score.jsonl
+    lunara_set: str  # another distribution's precomputed rows, scored at lunara_resolution into score_lunara.jsonl
+    lunara_resolution: int
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
-    heldout_set: str | None = None  # the dataset's held-out rows (scripts/holdout.py), scored beside eval_set into score_heldout.jsonl; none for a run continuing one that trained on them
     anneal_to: float | None = None  # an anneal run (SPEC §6), from a checkpoint with warmup = 0: Usui's lr falls by a cosine over `steps` to this value
 
 
@@ -72,7 +72,7 @@ def build_model(cfg: Config, device: torch.device, dtype: torch.dtype) -> DiT:
     """The config's DiT at its init, the null prompt from the precomputed empty caption."""
     null = load_file(cfg.null_embedding)
     layout = tuple(BlockType(**cfg.block_types[name]) for name in cfg.layout)
-    return DiT(null["null_tokens"], cfg.depth, cfg.width, layout, cfg.refiner_depth).to(device, dtype)
+    return DiT(null["null_tokens"], cfg.depth, cfg.width, layout).to(device, dtype)
 
 
 def compile_blocks(model: DiT) -> None:
@@ -130,13 +130,18 @@ def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, devi
     wandb.log({"eval": wandb.Image(str(path), caption="prompts row-major in eval_prompts.txt order")}, step=step)
 
 
+def score_rows(path: str, resolution: int, seed: int) -> tuple[torch.Tensor, Prompt, torch.Tensor]:
+    """A score set's latents, prompts and noise, one draw per row shared by every t."""
+    x, prompt = read_rows(path, resolution)
+    return x, prompt, torch.randn(x.shape, generator=torch.Generator().manual_seed(seed))
+
+
 @torch.no_grad()
 def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict:
     """The loss on fixed rows, each with its caption and fixed noise, at every t of a fixed grid: one number
     comparable across steps and runs, and its value at each t. The same for R² (`explained_variance`), per t and
     over the grid, and per band of spatial frequency (`objective.BAND_EDGES`): one minus the band's share of the clean-latent
-    error over its share of the latents' energy. Keys keep the `_caption` suffix of the records that also scored the
-    null embedding."""
+    error over its share of the latents' energy."""
     energy, per_t, band_errors = x.float().square().mean().item(), [], []
     band_energies = band_energy(x.float()).mean(0).tolist()
     for t_value in ts.tolist():
@@ -154,12 +159,12 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
     errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
     by_band_by_t = [[1 - e / b for e, b in zip(row, band_energies)] for row in band_errors]
     return dict(
-        loss_caption=sum(per_t) / len(per_t),
-        loss_caption_by_t=per_t,
-        r2_caption=1 - sum(errors) / len(errors) / energy,
-        r2_caption_by_t=[1 - error / energy for error in errors],
-        r2_caption_by_band=[sum(col) / len(col) for col in zip(*by_band_by_t)],
-        r2_caption_by_band_by_t=by_band_by_t,
+        loss=sum(per_t) / len(per_t),
+        loss_by_t=per_t,
+        r2=1 - sum(errors) / len(errors) / energy,
+        r2_by_t=[1 - error / energy for error in errors],
+        r2_by_band=[sum(col) / len(col) for col in zip(*by_band_by_t)],
+        r2_by_band_by_t=by_band_by_t,
     )
 
 
@@ -207,15 +212,15 @@ def wandb_scalars(record: dict, by_t: dict) -> dict:
     return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
 
 
-def wandb_scores(scores: dict, name: str) -> dict:
-    """A score record, flat: the means under `<name>/`, and each by-t series as the means of neighbouring grid points,
-    the t's of one fifth of the grid's probability mass each, in one group per topic,
-    `<name>_<topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
-    flat = {f"{name}/{key}": scores[key] for key in ("loss_caption", "r2_caption")}
-    flat |= {f"{name}/r2_caption_{band}": value for band, value in zip(BAND_NAMES, scores["r2_caption_by_band"])}
+def wandb_scores(scores: dict, prefix: str) -> dict:
+    """A score record, flat: the means under `eval/<prefix>`, and each by-t series as the means of neighbouring grid
+    points, the t's of one fifth of the grid's probability mass each, in one group per topic,
+    `eval_<prefix><topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
+    flat = {f"eval/{prefix}{key}": scores[key] for key in ("loss", "r2")}
+    flat |= {f"eval/{prefix}r2_{band}": value for band, value in zip(BAND_NAMES, scores["r2_by_band"])}
     size = SCORE_TS // WANDB_BUCKETS
-    for key in ("loss_caption_by_t", "r2_caption_by_t"):
-        flat |= {f"{name}_{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
+    for key in ("loss_by_t", "r2_by_t"):
+        flat |= {f"eval_{prefix}{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
 
 
@@ -317,14 +322,11 @@ def main(config_path: str) -> None:
     schedules = [torch.optim.lr_scheduler.LambdaLR(o, lr_factor) for o in optimizers]
     prompts_path = Path(config_path).parent / cfg.eval_prompts
     eval_prompt, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
-    score_x, score_prompt = read_rows(cfg.eval_set, cfg.resolution)
-    score_noise = torch.randn(score_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))  # one draw per row, shared by every t and condition
+    eval_keys = pq.read_table(cfg.eval_set, columns=["key"])["key"].to_pylist()
+    assert stream.excluded.issuperset(eval_keys), "the eval rows are in the training stream"
     score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
-    if cfg.heldout_set:
-        held_keys = pq.read_table(cfg.heldout_set, columns=["key"])["key"].to_pylist()
-        assert stream.excluded.issuperset(held_keys), "the held-out rows are in the training stream"
-        held_x, held_prompt = read_rows(cfg.heldout_set, cfg.resolution)
-        held_noise = torch.randn(held_x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))
+    eval_rows = score_rows(cfg.eval_set, cfg.resolution, cfg.eval_seed)
+    lunara_rows = score_rows(cfg.lunara_set, cfg.lunara_resolution, cfg.eval_seed)
 
     run_dir.mkdir(parents=True)
     shutil.copy(config_path, run_dir / "config.toml")
@@ -353,14 +355,12 @@ def main(config_path: str) -> None:
         paused = time.perf_counter()
         if step % cfg.eval_every == 0 or step == last:
             evaluate(model, decoder, eval_prompt, cfg, step, run_dir, device)
-            scores = score(model, score_x, score_prompt, score_noise, score_ts, cfg.micro_batch, device)
+            scores = score(model, *eval_rows, score_ts, cfg.micro_batch, device)
+            lunara = score(model, *lunara_rows, score_ts, cfg.micro_batch, device)
             weights = weight_reads(model, optimizers[0])
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores | dict(weights=weights))
-            wandb.log(wandb_scores(scores, "eval") | wandb_weights(weights), step=step)
-            if cfg.heldout_set:
-                held = score(model, held_x, held_prompt, held_noise, score_ts, cfg.micro_batch, device)
-                append_jsonl(run_dir / "score_heldout.jsonl", dict(step=step, t=score_ts.tolist()) | held)
-                wandb.log(wandb_scores(held, "heldout"), step=step)
+            append_jsonl(run_dir / "score_lunara.jsonl", dict(step=step, t=score_ts.tolist()) | lunara)
+            wandb.log(wandb_scores(scores, "") | wandb_scores(lunara, "lunara_") | wandb_weights(weights), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only

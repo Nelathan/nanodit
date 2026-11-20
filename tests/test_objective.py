@@ -2,7 +2,7 @@ import math
 
 import pytest
 import torch
-from conftest import open_gates
+from conftest import needs_cuda, open_gates
 
 from nanodit.model import Prompt
 from nanodit.objective import PROMPT_DROPOUT, band_energy, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
@@ -83,9 +83,11 @@ def test_flow_loss_at_init_is_the_expected_target_energy_and_dropped_rows_get_th
     assert all(torch.equal(a[~dropped], b[~dropped]) for a, b in zip(net.prompt, prompt))
 
 
+@needs_cuda
 def test_flow_loss_passes_gradient_to_the_network(model, prompt):
+    model, prompt = model.cuda(), prompt.to("cuda", torch.float32)
     open_gates(model)  # closed, F = x_t and the meta channels the patch embed fills are not read
-    loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64), prompt, shift=1.0)
+    loss, per_sample, t = flow_loss(model, torch.randn(3, 2, 64, 64, device="cuda"), prompt, shift=1.0)
     assert per_sample.shape == t.shape == (3,)
     loss.backward()
     assert model.patch_embed.weight.grad.abs().max() > 0

@@ -16,7 +16,7 @@ CONV, ATTN = BlockType("conv"), BlockType("attn")
 ARMS = {  # name: DiT keywords
     "attn": dict(layout=(ATTN,)),
     "conv2": dict(layout=(CONV, ATTN)),
-    "conv4": dict(layout=(CONV, CONV, CONV, ATTN)),
+    "conv4": dict(layout=(CONV, CONV, ATTN, CONV)),
 }
 WARMUP, STEPS = 3, 8
 
