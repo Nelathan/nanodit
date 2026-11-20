@@ -3,9 +3,10 @@
 State on 2026-11-20: the trunk is architecture a3. Its conv blocks are LFM2's gated short conv with the norm on the
 read (archive 2026-11-20-conv-block-lfm-norm-read), and its adaLN takes t alone, the caption entering only by cross
 attention (archive 2026-11-20-adaln-takes-t-only). Its last one-pass reference is the a2 run `a1-lfmnormread-1ep`
-(score 1.4199; log 2026-11-20-lfm-norm-read-1ep). Next, all on joint attention with the sink (`arm/joint-attn`):
-a base rerun without the pooled embedding and with the null key at zero; a caption refiner of two unmodulated blocks
-over the token states (PLAN J6); the adaLN without its shift (J4); then the merge of joint attention (J2). `PLAN.md` carries the questions, `FACTS.md` the measurements, `docs/log/` the run
+(score 1.4199; log 2026-11-20-lfm-norm-read-1ep). The arms stack on branches: joint attention with the sink
+(`arm/joint-attn`, J2), two caption refiner blocks over it (`arm/caption-refiner`, J6, the base of every further arm),
+the adaLN without its shift over that (`arm/no-shift`, J4); all three read, none merged. Next: tanh on the adaLN gates
+(J7, optional), then the merge of joint attention. `PLAN.md` carries the questions, `FACTS.md` the measurements, `docs/log/` the run
 notes, `AGENTS.md` the rules.
 
 ## Where it stands
@@ -19,19 +20,25 @@ on the attention, cross-attention and MLP branches; adaLN-single from t alone; c
 and slice read-out; every Usui matrix framed on its input side and inside the ball of its init norm, usui lr 2e-3.
 Width 768 × depth 24 at 128 px (237.7M parameters), batch 256 as 4 × 64.
 
-Runs, under `/mnt/mars/ai/tiny-dit/runs/`. One checkpoint is kept: `a2-jointsink-nopool-6k` at 6000, migrated to
-a3's names (`null_embedding` dropped from `model.safetensors`, `pooled_ada` from its `config.toml`, the optimizer
-state deleted), for `arm/joint-attn` rebased onto a3; its load there is not yet checked. Every other run keeps its logs and config
-only; the checkpoints of the a1 and a2 runs were deleted on 2026-11-20 as no longer loading into the model.
+Runs, under `/mnt/mars/ai/tiny-dit/runs/`. Checkpoints kept at 6000: `a3-jointsink-6k`, `a3-jointsink-refiner-6k`,
+`a3-refiner-noshift-6k`, and `a2-jointsink-nopool-6k`, migrated to a3's names (`null_embedding` dropped from
+`model.safetensors`, `pooled_ada` from its `config.toml`, the optimizer state deleted), which loads on `arm/joint-attn`
+and is superseded by `a3-jointsink-6k`. Every other run keeps its logs and config only; the checkpoints of the a1 and
+a2 runs were deleted on 2026-11-20 as no longer loading into the model.
 - `a1-lfmnormread-1ep` (`arm/lfm-forms` `5ad4c3e`): the a2 reference, 32,173 steps, 4 h 32 min at 198 W, 1.2536
   held-out at the end. `configs/a3-ref-1ep.toml` is its config on the trunk, not yet run.
 - `a1-ref-1ep` and its cooldown `a1-ref-1ep-anneal3k` (score 1.4106, the README's grid): architecture a1.
-- `a2-joint-6k`, `a2-jointsink-6k`, `a2-jointsink-nopool-6k`, `a2-jointsink-captionread-6k`: the joint-attention
-  arms (`arm/joint-attn`, `arm/caption-read`), 6000 steps; their log notes are not written yet.
+- `a2-joint-6k`, `a2-jointsink-6k`, `a2-jointsink-nopool-6k`, `a2-jointsink-captionread-6k`, `a3-jointsink-6k`,
+  `a3-jointsink-refiner-6k`: the joint-attention and refiner arms, 6000 steps (log
+  2026-11-20-joint-attention-and-caption-refiner).
+- `a3-refiner-noshift-6k`: the adaLN without its shift, 6000 steps (log 2026-11-20-adaln-without-shift); its
+  caption-use probe is not run, the probe reading the six-row layout.
 
 The power limit is 198 W (default 220 W, max 275 W); all arms since 2026-11-18 ran at 198 W.
 
 ## Waiting on a decision
+
+- **The arm stack**: whether the refiner and the shift-free adaLN join joint attention's merge or stay arms.
 
 - **256 px**: the set needs `shuffle.py`'s latent cast to `large_binary` (2 GB per chunk at `binary`), then the
   build; throughput at 256 px is unmeasured.
@@ -51,8 +58,8 @@ The power limit is 198 W (default 220 W, max 275 W); all arms since 2026-11-18 r
 
 ## Branches
 
-Not merged, each the record of an arm: `arm/joint-attn` (open, J2), `arm/caption-refiner` (open, J6), `arm/joint-probe` (the probes on
-the refiner arm), `arm/joint-probe-a2` (their form for a2), `arm/caption-read`,
+Not merged, each the record of an arm: `arm/joint-attn` (open, J2), `arm/caption-refiner` (open, J6), `arm/no-shift` (open, J4),
+`arm/joint-probe` (the probes on the refiner arm), `arm/joint-probe-a2` (their form for a2), `arm/caption-read`,
 `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`, `arm/gate-outside-norm`, `arm/gdn2-lite`,
 `arm/gdn2-meta`, `arm/gated-conv`, `arm/conv-designs`, `arm/xside`, `gdn-conv`, `g2-patch16` (closed), `pinned-copy` (PLAN H1, never measured on the
 trunk), `arm/{base,finalnorm,finalr64,idfinal,noconv,slice,solver,solvermlp}` (early arms).

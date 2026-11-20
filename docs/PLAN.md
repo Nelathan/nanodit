@@ -389,7 +389,8 @@ facto sink. State: wanted, with J2 or without.
 ### J4. The adaLN without its shift
 
 Scale and gate only, as Lumina 2 and Z-Image do (diffusers code) and Qwen-Image-2.0 (bias-free modulation). State:
-next after the caption refiner, one arm.
+read (log 2026-11-20-adaln-without-shift), on `arm/no-shift` over the refiner: score loss 0.0015 lower (better),
+held-out loss 0.0009 higher (worse), level throughput, 1.22M parameters fewer; one seed, both within twice its spread.
 
 ### J5. Several encoder layers instead of the last
 
@@ -404,7 +405,13 @@ have this `context_refiner` (diffusers code); MOSS-Image and Krea 2 have text-on
 LLMs, several of whose layers are merged, which a refiner may be needed to stabilise. *Hypothesis* under test: an
 embedding model's final states, EmbeddingGemma 2's, need none. Settle: one arm against `a3-jointsink-6k`, read on loss
 and on the caption-use probe. State: read (log 2026-11-20-joint-attention-and-caption-refiner): held-out 0.0022
-ahead, score level, the caption used half as much again, 6.2 % slower; one seed.
+ahead, score level, the caption used half as much again, 6.2 % slower; one seed. Open within it: whether one block
+is enough; a one-block arm against two likely differs by less than one seed resolves.
+
+### J7. tanh on the adaLN gates
+
+Lumina 2 and Z-Image bound each gate with a tanh (diffusers code; `topics/conditioning.md`); here the gates are
+linear. Settle: one arm over the shift-free adaLN, read on loss. State: optional, not run.
 
 ---
 

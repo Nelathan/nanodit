@@ -100,6 +100,16 @@ conditioning. Architecture a1, the basic conv: 204.6M total and 191.3M image at 
 | d1024 × 28 | 490.8M | 466.4M | 37 |
 | d1024 × 32 | 559.8M | 533.1M | 32 |
 
+## Conditioning arms at 6000 steps (2026-11-20)
+
+d768x24, 128 px, seed 41; seed spread 0.0009. Score (Lunara) / held-out (FLUX.2-dev) at 6000.
+
+| Run | Form | Score | Held-out | img/s | Source |
+|---|---|---|---|---|---|
+| `a3-jointsink-6k` | joint attention with the sink, adaLN on t | 1.4647 | 1.3071 | 556 | log 2026-11-20-joint-attention-and-caption-refiner |
+| `a3-jointsink-refiner-6k` | the same, two caption refiner blocks | 1.4653 | 1.3049 | 521 | log 2026-11-20-joint-attention-and-caption-refiner |
+| `a3-refiner-noshift-6k` | the same, the adaLN without its shift | 1.4638 | 1.3057 | 523 | log 2026-11-20-adaln-without-shift |
+
 ## Numbers kept with their topic
 
 - `topics/priming.md`, Reads: single-level denoising, masked priming, per-token t, REPA and its target, the vision tower's input size.
