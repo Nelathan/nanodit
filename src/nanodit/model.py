@@ -140,7 +140,7 @@ class Block(nn.Module):
                 self.cross_norm = nn.RMSNorm(width)
                 self.cross_gate = nn.Parameter(torch.zeros(width))
             if self.sink:
-                self.null_key = nn.Parameter(torch.randn(self.kv_heads, HEAD_DIM))  # unit RMS, as the normed keys
+                self.null_key = nn.Parameter(torch.zeros(self.kv_heads, HEAD_DIM))  # b = 0 at init: a head's openness starts as σ(lse); draws no RNG, so the init matches the joint arm's
         self.mlp_norm = nn.RMSNorm(width)
         self.w_gate = nn.Linear(width, hidden, bias=False)
         self.w_up = nn.Linear(width, hidden, bias=False)
