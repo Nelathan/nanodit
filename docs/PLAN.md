@@ -403,7 +403,8 @@ before any attention block reads them; no t and no image tokens, so they run onc
 have this `context_refiner` (diffusers code); MOSS-Image and Krea 2 have text-only layers. Their encoders are decoder
 LLMs, several of whose layers are merged, which a refiner may be needed to stabilise. *Hypothesis* under test: an
 embedding model's final states, EmbeddingGemma 2's, need none. Settle: one arm against `a3-jointsink-6k`, read on loss
-and on the caption-use probe. State: arm `arm/caption-refiner`.
+and on the caption-use probe. State: read (log 2026-11-20-joint-attention-and-caption-refiner): held-out 0.0022
+ahead, score level, the caption used half as much again, 6.2 % slower; one seed.
 
 ---
 
