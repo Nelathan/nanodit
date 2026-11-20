@@ -5,12 +5,18 @@ Operating contract for agents working in the nanodit repo.
 ## What this repo is
 
 A from-scratch text-to-image DiT on one consumer GPU. `docs/SPEC.md` is the design, `docs/HANDOVER.md` says where
-things stand, `README.md` has the layout and how to run it.
+things stand, `docs/FACTS.md` what has to be kept in mind, `README.md` has the layout and how to run it. A session
+starts by reading HANDOVER and FACTS.
 
 ## Who decides what
 
 The maintainer decides the design: anything SPEC states, which questions are open or closed, what gets merged into
 the design. Agents write the code, run the experiments, keep the record and commit.
+
+Agents also take part in the design, as peers. Read the results for what they say about the model, form a view of
+what would improve it, and bring it: a candidate with its reason and the run that would settle it, a ranking of what
+to try next, a disagreement with the evidence behind it. Propose the next arm before being asked for it. The
+maintainer decides; the proposals are part of the work.
 
 - Implement what SPEC says. A deviation, however small, is a design change: stop and bring it with the facts that
   decide it. Do not improve the design silently, and do not write an experiment's winner into SPEC yourself.
@@ -18,6 +24,8 @@ the design. Agents write the code, run the experiments, keep the record and comm
 - Verify the risky assumption before building on it, with a small script, and report the numbers.
 - Never discard a working state without isolating the cause of a problem.
 - Measurement beats the docs. When a finding contradicts something written, correct it where the wrong claim lives.
+- The rules here serve the work. Where one does not fit a case, do what it is for and say so. A line elsewhere that
+  breaks a rule is a defect to fix, not a precedent for breaking more.
 
 ## Documentation
 
@@ -28,15 +36,15 @@ Each fact has one home. Before writing, find where it belongs; if it is already 
 | `README.md` | what the project is, layout, how to run | for a reader who has never seen the repo |
 | `docs/SPEC.md` | the settled design, present tense | no history, no reasons, no numbers from runs |
 | `docs/PLAN.md` | open questions, grouped | a question, how it would be settled, the state in a few lines; nothing closed, no diary |
-| `docs/FACTS.md` | measured numbers that the design or an open question rests on | each with source and date; replaced when superseded, never appended to |
+| `docs/FACTS.md` | principles and gotchas: what has to be in mind before designing, running or reading anything | statements that hold until the code or data changes, each pointing to its evidence; no measurements, no history |
 | `docs/log/` | one note per run or read, `YYYY-MM-DD-title.md` | full tables; written once |
 | `docs/topics/` | one doc per side quest: its question, design, reads and numbers | PLAN keeps the heading, one line of state and the link |
 | `docs/archive/` | closed questions, one note per closure, `YYYY-MM-DD-title.md` | read for the reasons; never edited |
-| `docs/HANDOVER.md` | where things stand, what waits on a decision, traps | rewritten each time, never appended to |
+| `docs/HANDOVER.md` | for the next agent session, starting cold: where things stand, the runs, what waits, what is next | rewritten each time, never appended to; complete enough to resume without the last session's context |
 | `docs/REFERENCES.md`, `docs/references/` | sources and what each establishes; verbatim source material | |
 
-How a question moves: found, it goes into PLAN. Measured, the numbers go to a log note, and the one line that matters
-to FACTS. Grown past a screen, it becomes a topic. Closed by the maintainer, it leaves PLAN in the same session, its
+How a question moves: found, it goes into PLAN. Measured, the numbers go to a log note, and PLAN's state cites it; a
+principle or a gotcha the measurement teaches goes to FACTS, without the number. Grown past a screen, it becomes a topic. Closed by the maintainer, it leaves PLAN in the same session, its
 conclusion and reason go into a new archive note, and SPEC gets the result and only the result.
 
 How to write them:
@@ -65,11 +73,14 @@ How to write them:
 - Boring and clear over clever; explicit domain concepts over generic plumbing. Comments for non-obvious maths,
   tensor-shape invariants and performance traps, never to narrate an operation.
 - EmbeddingGemma 2 runs in bf16 or fp32, never fp16.
-- Tests test behaviour. Change a test when the design changes, not to get back to green.
+- Tests test behaviour. Change a test when the design changes, not to get back to green. Test what could break
+  unnoticed, not every line: a test earns its place as code does.
 
 ## Experiments
 
 - `main` is the trunk: what SPEC describes, and where every run that counts starts from.
+- No confirmation runs. An arm level within the seed spread is decided on what it shows (cost, simplicity, a prior)
+  or waits for a run that answers more than it; a second seed of the same comparison is not spent to firm it up.
 - An arm that changes code lives on a branch `arm/<name>`, committed before it runs. Never run from uncommitted
   code: the commit is the run's only description. An arm that is only a config runs from `main`.
 - Work in the one checkout. No extra worktrees left behind; if one is needed to run an arm while the trunk moves,
@@ -111,6 +122,9 @@ in the background, never in the foreground.
 ```bash
 uv run python -m pytest tests/
 ```
+
+Tests marked `cuda` take gradients through flex_attention and need the GPU; without one they are skipped, and the
+report says so.
 
 Work is not done because imports resolve or a smoke run descends. If validation could not run, say exactly what is
 unverified. A report says what was verified, what was assumed, and what is still open.

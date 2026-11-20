@@ -7,7 +7,7 @@ UsuiTrack's moment is `M = beta M + (1 - beta) g` and the write is `-lr * M` (be
 the characteristic polynomial is `z^2 - (1 + beta - eta lam (1 - beta)) z + beta`; its roots reach -1 at
 `eta lam = 2 (1 + beta) / (1 - beta)`. Prints, per beta and per `eta lam` as a fraction of that, the root radius and the
 stationary `cos(g_t, M_{t-1})`, the quantity of the `grad_moment_cosine` diagnostic. Then fits the fraction at which
-beta 0.9 reads the real run's -0.41 (FACTS, `128_fixed_2e-3_9k`) and predicts beta 0.99 at the same sharpness and lr.
+beta 0.9 reads the real run's -0.41 (log 2026-11-20-measurements-from-facts, `128_fixed_2e-3_9k`) and predicts beta 0.99 at the same sharpness and lr.
 """
 import numpy as np
 

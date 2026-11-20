@@ -125,7 +125,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert abs(log[0]["loss"] - sum(step_losses[:2]) / 2) < 1e-6 and abs(log[1]["loss"] - step_losses[2]) < 1e-6
     assert sum(v is not None for v in log[0]["loss_by_t"]) <= 8  # 4 samples per step, two steps
     assert all(len(r["loss_by_t"]) == 10 and r["fallback_grad_norm"] > 0 and r["imgs_per_s"] > 0 for r in log)
-    # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (FACTS, GPU smoke runs);
+    # under Molegrad the raw gradient norm is a probed estimate, so capture can pass 1 (log 2026-11-20-measurements-from-facts, GPU smoke runs);
     # random frames: a matrix behind a still-closed zero gate reads capture 0, which pulls the mean down in a 3-step run
     assert all(0 < r["usui"]["grad_capture_probe"] < 1.5 for r in log)
     assert (run / "config.toml").exists() and (run / "eval_prompts.txt").read_text() == "a red apple\na blue car\na cat\n"

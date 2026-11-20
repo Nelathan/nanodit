@@ -1,7 +1,7 @@
 # Open design questions
 
 What is unsure, how each would be settled, and the current evidence. `SPEC.md`
-says what the design is; `FACTS.md` holds measured numbers; `archive/` holds
+says what the design is; `FACTS.md` holds principles and gotchas, `log/` the measurements; `archive/` holds
 everything closed. See `AGENTS.md` for how this file is worked.
 
 Questions are grouped so a session can take **one group** and leave the rest
@@ -23,7 +23,7 @@ if it holds.
 
 ### A4. The polar step over the writers' two geometries
 
-The writers (`out`, `cross_out`, `w_down`, `conv.out`) stack rows that write the 128 image channels on rows that
+The writers (`out`, `w_down`, `conv.out`) stack rows that write the 128 image channels on rows that
 write the meta channels; the image rows read out as the prediction, the meta rows as workspace. The polar step
 orthogonalises the stacked matrix as one, as Muon on stacked heads does across heads that each have their own
 geometry: it trains, the alignment is wrong. *Hypothesis*: a polar step per row block (image, meta) fits each role.
@@ -39,18 +39,18 @@ spectrum on a checkpoint; then a usuitrack branch. State: proposed, no read.
 Training captions are paragraph-length, inference prompts are short. Settle: judge
 it on the eval grid with short prompts. If they are ignored, add a second
 embedding per image from the first sentence and sample 50/50 (another ~3 GB).
-Evidence: FACTS "EmbeddingGemma 2" (cosines of short prompts against captions); no generation tested.
+Evidence: log 2026-11-20-measurements-from-facts, "EmbeddingGemma 2" (cosines of short prompts against captions); no generation tested.
 
 ### B4. Flip augmentation, if ever needed
 
 Parked: no augmentation now. Primal's decoder is flip- and rot90-equivariant, its encoder
-is not (FACTS, Primal 2x2), so a flipped latent decodes correctly but is not on the
+is not (log 2026-11-20-measurements-from-facts, Primal 2x2), so a flipped latent decodes correctly but is not on the
 encoder's distribution. Settle, if more data diversity is needed: re-encode flipped
-images, or test whether training on flipped latents hurts. Evidence: FACTS only.
+images, or test whether training on flipped latents hurts. Evidence: log 2026-11-20-measurements-from-facts only.
 
 ### B5. Which downsampler for any re-encode and for 256 px?
 
-The 128 px latents were encoded from a torch bicubic antialiased resize of the 512 crops. Lanczos keeps more of the top two frequency bands (FACTS, Downsampler). Decided 2026-11-04: keep the current latents; Lanczos is the better resizer if the data are ever re-encoded or the 256 px stage is made, and a Lanczos arm comes later. Open:
+The 128 px latents were encoded from a torch bicubic antialiased resize of the 512 crops. Lanczos keeps more of the top two frequency bands (log 2026-11-20-measurements-from-facts, Downsampler). Decided 2026-11-04: keep the current latents; Lanczos is the better resizer if the data are ever re-encoded or the 256 px stage is made, and a Lanczos arm comes later. Open:
 - Whether Lanczos latents train or sample better than bicubic ones at equal steps, at 128 px (a re-encode of a shard subset and one paired arm would say).
 - Whether the 256 px stage should resize from the 512 crops with Lanczos in the same precompute that makes its latents.
 
@@ -62,7 +62,7 @@ Its own topic doc: `topics/datasets-and-encode.md` (the sets, the fused encode, 
 
 ### B7. Defective captions in `set_128`
 
-About 2,900 of 8.24M rows (FACTS, Captions of `set_128`; `log/2026-11-17-caption-outliers-and-oom.md`): escaped
+About 2,900 of 8.24M rows (log 2026-11-20-measurements-from-facts, Captions of `set_128`; `log/2026-11-17-caption-outliers-and-oom.md`): escaped
 UTF-8 bytes (410, jackyhate), captioner loops and repeats (195 matched, more with longer units), chat-template leaks
 (3), and captions that switch into Chinese mid-sentence (part of 2,297 with CJK; quoted text to render is the other
 part and is wanted). The length tail above about 256 tokens is almost all defects. *Decided* (2026-11-17): every
@@ -81,13 +81,13 @@ At 128 px every reference since 2026-11-13 runs batch 256 (the configs, the 2026
 16k tokens per step. The archive's batch 128 (2026-11-02) no longer describes what runs, and no closure records the
 return to 256. The step budget follows from the data, each image seen once (archive 2026-11-01, final frame and smoke settings). Open for 256 px: the batch, and whether tokens are the right noise
 unit for diffusion (t sampling adds its own gradient noise). A smaller batch may want a lower lr, and a lower rank
-fraction if the frame's live share falls (it was read as `tangent_live_fraction`, which the current pin no longer logs); it did not fall at batch 64 (FACTS, 1000-step ablations). 256 px
+fraction if the frame's live share falls (it was read as `tangent_live_fraction`, which the current pin no longer logs); it did not fall at batch 64 (log 2026-11-20-measurements-from-facts, 1000-step ablations). 256 px
 throughput is unmeasured. Settle: when the 256 px stage is planned.
 
 At 128 px the batch is *Decided* (2026-11-18): 256 (archive 2026-11-18-batch-256). Open here: the batch at 256 px.
 
 Batch 512 at 128 px (`references/handover-2026-11-12-residual-gating.md`, E4, recomputed): at d768x24 only about 59 ms of
-the 430 ms step is fixed per step, the Usui and fallback steps (FACTS, Step time at d768x24). Doubling the batch
+the 430 ms step is fixed per step, the Usui and fallback steps (log 2026-11-20-measurements-from-facts, Step time at d768x24). Doubling the batch
 projects to about 630–640 img/s against 596, +6–7 % (*Hypothesis*, arithmetic on that table, assuming forward/backward
 and data scale linearly with the batch and the Usui step is per optimizer step, not per micro-batch; the latter is to
 verify). The handover's +25 % rested on
@@ -98,7 +98,7 @@ sees accumulated micro-batches (one gradient per optimizer step under Molegrad, 
 continuation wants a short warmup so the moments re-form on the new statistics.
 
 When to add 256 px is open again (2026-11-05). On 2026-11-02 it was too early, with still no hint of a
-cat; `128_d1024x16_swpin_5ep` now follows prompts at class level (FACTS). It needs the images downloaded again and a
+cat; `128_d1024x16_swpin_5ep` now follows prompts at class level (log 2026-11-20-measurements-from-facts). It needs the images downloaded again and a
 precompute (B5: Lanczos from the 512 crops), and it interacts with G2: a patch over 4× the latent area keeps 256 px at
 the current 64 tokens. The same data may reach a limit where it stops generalizing; 128 px does not look saturated yet
 (2026-11-05). The second image dataset (B6), when it comes: Fine-T2I is the candidate found (REFERENCES,
@@ -140,11 +140,12 @@ weak; FD-DINOv2 is the alternative), and against which reference set.
 
 ### D7. A read of prompt following
 
-Loss does not measure prompt following: the caption-versus-null gap stayed near 0.002 at every width (FACTS, G5).
-Every token-conditioning question (J2, J3, L2) and G5 waits on a read that does. Candidates:
+Loss does not measure prompt following: the caption-versus-null gap stayed near 0.002 at every width (log 2026-11-20-measurements-from-facts, G5).
+Every token-conditioning question (J5, L2) and G5 waits on a read that does; the caption-use probe
+(`scripts/probe_caption_use.py`, loss with the null prompt against the caption, and the caption's softmax mass per block) is a partial one. Candidates:
 - **Role-swap binding prompts**, scored per checkpoint: "a bear building a cabin" against "a cabin shaped like a
   bear", "a red cube on a blue sphere" and its reverse (E5b). The eval grid's bear prompt is the case that motivated
-  cross attention.
+  token conditioning.
 - **Caption alignment:** EmbeddingGemma 2's image embedding of the sample against the pooled caption, by cosine
   (`topics/priming.md`, ideas ledger). The model maps images and text into one space.
 
@@ -172,10 +173,10 @@ rotate under 0.15 rad across the whole grid, so about half the rotated dims carr
 almost no position. A base near 100, or frequencies log-spaced from 1 to 1/16,
 would use them.
 
-### F2. adaLN shift/scale init scale
+### F2. adaLN scale init scale
 
 SPEC says "small random". Std 0.02 on the shared 512→4096 projection makes the
-blocks' and the final layer's shift/scale far from zero at init (FACTS, init), so
+blocks' scale rows far from zero at init (log 2026-11-20-measurements-from-facts, init), so
 `1 + scale` starts far from 1. A fan-in-scaled or 10× smaller init would start near
 identity.
 
@@ -184,14 +185,8 @@ identity.
 The list of 2026-11-06, in `topics/block-design.md` with the ledger: meta-only patch embed at one primal block per token, parallel
 mixers with one meta-only output projection, a sparse layout of conv layers with an occasional cross-and-self layer, a PaLM-style parallel
 MLP, RoPE against partial RoPE against NoPE, MHA against GQA for self-attention (MHA is not cheap in runtime and a 1-megapixel image
-costs far more), GQA and NoPE for the cross attention. Base: conv in 3/4 of the blocks.
-
-Open: where the attention block sits in the period. The trunk puts it fourth of four, as Qwen does; an earlier ablation
-on another model found the third position best of the 3/4 layouts. Settle: one config-only arm per position (`layout`,
-SPEC §3). First and third of four are level with fourth at 6000 steps, within the seed noise (logs 2026-11-18-attnfirst,
-2026-11-18-attnthird). *Measured* (2026-11-19): attention in the middle of a period of three (8 attention blocks of
-24) is 0.0044 ahead at 6000 at 0.96× the step, the only arm ahead at the same wall-clock (−0.0029; log
-2026-11-19-conv-forms-and-attn-middle-of-three).
+costs far more). *Decided* (2026-11-20): conv in 3/4 of the blocks, attention third of four (archive
+2026-11-20-attention-third-of-four).
 
 ### F5. What ports from the modded-nanogpt speedrun?
 
@@ -224,7 +219,7 @@ channels should be an obvious success. The original idea was 128/512 and the str
 512/1024: the current setup works well but may be overprovisioned, and the 2-channel VAE was picked to have more real
 estate. Other models: DiT, PixArt, SD3
 and Flux take 16 px per token (f8 VAE, patch 2), SANA 32 px (f32 DC-AE, patch 1); the 512/1024 arm takes 32 px.
-Measured: `128_d1024x16_p16meta_3k` (branch `g2-patch16`, meta-only patch embed), FACTS (Architecture arms).
+Measured: `128_d1024x16_p16meta_3k` (branch `g2-patch16`, meta-only patch embed), log 2026-11-20-measurements-from-facts (Architecture arms).
 
 Reading, 2026-11-06: that arm packed four primal blocks into each token ("4 blocks per latent"), which was the bad part, and it combined the
 token size with the meta-only write. The token stays one primal block (8 px, 128 dims; patch 12 does not divide the 64×64 latent). The
@@ -233,7 +228,7 @@ untested arm is the meta-only write alone at 8 px (`topics/block-design.md`).
 ### G3. The common mode in the residual stream
 
 By mid-depth most of each image's stream energy is one vector shared by its tokens, written by attention in blocks
-0–1; the token-specific part keeps its rank (FACTS, Token signal). Unsure whether it costs anything: each branch's
+0–1; the token-specific part keeps its rank (log 2026-11-20-measurements-from-facts, Token signal). Unsure whether it costs anything: each branch's
 RMSNorm then sees the token-specific part at about a quarter of unit scale. Candidates that fit the architecture:
 register tokens, which give global state its own slots; nothing else proposed yet. Settle: a register arm against the
 base, read on loss, the eval grid and the same diagnostic. Background (Li's notes ch. 5–6, the shaped Transformer,
@@ -249,7 +244,7 @@ arm at depth 24 against it.
 ### G5. Does 128 px saturate before 256?
 
 Open: whether 64 tokens at 128 px limit the model, and when 128 px stops paying before the move to 256 px. Loss does
-not measure prompt following (the caption-versus-null gap stayed near 0.002 at every width, FACTS); samples do.
+not measure prompt following (the caption-versus-null gap stayed near 0.002 at every width, log 2026-11-20-measurements-from-facts); samples do.
 Observation, not recorded in a log: objects, not only the mood, appear in samples after about 10M images (on an earlier
 model).
 
@@ -262,7 +257,7 @@ Open:
 - Whether a learned scalar gain per bounded matrix (direction bounded, gain on the fallback) helps: some scale is free in
   the gates (`out` and the v rows of `qkv`, the `w_up`·`w_down` product), some is not (`w_gate` sets the SiLU operating
   point; `ada` and `time_mlp` the conditioning scale; `patch_embed` the input scale).
-- A bound per output row instead of per matrix. The rows of `out`, `cross_out` and `w_down` that write the 128 image
+- A bound per output row instead of per matrix. The rows of `out` and `w_down` that write the 128 image
   channels have another role than those writing meta, and share one bound with them now (the thread in
   `references/gemini-thread-adaln-and-architecture.md`).
 - Bounds per role, and a zero-initialized matrix: Usui's bounds are multiples of the init norm, so a matrix that
@@ -284,10 +279,9 @@ the norm on its read, writing all channels (SPEC §3). Open: the placement and r
 t 0.66 to 0.74 against the basic conv; not yet read on samples.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
-- **A conv as the last block.** Attention last leaves the patch borders to RoPE, a poor measure of the immediate
-  neighbours; depth 25 to 27 on the period of four, or a layout ending in a conv, puts a conv last.
-- **A 5×5 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
-  differently from two stacked 3×3s (one filter, no nonlinearity or gate between).
+- **A 5×5 or 7×7 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
+  differently from two stacked 3×3s (one filter, no nonlinearity or gate between). Settle: 3×3, 5×5 and 7×7 arms at
+  256 px, read on loss and step time; needs the 256 px set (HANDOVER).
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 
@@ -297,7 +291,7 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 
 ### H1. How much of the step's time can go?
 
-At d768x24 on usuitrack `92b23bc`, a 429.5 ms step breaks down as follows (FACTS, Step time at d768x24):
+At d768x24 on usuitrack `92b23bc`, a 429.5 ms step breaks down as follows (log 2026-11-20-measurements-from-facts, Step time at d768x24):
 - forward and backward: 363.6 ms;
 - the Usui step: 57.6 ms for 131 matrices;
 - the GPU is busy about 397 ms, so launch overhead can win at most about 33 ms.
@@ -316,7 +310,7 @@ Open:
   optimizer: compile, attention, the depthwise conv, FP8 (`topics/speedrun-ports.md`).
 
 The 2026-11-02 profile below is of d768x12 on usuitrack `zero-init`: about 140 ms of each step was fixed and
-launch-bound, and the Usui step made about 14,700 of 19,500 launches and synced 9 times, once per `eigh` (FACTS, Sweep
+launch-bound, and the Usui step made about 14,700 of 19,500 launches and synced 9 times, once per `eigh` (log 2026-11-20-measurements-from-facts, Sweep
 throughput and host syncs). The blocks are compiled once every Molegrad frame has fit; that cut forward/backward from
 ~5,400 to ~3,400 launches, a modest share of the step. Simple blockwise compile worked well in the past.
 
@@ -329,14 +323,15 @@ in the past only `eigh` gave a stable aim, while with a diagonal aim simpler sol
 at init with the standard `eta`, no schedule, no refit (calling fit is dead; a geometric `eta` decay helped very short
 runs before, but was not worth keeping in the code, since more rank does the same); and the `eigh` calls are stacked.
 No random-frame comparison run: by step 1k the fitted frame has fully caught up, with zero difference. Both are usuitrack changes, on usuitrack `lab`. Also open: the pinned, non-blocking copy in `Stream` (4 syncs per step). Block compile measured
-on a free GPU: FACTS, Sweep throughput.
+on a free GPU: log 2026-11-20-measurements-from-facts, Sweep throughput.
 
 ---
 
-### H2. The cross attention's padding
+### H2. The caption's padding
 
-`pad_sequences` pads a micro-batch to its longest caption, and the masked SDPA call runs the cutlass memory-efficient
-kernel with the mask expanded to a full bias in the backward. One 2000-token caption costs about 8× the time and 6×
+`pad_sequences` pads a micro-batch to its longest caption. The measurements below are of the removed SDPA cross
+attention, where the masked call ran the cutlass memory-efficient kernel with the mask expanded to a full bias in the
+backward; a4's joint flex_attention masks the padding in its score_mod, and its cost on an outlier is not measured. One 2000-token caption costs about 8× the time and 6×
 the memory of a cross-attention call, and with micro-batch 128 it ran the 1ep run out of memory (log
 2026-11-17-caption-outliers-and-oom). Packed captions through `torch.nn.attention.varlen.varlen_attn` (flash, GQA
 native, no mask) remove that cost and gain nothing on clean captions. *Decided* (2026-11-17): micro-batch 64, the same
@@ -361,7 +356,8 @@ Its own topic doc: `topics/priming.md` (the source, the direction, the arms and 
 ## Group J. The conditioning path
 
 Its own topic doc: `topics/conditioning.md` (the path as built, the questions, other models' conditioning). The adaLN
-takes t alone (archive 2026-11-20-adaln-takes-t-only).
+takes t alone, without a shift; the caption is read by joint attention with a sink, after a two-block refiner
+(archives 2026-11-20-adaln-takes-t-only, -joint-attention, -attention-sink, -caption-refiner, -adaln-without-shift).
 
 ### J1. t at the input only, no adaLN
 
@@ -372,46 +368,19 @@ blocks clean, add coherence and the prompt. Free read first: how much the traine
 over depth, from a checkpoint. State: parked. Krea 2 reports that dropping t conditioning underperformed its adaLN
 baseline and that t as tokens fell behind at 512 and 1024 px (`topics/conditioning.md`).
 
-### J2. Joint attention instead of self then cross
-
-The token states as extra keys and values of self-attention, static, with no queries or MLP of their own; the cross
-sublayer goes, and every head attends to both. Open: the token states' own K/V projection per block, or one global
-Linear 512 → width that translates them once, after which each block's `qkv` serves both. Settle: an arm read on the
-samples and on D7. With joint attention, attention writes the image channels (M4 then does not apply to it). State:
-the preferred direction.
-
-### J3. A null key and value in cross attention
-
-An attention sink: lets a head write nothing for a query, which neither the static `cross_gate` nor, under J2, the
-self-match gives (the self-match still writes its value). Free read first: whether the cross maps already use a de
-facto sink. State: wanted, with J2 or without.
-
-### J4. The adaLN without its shift
-
-Scale and gate only, as Lumina 2 and Z-Image do (diffusers code) and Qwen-Image-2.0 (bias-free modulation). State:
-read (log 2026-11-20-adaln-without-shift), on `arm/no-shift` over the refiner: score loss 0.0015 lower (better),
-held-out loss 0.0009 higher (worse), level throughput, 1.22M parameters fewer; one seed, both within twice its spread.
-
 ### J5. Several encoder layers instead of the last
 
 Krea 2 is said to fuse several layers of its text encoder; the token states here are EmbeddingGemma 2's last hidden
 state. Needs a re-encode. Settle: read Krea 2's report and code first. State: hypothesis.
 
-### J6. A small text refiner
-
-Two unmodulated blocks, self-attention and SwiGLU, over the caption's token states alone, at their native 512 and
-before any attention block reads them; no t and no image tokens, so they run once per sample. Lumina 2 and Z-Image
-have this `context_refiner` (diffusers code); MOSS-Image and Krea 2 have text-only layers. Their encoders are decoder
-LLMs, several of whose layers are merged, which a refiner may be needed to stabilise. *Hypothesis* under test: an
-embedding model's final states, EmbeddingGemma 2's, need none. Settle: one arm against `a3-jointsink-6k`, read on loss
-and on the caption-use probe. State: read (log 2026-11-20-joint-attention-and-caption-refiner): held-out 0.0022
-ahead, score level, the caption used half as much again, 6.2 % slower; one seed. Open within it: whether one block
-is enough; a one-block arm against two likely differs by less than one seed resolves.
-
 ### J7. tanh on the adaLN gates
 
 Lumina 2 and Z-Image bound each gate with a tanh (diffusers code; `topics/conditioning.md`); here the gates are
-linear. Settle: one arm over the shift-free adaLN, read on loss. State: optional, not run.
+linear. Lumina-Next, where it comes from, adds it "to prevent extremely large modulation values from contributing to
+the residual branch" (arXiv 2406.18583 §2.1), with no ablation. Here Usui holds the shared projection inside its
+init-norm ball; only the per-block tables (fallback) are unbounded. *Hypothesis*: the bound matters only where a
+gate grows, which loss may not show. Settle: one arm on a4, read on loss and on the gates' size over training.
+State: not run.
 
 ---
 
@@ -441,7 +410,7 @@ assumed, the sensor, the backward temperature and its tests, the parked ideas).
 
 ### L1. Does attention lock in early here?
 
-A sensor of attention maps on a fixed probe batch at log-spaced steps, self and cross. A partial read is possible from
+A sensor of attention maps on a fixed probe batch at log-spaced steps, over image and caption keys. A partial read is possible from
 the 1ep run's checkpoints at 4000–16000. State: proposed; this comes before L2.
 
 ### L2. Backward temperature on the attention scores
@@ -463,8 +432,8 @@ and SimpleHC, other scratchpads). Related: G3, G10.
 
 ### M1. Per-token write gates onto the slice
 
-Learned per token, initialized at the current masks. Today only the per-image adaLN gate governs the MLP's and the
-cross attention's writes to the image channels. State: parked in its source.
+Learned per token, initialized at the current masks. Today only the per-image adaLN gate governs the MLP's and
+attention's writes to the image channels. State: parked in its source.
 
 ### M2. Long skips
 
@@ -477,7 +446,7 @@ embeddings, recalled). Shares its mechanism with J1's t re-injection. State: pro
 
 ### M4. Mixers write the context, a separate step prints it
 
-Self-attention and cross attention write the meta channels only, so the meta lanes carry the context and only the
+Attention writes the meta channels only, so the meta lanes carry the context and only the
 per-token MLP writes the slice; the conv block writes all channels (archive 2026-11-20-conv-block-lfm-norm-read). A dedicated print step at the end is *Not wanted* (2026-11-17): skips (K1) carry
 x_t, not idle channels. State: proposed, no arm.
 

@@ -2,7 +2,7 @@
 
 Topic doc for PLAN Group J. The adaLN takes t alone (archive 2026-11-20-adaln-takes-t-only). Opened 2026-11-17 from
 `references/gemini-thread-adaln-and-architecture.md` (the conditioning questions) and
-`references/handover-2026-11-12-residual-gating.md` §3.3 (the sink derivation). Measured numbers go to FACTS, closures to
+`references/handover-2026-11-12-residual-gating.md` §3.3 (the sink derivation). Measured numbers go to `log/`, closures to
 `archive/`.
 
 ## As built (SPEC §3, §5; `src/nanodit/model.py` at `12c2028`)
@@ -71,6 +71,8 @@ arm is proposed.
 
 ## J2. Joint attention: the token states as keys of self-attention
 
+*Closed* (archive 2026-11-20-joint-attention); what follows is the question as it was studied.
+
 *Proposal* (from the thread): one attention per attention block instead of self-attention followed by cross
 attention.
 - **Mechanism.** Image queries attend over [image keys, text keys]. Each block projects text K/V from the static
@@ -98,9 +100,11 @@ update the text tokens in every layer; J2 keeps them static, with no text stream
 
 Settle: an arm against the reference, read on the samples and on a binding probe (D7). Caption loss could not judge
 token conditioning at 3000 steps (`topics/block-design.md`, lessons), and at 6000 cross attention on or off was level
-in loss (FACTS).
+in loss (log 2026-11-20-measurements-from-facts).
 
 ## J3. Can a patch abstain from the caption? A null key and value in cross attention
+
+*Closed* (archive 2026-11-20-attention-sink); what follows is the question as it was studied.
 
 Derivation (residual-gating handover §3.3). Softmax with a sink logit b rearranges to
 `o = σ(log Z − b) · softmax(s) V`, where `Z = Σ_j exp(s_j)`. So a sink is a scalar output gate per head and per query,
@@ -126,6 +130,8 @@ loss does. That needs D7 to be visible; at 6000 steps loss alone will likely sit
 
 ## J4. If the adaLN stays: drop its shift
 
+*Closed* (archive 2026-11-20-adaln-without-shift); what follows is the question as it was studied.
+
 Lumina 2 and Z-Image modulate with scale and gate only, with no shift, and a tanh on the gates (diffusers code);
 Qwen-Image-2.0 removes the modulation's bias term (report). Here
 that would drop 2 of the 6 rows (`shift_a`, `shift_m`) and keep 4. The thread's reason, that velocity targets are zero-mean, does not obviously carry
@@ -143,6 +149,8 @@ unless they are mixed at encode time with fixed weights. *Hypothesis*, no arm. S
 (`github.com/krea-ai/krea-2`, `encoder.py`) first.
 
 ## J6. A text refiner before the image reads the tokens
+
+*Closed* (archive 2026-11-20-caption-refiner); what follows is the question as it was studied.
 
 Lumina 2 and Z-Image run two unmodulated `context_refiner` blocks over the text tokens before the joint stack
 (diffusers code); MOSS-Image has two text-only blocks and Krea 2 bidirectional layers over the text (reports). Here the token states are

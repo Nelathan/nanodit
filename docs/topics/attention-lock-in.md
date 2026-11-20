@@ -2,7 +2,7 @@
 
 Topic doc for PLAN Group L (L1–L3). Opened 2026-11-17 from `references/handover-2026-11-12-attention-lock-in.md`, a
 chat session that never saw this repo. The parts it assumed about the model are checked against the code below.
-Measured numbers go to FACTS, closures to `archive/`.
+Measured numbers go to `log/`, closures to `archive/`.
 
 ## Source
 

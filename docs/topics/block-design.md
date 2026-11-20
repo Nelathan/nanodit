@@ -1,7 +1,7 @@
 # Block design: mixers, layout, rope, heads
 
 Topic doc for cross attention (archive 2026-11-12, plan history), PLAN F4 and G10, opened 2026-11-06 from a list of suggestions. It holds every suggestion with its status, the
-experiment ledger and the lessons drawn. Measured numbers go to FACTS, closures to `archive/`.
+experiment ledger and the lessons drawn. Measured numbers go to `log/`, closures to `archive/`.
 
 ## Current design (2026-11-06)
 
@@ -81,7 +81,7 @@ Each comes from that list unless noted. Status: open, queued, running, read.
   conv speed), the balance between 3000 and 10000.
 - Size generalisation is read from the 128 px checkpoints on 256 px; a 3000-step checkpoint does not yet hold proper positional readings,
   which is why conv dominated there. Speed is read by regression: step time at 128, 256, 512 and 1024 px per layout, projected to larger grids
-  (`scripts/bench_speed.py`, FACTS).
+  (`scripts/bench_speed.py`, log 2026-11-20-measurements-from-facts).
 - Branches are kept tidy.
 
 ## Open (2026-11-06)
@@ -109,7 +109,7 @@ attention ablations only mean something where attention is. Cross attention rejo
 | `conv4_pmlp_3k` | PaLM block (8.) | read | 1.4908 | +0.0024 and no speed gain: dropped |
 | `conv4_nope_3k` | no rotary position (10.) | read | 1.4895 | +0.0011 at 128 px, +0.0034 on the unseen 256 px grid |
 | `conv4_rope25_3k` | a quarter of the rotary frequencies, the 4 fastest per axis (10.) | read | 1.4883 | level with full RoPE at both resolutions |
-| `conv4_gqa3_3k` | 3 key/value heads against 12 (10.) | read | 1.4888 | level, 1.2 % faster in training; 2–3 % at every grid size in the benchmark (FACTS), a smaller projection and no cheaper attention |
+| `conv4_gqa3_3k` | 3 key/value heads against 12 (10.) | read | 1.4888 | level, 1.2 % faster in training; 2–3 % at every grid size in the benchmark (log 2026-11-20-measurements-from-facts), a smaller projection and no cheaper attention |
 
 ## Lessons
 
@@ -126,5 +126,5 @@ Arms run in the order metaembed, pmlp, nope, gqa3, rope25, about 15 minutes each
   A reading of why it loses (`references/gemini-thread-adaln-and-architecture.md`, *Hypothesis*): in a parallel block the MLP reads
   the input before attention's retrieval. With attention in only one of four blocks, the sequential MLP is the first per-token
   layer to turn the caption's and the global context into slice writes; in parallel, that waits three conv blocks.
-- Speed by regression (FACTS, step speed by layout): the quadratic term of attention is 1.78 ns per token per token of grid; conv in 3/4 has a quarter of it. Conv is 1.27× faster at 128 px and 1.66× at 1024 px; the fit projects 2.4× at 2048 px. GQA's 2–3 % does not grow with the grid: it saves projection work, not attention work. Earlier note that its saving grows was wrong.
+- Speed by regression (log 2026-11-20-measurements-from-facts, step speed by layout): the quadratic term of attention is 1.78 ns per token per token of grid; conv in 3/4 has a quarter of it. Conv is 1.27× faster at 128 px and 1.66× at 1024 px; the fit projects 2.4× at 2048 px. GQA's 2–3 % does not grow with the grid: it saves projection work, not attention work. Earlier note that its saving grows was wrong.
 - Meta-only embed at one primal block per token is free and slightly ahead at both resolutions; it keeps the first 128 channels as the raw latent. Keep.

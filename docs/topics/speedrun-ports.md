@@ -4,7 +4,7 @@ Topic doc for PLAN F5 and F6. Opened 2026-11-17 from `references/gemini-thread-a
 optimizer section. **The speedrun's record history is not read here.** The list below is the thread's, plus items
 recalled from memory and marked as such, each needing a check against
 https://github.com/KellerJordan/modded-nanogpt (the README's record table, and the PRs behind the recent records).
-Measured numbers go to FACTS, closures to `archive/`.
+Measured numbers go to `log/`, closures to `archive/`.
 
 ## The task (F5)
 

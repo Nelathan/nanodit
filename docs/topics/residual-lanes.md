@@ -3,7 +3,7 @@
 Topic doc for PLAN Group M (M1–M3). Opened 2026-11-17 from `references/handover-2026-11-12-residual-gating.md` §3.1
 and §5 (the two-stream reading, SimpleHC) and `references/gemini-thread-adaln-and-architecture.md` (scratchpads, U-Net
 skips). Related: G3 (the common mode, register tokens), G10 (the conv block), `topics/block-design.md`. Measured
-numbers go to FACTS, closures to `archive/`.
+numbers go to `log/`, closures to `archive/`.
 
 ## The stream as built (SPEC §3, `12c2028`)
 
@@ -76,7 +76,7 @@ mixers → meta, MLP → all channels.
 residual is worked on continuously; keeping x_t reachable late is the job of a skip (K1), not of channels held idle.
 
 What it tests: whether the slice writes of attention and cross attention help (they are global and per token, unlike
-the conv's blur) or only add noise to the prediction. GDN2 writing the image channels added 0.0008 (FACTS), which is
+the conv's blur) or only add noise to the prediction. GDN2 writing the image channels added 0.0008 (log 2026-11-20-measurements-from-facts), which is
 the one measured hint, from a conv block.
 
 Interactions: M1 (per-token gates on the slice writes) is the soft form of the same question; K1 is where a skip

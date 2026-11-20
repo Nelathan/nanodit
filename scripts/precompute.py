@@ -42,7 +42,7 @@ RESOLUTIONS = (128, 256)
 TEXT_DIM = 768
 ROW_GROUP = 1024
 TEXT_BATCH = 32
-DEVICE = torch.device("cuda")  # cuDNN's TF32 convolutions stay on: 2x the rate, 0.25% on a latent (FACTS, GPU precompute)
+DEVICE = torch.device("cuda")  # cuDNN's TF32 convolutions stay on: 2x the rate, 0.25% on a latent (log 2026-11-20-measurements-from-facts, GPU precompute)
 
 
 def samples(tar_path):

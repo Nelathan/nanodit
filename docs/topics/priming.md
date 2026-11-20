@@ -1,7 +1,7 @@
 # Priming on the Primal latent
 
 Topic doc for PLAN I1, opened as the plan had just a reference. It holds
-this line of work's plan, design and reads; measured numbers still go to FACTS, closed decisions to `archive/`. The code
+this line of work's plan, design and reads; measured numbers still go to `log/`, closed decisions to `archive/`. The code
 gets its own branch when it starts.
 
 ## Status (2026-11-12)
@@ -104,9 +104,9 @@ to the reference only once priming has ended; the eval score is never primed.
   a budget of 280 soft tokens (about 2,500 patches, near 800 px), so an 8×8 patch grid at 128 px is far below what the
   tower sees in use. Its smallest budget, 70, takes a square image to 384 px, whose 24×24 patches pool 3×3 onto the
   8×8 tokens (280 gives 768 px and the 16×16 at 256 px); at 384 px it matches decoded images to their captions as well
-  as at 768 (FACTS), so 384 px is the REPA input at 128 px. That probe decoded 256 px latents and scored the final
+  as at 768 (log 2026-11-20-measurements-from-facts), so 384 px is the REPA input at 128 px. That probe decoded 256 px latents and scored the final
   embedding. On 128 px decodes upsampled 3×, the pooled per-token features follow their token's content under a
-  horizontal flip (FACTS, `scripts/probe_repa_target.py` at a9a111a).
+  horizontal flip (log 2026-11-20-measurements-from-facts, `scripts/probe_repa_target.py` at a9a111a).
   As built at `a9a111a` (`align.VisionTarget`, `DiT(repa_block=…)`, Config `repa_block`, `repa_weight`): the clean latent is
   decoded by Primal, upsampled bicubic 3×, cut into the processor's 16 px patches and positions, and passed through
   the frozen tower (bf16), whose own 3×3 pooling hands back one 768-d feature per token in row-major order. The
@@ -120,7 +120,7 @@ to the reference only once priming has ended; the eval score is never primed.
 - Caption alignment: the image embedding of the generated image against the pooled caption, by cosine, as an eval of
   prompt following. EmbeddingGemma 2 maps text, images, video and audio into one 768-d space; that is its core feature
   (model card). Against the real image's cosine to the same caption, it also marks captions that miss their image.
-  Captions without a prefix retrieve their image best of the model's prefixes; the stored ones are encoded without one (FACTS; archive 2026-11-12-no-prefix).
+  Captions without a prefix retrieve their image best of the model's prefixes; the stored ones are encoded without one (log 2026-11-20-measurements-from-facts; archive 2026-11-12-no-prefix).
   Reading: prompt following was poor for want of cross attention, and now waits on a long run on good
   captions.
 - A 64 px first stage needs latents encoded again; noted, not planned: in the samples 128 px learns the mood within

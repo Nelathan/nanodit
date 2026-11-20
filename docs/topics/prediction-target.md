@@ -1,7 +1,7 @@
 # What the network predicts: the skip and the target's geometry
 
 Topic doc for PLAN Group K (K1, K2). Opened 2026-11-17 from `references/handover-2026-11-12-residual-gating.md` §3.2
-(the skip) and `references/gemini-thread-adaln-and-architecture.md` (AnisoFlow). Measured numbers go to FACTS,
+(the skip) and `references/gemini-thread-adaln-and-architecture.md` (AnisoFlow). Measured numbers go to `log/`,
 closures to `archive/`.
 
 ## As built (SPEC §3, §4)

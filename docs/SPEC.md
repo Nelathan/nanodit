@@ -58,7 +58,7 @@ DiT over image tokens; the caption's tokens are keys, never queries or stream po
 | Modulation | adaLN-single (PixArt): one shared projection from the conditioning vector to every block's four scale/gate vectors (mixer, MLP), plus a learned 4×width table per block; per image, not per token. No shift: a branch reads `rms_norm(x) · (1 + scale)` |
 | Conditioning vector | `c = MLP_t(sinusoid(t))` |
 | Output | The first 128 channels of the residual stream after the last block, unpatchified: no final norm, modulation or linear. The patch embed concatenates: the raw 128-d patch fills the first 128 channels, a Linear 128 → width − 128 fills the rest, so the image channels stay pure and the read-out has no bottleneck; the stream carries the working latent and each block adds a correction to it |
-| Size | Parameter counts by width and depth in FACTS |
+| Size | Parameter counts by width and depth: `scripts/count_params.py` |
 
 Not used: linear attention (256 tokens make softmax cheap), MLA (no KV cache), DeepSeek sparse attention (no long context).
 

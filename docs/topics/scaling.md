@@ -3,7 +3,7 @@
 Topic doc for the size and length of the long run (PLAN C1, C2, D8; archive 2026-11-18-long-run-size, 2026-11-18-no-ema-no-merging and
 2026-11-18-heldout-set). Opened 2026-11-18 from W. Chai, "How
 to Scale Text-to-image Models: a Handbook" (REFERENCES, Scaling), the first iso-FLOP study of text-to-image DiTs with
-a recipe close to this one (a matrix optimizer, held-out loss, fixed noise). Measured numbers go to FACTS, closures to
+a recipe close to this one (a matrix optimizer, held-out loss, fixed noise). Measured numbers go to `log/`, closures to
 `archive/`.
 
 ## What the handbook measures
@@ -53,7 +53,7 @@ convention is a shift toward noise with σ 0.8, close to the σ 0.7 here plus a 
 
 ## The budget, in this model's terms
 
-Image parameters N from FACTS (Parameter counts). At TPP 50: d768 × 24 (191.3M) needs 9.6B tokens, d768 × 32
+Image parameters N from `scripts/count_params.py`. At TPP 50: d768 × 24 (191.3M) needs 9.6B tokens, d768 × 32
 (255.1M) 12.8B, d1024 × 20 (284.1M) 14.2B, d1024 × 28 (397.6M) 19.9B.
 
 `set_128` less its excluded rows is 8,236,215 rows: 527M image tokens per epoch at 128 px (64 per image), 2.11B at
@@ -74,7 +74,7 @@ Wall-clock is open: the 128 px rate is in log 2026-11-18-a1-ref-1ep; 256 px thro
 ## Open here
 
 - Scoring at 256 px, on Lunara and on the held-out rows (archive 2026-11-18-heldout-set), once the 256 px set exists.
-- The seed noise of a 6000-step comparison: one pair measured, 0.001 (about 0.07 %; FACTS, Seed noise); the handbook
+- The seed noise of a 6000-step comparison: one pair measured, 0.001 (about 0.07 %; log 2026-11-18-seed42); the handbook
   resolves 0.03 % with four seeds. A second pair would bound the spread.
 - Whether a longer run wants a lower lr (the C^−0.5 exponent), read by a 2× length pair once the long-run length is
   chosen.

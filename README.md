@@ -15,7 +15,7 @@ seed each.
 - **Framework:** pure PyTorch, bf16 parameters, single GPU, no trainer framework
 
 It is a research log as much as a codebase: every design choice is in `docs/SPEC.md`, every number behind it in
-`docs/FACTS.md` and `docs/log/`, every question still open in `docs/PLAN.md`.
+`docs/log/`, every question still open in `docs/PLAN.md`, and what has to be kept in mind in `docs/FACTS.md`.
 
 ## Where it stands
 
@@ -49,7 +49,7 @@ steps (an in-distribution held-out set, 256 px, saturating this size at about 50
 ```
 docs/SPEC.md          the design: data, model, init, optimizer, eval
 docs/PLAN.md          open questions, grouped, and how each would be settled
-docs/FACTS.md         measured numbers with source and date
+docs/FACTS.md         principles and gotchas, no numbers
 docs/log/             the logbook: one note per run or read, with the full tables
 docs/topics/          one doc per side quest (block design, priming, edge of stability, ...)
 docs/archive/         closed decisions and questions, one note per session
