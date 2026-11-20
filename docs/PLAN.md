@@ -287,52 +287,15 @@ Its own topic doc: `topics/weight-spectra.md` (the spectra of the pinned five-ep
 
 ### G10. The depthwise conv, placed differently
 
-The conv before attention made no difference at d768 (FACTS) and was dropped; that may have been a design mistake
-rather than a verdict on the conv (2026-11-05). Candidates: the conv in place of
-attention in some blocks, rather than before it; the conv writing only the meta channels (see the patch-size question); its output stacked into
-the MLP input (SANA's Mix-FFN puts a depthwise conv inside the MLP). Settle: one arm per placement against the current
-model, at a scale and length agreed when it runs.
-
-Decided 2026-11-05: the conv replaces attention, writing to the meta channels only, the cleanest variant (that would be half the
-layers of a 768x12 model); always conv first, attention next. If it succeeds, 2/3 or 3/4 of the blocks are the next thing to try. Of the two forms, (a) the depthwise conv over the meta channels only, (b) over all channels and then `out` into the meta
-channels, form (b) was chosen. Writing image channels may be fine, but it could also write context into the render,
-whereas meta only would put the SwiGLU gate before it; in earlier samples that compared the canon conv with none, the
-image was softer, as if it just copied context into the render. It may take more time. Measured (FACTS, Architecture arms): `128_d1024x16_conv_3k` (branch
-`conv-meta`): `swpin_3k` with blocks 0, 2, ..., 14 a depthwise 3×3 conv over all 1024 channels after the adaLN
-modulation, then `out` (1024 → 896) into the meta channels, its sandwich norm and the attention gate; the MLP as before.
-
-At d768x12 (FACTS, cross attention and conv period, 2026-11-06): conv in 1/2, 2/3 and 3/4 of the blocks all end level with the pooled-only baseline
-at 3000 steps (−0.0003, +0.0004, +0.003) and run 1.20×, 1.28× and 1.32× as fast. 3/4 is preferred: a faster model allows more layers. The conv is
-the basic form. adaLN stays for the conv layers.
-
-*Decided* (2026-11-16): the GDN2-style gated update (`log/2026-11-07-trunk-arms-6k-and-lr-sweep.md`) is replaced by the
-basic form again, a depthwise conv over all channels and `out` into the meta channels: the fastest, and it cannot write
-into the image channels. *Decided* (2026-11-19, archive 2026-11-19-conv-writes-all-channels): reversed; a conv
-block writes all channels, and its form must be gated well enough to do so. Open: which form.
-*Hypothesis* (2026-11-18): the basic conv informs about locality but washes or copies it. In `a1-ref-1ep` the
-detail inside a token is recovered worst, about twice the coarse band's share (log 2026-11-18-residual-writes, in that log's split: over two tokens, one to two, inside one), and edges in the eval grids repeat into
-neighbouring tokens (seen, not measured). The gated conv below is the arm.
-*Measured* (2026-11-19, log 2026-11-19-conv-forms-and-attn-middle-of-three): what buys loss is a projected value and
-per-channel gates; writing all channels gains 0.0013 to 0.0019 at no cost; a form's cost is its projection's width.
-GDN2 writing all channels leads at 6000 (−0.0072 at 0.85× the step), LFM's gated conv writing all channels −0.0047 at
-0.88×; at the same wall-clock both are level with the reference at 6000.
-*Measured* (2026-11-19, log 2026-11-19-conv-forms-gates-and-widths): LFM-all with the norm on its read and no branch
-norm, `out(C ⊙ norm(conv(B ⊙ v)))`, leads: −0.0059 at 6000, ahead of LFM-all at every eval from 2000 (0.0012 at 6000, inside
-the seed draw), at its speed, gaining on all three bands; −0.0014 at the same wall-clock. Slim's sigmoid-gated forms (384 to 768
-channels, with a sending gate or its gate outside the norm) stay at about −0.0022; a sigmoid gate outside the norm
-in place of LFM's C or GDN2's write gate loses about 0.003; LFM without `out` and the conv inside the MLP fall
-behind the reference by 6000. Open: whether a form's lead outweighs its step over a longer run; attention in
-the middle of three adds little to LFM-all at 6000 (−0.0053).
-Not yet run (branch `arm/slim-conv`): heads sharing a value, stacked or summed; LFM-all with one projection per period.
+The conv replaces attention in three of every four blocks (SPEC §3).
+*Decided* (2026-11-20, archive 2026-11-20-conv-block-lfm-norm-read): the conv block is LFM2's gated short conv with
+the norm on its read, writing all channels (SPEC §3). Open: the placement and reach below.
+*Measured* (log 2026-11-20-lfm-norm-read-1ep): at the end of one pass it loses R² on the band over three tokens at
+t 0.66 to 0.74 against the basic conv; not yet read on samples.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
-- **What the GDN2 block's lead was made of.** The GDN2 block added a per-token, data-dependent write gate and a forget
-  term. *Hypothesis*: the gate carries most of its lead.
-  - Arm: the basic conv plus an output gate `σ(W y) ⊙ conv(y)`, writing meta only, against the reference.
-  - If it recovers most of the 0.0014–0.004 at close to the basic conv's speed, the forget term goes.
-  - The same gate writing all channels is the handover's second arm. With the meta-only write decided, it only
-    matters if the meta-only gate falls short (GDN2 writing the image channels added 0.0008, FACTS).
-  - Look at the samples too: no one has looked at the conv arms' samples for smudging.
+- **A conv as the last block.** Attention last leaves the patch borders to RoPE, a poor measure of the immediate
+  neighbours; depth 25 to 27 on the period of four, or a layout ending in a conv, puts a conv last.
 - **A 5×5 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
   differently from two stacked 3×3s (one filter, no nonlinearity or gate between).
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
@@ -510,8 +473,8 @@ embeddings, recalled). Shares its mechanism with J1's t re-injection. State: pro
 
 ### M4. Mixers write the context, a separate step prints it
 
-The conv's meta-only write extended to self-attention and cross attention, so the meta lanes carry the context and only
-the per-token MLP writes the slice. A dedicated print step at the end is *Not wanted* (2026-11-17): skips (K1) carry
+Self-attention and cross attention write the meta channels only, so the meta lanes carry the context and only the
+per-token MLP writes the slice; the conv block writes all channels (archive 2026-11-20-conv-block-lfm-norm-read). A dedicated print step at the end is *Not wanted* (2026-11-17): skips (K1) carry
 x_t, not idle channels. State: proposed, no arm.
 
 ### M5. Separate lanes, the image lane apart

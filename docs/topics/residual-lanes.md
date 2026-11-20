@@ -13,7 +13,7 @@ are **meta**.
 | Writer | Writes | Gate |
 |---|---|---|
 | patch embed | the slice: the raw patch, identity; meta: `Linear(128 → 640)` | none |
-| conv block | meta only | adaLN gate, per image and channel |
+| conv block | all channels (architecture a2; a1 wrote meta only) | adaLN gate per image and channel; C per token and channel, after the read's norm |
 | self-attention | all channels | adaLN gate per image; the sigmoid gate per token on the heads, before `out` |
 | cross attention | all channels | static `cross_gate` per channel |
 | MLP | all channels | adaLN gate per image and channel |
@@ -26,7 +26,8 @@ transition.
   into the prediction directly would be a blur.
 - Per-token translation may touch the prediction. The MLP is per token, so its writes to the slice can be sharp.
 
-The 2026-11-16 decision for the meta-only conv (PLAN G10) rests on the same principle.
+The 2026-11-16 decision for the meta-only conv (PLAN G10) rested on the same principle; it is reversed: a conv gated per
+token by C writes all channels (archive 2026-11-19-conv-writes-all-channels, 2026-11-20-conv-block-lfm-norm-read).
 
 ## M1. Learned per-token write gates onto the slice
 
@@ -67,8 +68,7 @@ the input forward through the stream. Settle: after M2, or with it if both chang
 
 ## M4. The mixers write context only; printing onto the slice is its own step
 
-*Proposal*. Extend the conv's meta-only write to every mixer: self-attention and cross
-attention write the meta channels only, so the meta lanes hold the context and the slice changes only where something
+*Proposal*. Self-attention and cross attention write the meta channels only, so the meta lanes hold the context and the slice changes only where something
 prints the context onto it. **The MLP prints:** it is per token, so it can write sharply. The write map becomes:
 mixers → meta, MLP → all channels.
 

@@ -18,8 +18,8 @@ def test_split_covers_every_parameter_once_and_routes_by_role():
     adam = {names[id(p)] for g in fallback.param_groups for p in g["params"]}
     assert usui | adam == set(names.values()) and not usui & adam
     assert all(model.get_parameter(n).ndim == 2 for n in usui)
-    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.0.conv_norm.weight", "blocks.1.mlp_norm.weight"} <= adam
-    assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "patch_embed.weight"} <= usui
+    assert {"null_embedding", "blocks.0.table", "patch_embed.bias", "blocks.1.q_norm.weight", "blocks.1.attn_norm.weight", "blocks.0.conv.weight", "blocks.1.mlp_norm.weight"} <= adam
+    assert {"ada.1.weight", "blocks.1.qkv.weight", "blocks.1.gate.weight", "blocks.0.out.weight", "blocks.0.conv_in.weight", "patch_embed.weight"} <= usui
     assert [(g["side"], g["step_rule"], g["frame_init"], g["norm_bounds"]) for g in matrix.param_groups] == [("right", "trust", "random", (None, 1.0))]
 
 

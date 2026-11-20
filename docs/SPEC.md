@@ -37,19 +37,19 @@ Patch size is fixed across stages, so the patch embedding carries over unchanged
 
 ## 3. Model
 
-Architecture **a1**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a1-ref-1ep`).
+Architecture **a2**: §2, this section and §5 as they stand. A change to any of them is a new version, and run names carry it (`a2-ref-1ep`).
 
-Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by a depthwise conv that writes only the meta channels (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
+Plain DiT: no text tokens in the sequence, bidirectional mixing over image tokens. Three of every four blocks mix over the 3×3 neighbourhood on the token grid by LFM2's gated short conv, writing all channels (conv-first), the fourth by self-attention. The caption enters through the pooled embedding in the adaLN conditioning, and every attention block reads its 512-d token states by cross attention.
 
 | Component | Decision |
 |---|---|
 | Width | 768 |
 | Depth | 24 layers |
 | Layout | A sequence of block types, repeated to the depth: conv, conv, conv, attention, so the 4th, 8th, … block is self-attention. A block type names its mixer |
-| Mixer | A depthwise 3×3 conv over the modulated input, then an output Linear of width → width − 128 into the meta channels, a branch norm and the gate; the conv blocks add nothing to the 128 image channels |
+| Mixer | LFM2's gated short conv: one Linear width → 3 × width from the modulated input gives B, C and v; a depthwise 3×3 conv over the token grid reads B ⊙ v; its read, RMS-normed without a gain, times C, goes through an output Linear width → width and the gate into all channels. No branch norm, so a small C makes a small write |
 | Attention | GQA: query heads of dim 64 (12 at width 768), a quarter as many key/value heads (a speed gain at every grid size; no KV cache to slim) |
 | QK norm | RMSNorm on Q and K |
-| Branch norm | Sandwich norm (LFM3): an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so a block adds at most the gate times a vector of unit RMS before the gains |
+| Branch norm | Sandwich norm (LFM3) on the attention, cross-attention and MLP branches: an RMSNorm with a learned gain on each branch's output, before its gate and the residual add, so such a branch adds at most the gate times a vector of unit RMS before the gains. The conv branch has its norm on the read instead (Mixer) |
 | Output gate | Krea-style sigmoid gate on the attention output: `o = attn(·) ⊙ σ(W_g h)` |
 | Position | 2D axial RoPE on the first quarter of the frequencies per axis, the rest position-free; the convs carry local position |
 | Cross attention | In every attention block, after self-attention and before the MLP: no modulation, no positional encoding, GQA, its own q/k norm and branch norm, a zero-initialised per-channel gate |
@@ -80,7 +80,7 @@ Default: fan-in normal, `std = 1/√fan_in`.
 | Text projection 768→width | fan-in normal on its input `rms_norm(e_text)` (unit RMS over entries) | Usui |
 | Null embedding | EmbeddingGemma 2's embedding of the empty caption, learned from there; the null tokens start as its `<bos>` and `<eos>` states | fallback |
 | Q, K, V (fused, GQA) and cross-attention q, kv | fan-in normal | Usui |
-| Conv block depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linear on Usui |
+| Conv block input Linear (B, C, v), depthwise 3×3 and output Linear | fan-in normal | conv on the fallback, Linears on Usui |
 | Sigmoid gate projection | fan-in normal (σ ≈ 0.5 at start) | Usui |
 | Attention out-proj | fan-in normal | Usui |
 | SwiGLU up / gate / down | fan-in normal | Usui |

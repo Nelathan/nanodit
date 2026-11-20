@@ -163,8 +163,8 @@ def test_a_branch_adds_at_most_its_gate_however_large_its_weights(model, prompt)
     base = model(x, t, prompt)
     for block in model.blocks:
         block.w_down.weight.data *= 1e3
-        block.out.weight.data *= 1e3
-        if not block.is_conv:
+        if not block.is_conv:  # the conv block has no branch norm; its norm sits on the read
+            block.out.weight.data *= 1e3
             block.cross_out.weight.data *= 1e3
     assert torch.allclose(model(x, t, prompt), base, atol=1e-3)  # the post-norm removes the weights' scale
 
@@ -229,9 +229,22 @@ def conv_block_change(prompt, poke=None):
     return first, seen["stream_out"] - seen["stream_in"]
 
 
-def test_a_conv_block_writes_the_meta_channels_only(prompt):
+def test_a_conv_block_writes_all_channels(prompt):
     change, _ = conv_block_change(prompt)
-    assert change[..., TOKEN_DIM:].abs().max() > 0 and not change[..., :TOKEN_DIM].any()
+    assert change[..., :TOKEN_DIM].abs().amax((0, 1)).gt(0).all() and change[..., TOKEN_DIM:].abs().amax((0, 1)).gt(0).all()
+
+
+def test_a_small_c_makes_a_small_conv_write(prompt):
+    """C scaled by 1e-3 scales the write with it; a branch norm after `out` would scale it back to unit RMS."""
+    model = build(layout=PAIR)
+    open_gates(model)
+    block = model.blocks[0]
+    block.table.data[5] = 0  # the MLP's gate: the change is the conv's alone
+    block.conv_in.weight.data[block.width:2 * block.width] *= 1e-3  # C's rows
+    seen = {}
+    block.register_forward_hook(lambda module, args, out: seen.update(stream_in=args[0], stream_out=out))
+    model(torch.randn(1, 2, 64, 64), torch.rand(1), prompt.rows(0, 1))
+    assert 0 < (seen["stream_out"] - seen["stream_in"]).abs().max() < 0.02
 
 
 def test_a_conv_block_mixes_only_neighbouring_tokens(prompt):
