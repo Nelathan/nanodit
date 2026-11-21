@@ -118,7 +118,7 @@ The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or
 
 ### C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate chosen?
 
-Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, the toy, the lr-jump read and what is open). State: the pinned lr is not a stability ceiling, the curvature adapts to it; that favours a constant lr with a late anneal, now the schedule (archive 2026-11-12-constant-lr); whether the anneal recovers the loss is untested at length.
+Its own topic doc: `topics/edge-of-stability.md` (the bubbleforce prediction, the toy, the lr-jump read and what is open). State: the pinned lr is not a stability ceiling, the curvature adapts to it; that favours a constant lr with a late anneal, now the schedule (archive 2026-11-12-constant-lr); at one pass a 6000-step anneal takes more off the held-out loss than the pass's second half at constant lr did (log 2026-11-21-anneal6k); whether a lower constant lr ends lower after its own anneal is C2.
 
 ---
 
@@ -166,12 +166,13 @@ whether the gaps stay constant.
 Taken as the standard DiT/PixArt choice in `src/nanodit/model.py`; each is
 to be confirmed. Settle: by reading, or a short 128 px comparison once training runs.
 
-### F1. RoPE frequency base
+### F1. RoPE: the share of frequencies that rotate
 
 Base 10000, 16 frequencies per axis, of which only the fastest quarter rotate (SPEC §3): 1, 0.56, 0.32 and 0.18 rad
 per token (`model.rope_angles`). The slowest turns 1.2 rad across the 8 tokens of a 128 px grid and 2.7 across 16 at
-256 px; the rotated dims all carry position, and the rest carry none by design. A lower base would only speed the
-four up and wrap sooner on large grids. State: the premise of a lower base does not hold; proposed to close without an arm.
+256 px, so every rotated dim carries position; a lower base would only make them wrap sooner. The question left is the
+share: a quarter against full RoPE, read on Lunara at 256 px and on samples. State: no arm; the samples place and
+compose without a sign of a position fault.
 
 ### F2. adaLN scale init scale
 

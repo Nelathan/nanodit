@@ -5,8 +5,7 @@ For the next agent session, starting cold. Read this, `FACTS.md` and `AGENTS.md`
 
 ## Where it stands (2026-11-21)
 
-The trunk is architecture **a4** (SPEC §3), on branch `trunk/adaln-t-only`, ahead of `main` (which is still
-a2); the maintainer merges it into `main`. a4 in one line: d768x24 at 128 px, three gated short-conv blocks (LFM2's,
+The trunk is architecture **a4** (SPEC §3), on `main`; `trunk/adaln-t-only` is the branch it was built on, merged. a4 in one line: d768x24 at 128 px, three gated short-conv blocks (LFM2's,
 norm on the read) per period of four with joint attention third, the caption's EmbeddingGemma 2 token states as extra
 keys after a two-block caption refiner, a zero-valued null key per KV head (the sink), adaLN-single from t alone with
 scale and gate only, concatenating patch embed and slice read-out, UsuiTrack (lr 2e-3, each matrix in its init-norm
@@ -46,7 +45,6 @@ directory keeps it.
 
 ## Waiting on the maintainer
 
-- Merging `trunk/adaln-t-only` into `main`.
 - Whether `count_params.py`'s split is right for a4: the refiner and the null keys now count as conditioning, with the
   caption's keys and values; the scaling law's N is the image part.
 
@@ -72,7 +70,7 @@ it resets on reboot (`pkexec nvidia-smi -pl 198`).
 
 ## Branches
 
-`trunk/adaln-t-only`: the trunk, a4. Running: `arm/conv5`, `arm/conv7`, `arm/tanh-gates`. Merged into it and kept as records: `arm/joint-attn`, `arm/caption-refiner`,
+`main`: the trunk, a4, with `trunk/adaln-t-only` merged into it. Running: `arm/conv5`, `arm/conv7`, `arm/tanh-gates`. Merged into it and kept as records: `arm/joint-attn`, `arm/caption-refiner`,
 `arm/no-shift`. Not merged, each the record of an arm: `arm/joint-probe` (the probes on a3), `arm/joint-probe-a2`,
 `arm/caption-read`, `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`, `arm/gate-outside-norm`,
 `arm/gdn2-lite`, `arm/gdn2-meta`, `arm/gated-conv`, `arm/conv-designs`, `arm/xside`, `gdn-conv`, `g2-patch16`,
