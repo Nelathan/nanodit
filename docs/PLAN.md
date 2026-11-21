@@ -228,8 +228,9 @@ untested arm is the meta-only write alone at 8 px (`topics/block-design.md`).
 
 ### G3. The common mode in the residual stream
 
-By mid-depth most of each image's stream energy is one vector shared by its tokens, written by attention in blocks
-0–1; the token-specific part keeps its rank (log 2026-11-20-measurements-from-facts, Token signal). Unsure whether it costs anything: each branch's
+By mid-depth much of each image's stream energy is one vector shared by its tokens, written from the first blocks
+on, conv and attention alike (logs 2026-11-20-measurements-from-facts, Token signal, and 2026-11-21-stream-scale); the
+token-specific part keeps its rank. Unsure whether it costs anything: each branch's
 RMSNorm then sees the token-specific part at about a quarter of unit scale. Candidates that fit the architecture:
 register tokens, which give global state its own slots; nothing else proposed yet. Settle: a register arm against the
 base, read on loss, the eval grid and the same diagnostic. Background (Li's notes ch. 5–6, the shaped Transformer,
@@ -287,6 +288,19 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
   `arm/conv5`, `arm/conv7` queued.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
+
+### G11. The stream's scale
+
+*Measured* (log 2026-11-21-stream-scale): the meta channels grow with depth to eight or nine times their input,
+where the per-block tables' gates are large, while the slice stays at the prediction's scale; into the last blocks
+the slice is a hundredth to a thousandth of the energy a block reads. Related: G3 (the common mode, a part of the
+growth), J7 (tanh bounds the same gates), K1 (what the trunk can still read of x_t).
+*Hypothesis*: a pre-norm stream that grows makes later writes need to grow; the tables let it run.
+Candidates:
+- **No per-block tables:** the shared adaLN-single alone; a per-block modulation from t (Lumina 2's form) only if
+  that loses.
+- **Hold the stream's scale:** the gates bounded (J7), or the meta part held at a fixed RMS.
+Settle: arms at 6000 steps, read on loss by t and on both probes. State: no arm run; tanh (J7) queued.
 
 ---
 

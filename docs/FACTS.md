@@ -29,8 +29,15 @@ entry points to where its evidence lives. The measurements that stood here befor
 
 - The function is tied to the weight norms. Without a ceiling the norms grow without end and the run spikes; inside
   the ball of their init norm the matrices train without spikes (archive 2026-11-12-norm-ceiling).
-- The per-block adaLN tables train outside the norm ceiling, and the gates grow through them, the more the deeper the
-  block. A bound on the gates is not the identity (log 2026-11-21-gate-sizes).
+- The slice is anchored and the meta channels are not. The slice is read out raw, with no final norm or projection,
+  so its scale is the prediction's. The meta channels are only read through RMS norms, blind to their scale, and
+  nothing in the loss holds their size: it grows with depth, partly as a per-image common mode, written at attention
+  and some conv blocks (log 2026-11-21-stream-scale).
+- The adaLN gates are large on the meta channels and small on the slice; the size is in the per-block tables. The
+  branch norms cap a write before its gate, not the gate, and the tables are outside the norm ceiling, so nothing
+  bounds the gates. A bound on them is not the identity (logs 2026-11-21-gate-sizes, 2026-11-21-stream-scale).
+- Every branch normalizes its read over all channels, so as the meta part grows the slice, x_t and the prediction so
+  far, fades from what deep blocks read. A probe of the stream reads slice and meta apart (`scripts/probe_stream.py`).
 - Behind the zero gates every block starts as the identity and every upstream gradient is zero: on the first step
   of the Usui matrices only `ada.1.weight` moves, the patch embed and the blocks follow as the gates open, and a frame fitted to the first
   gradient has nothing to fit (SPEC §5, §6).
