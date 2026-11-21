@@ -15,7 +15,8 @@ Done: `a4-ref-1ep` (one pass, log 2026-11-21-a4-ref-1ep: ahead of a2 by a small 
 6000-step cooldown `a4-ref-1ep-anneal6k` (log 2026-11-21-anneal6k; held-out 1.2322, Lunara at 256 px 1.3030; the
 README's grids). The gates' size after one pass: log 2026-11-21-gate-sizes; the stream's size through depth: log
 2026-11-21-stream-scale, now the topic `topics/stream-scale.md` (PLAN G11). The 5×5 / 7×7 conv and tanh-gate arms
-at 6000 steps with the step bench: log 2026-11-21-conv-kernel-and-tanh-gates.
+at 6000 steps with the step bench: log 2026-11-21-conv-kernel-and-tanh-gates. The pass at half the lr, annealed:
+log 2026-11-21-lr1e3-one-pass (behind by 0.017 / 0.011; the first pass stays at 2e-3).
 
 `main` is pushed up to `191bed5`; the commits after it are local.
 
@@ -24,23 +25,27 @@ backward) and need the GPU; with `CUDA_VISIBLE_DEVICES=""` they are skipped.
 
 ## Running now
 
-`/tmp/nanodit/lr.sh` under `systemd-inhibit`, console `/tmp/nanodit/lr.out`, from a detached worktree
-`/tmp/nanodit/wt-lr` of `fb9715c` (removed when it ends): `a4-lr1e3-1ep`, a4's pass at half the lr (Usui 1e-3,
-fallback 1.25e-3; from 12:12, about 4.4 h), then `a4-lr1e3-1ep-anneal6k` from its last checkpoint (about 50 min).
-PLAN C2. Read against `a4-ref-1ep` by eval step, and after the anneal against `a4-ref-1ep-anneal6k` (1.2322 /
-1.3030). Its 4000-step checkpoints stay until it is read; then only the last of the pass, if anything continues.
-
-Then `/tmp/nanodit/graded.sh` (console `/tmp/nanodit/graded.out`): from one worktree of `arm/conv-kernel` (the
-conv kernel a field of the block type), four 6000-step layouts in turn: `a4-conv-graded-6k` (7/5/3 by thirds),
+`/tmp/nanodit/graded.sh` under `systemd-inhibit` (console `/tmp/nanodit/graded.out`), from 2026-11-21 17:51, about
+55 min each: from one worktree of `arm/conv-kernel` (the conv kernel a field of the block type), four 6000-step layouts in turn: `a4-conv-graded-6k` (7/5/3 by thirds),
 `a4-conv-graded-soft-6k` (5/3/3), `a4-conv-phased-6k` (three attention + 7×7, twelve 3×3, three attention + 5×5),
 `a4-conv-period-6k` (attention, 7×7, 5×5, 3×3). PLAN G10. Read each on loss against `a4-ref-1ep`'s first 6000 and
 on `scripts/probe_conv_taps.py` at step 6000 (run with the arm's code) before its checkpoint is deleted.
 
+Then `/tmp/nanodit/stream.sh`, waiting on it under `systemd-inhibit` (console `/tmp/nanodit/stream.out`): the stream arms (`topics/stream-scale.md`, PLAN
+G11), each from a detached worktree of its branch, removed after: `a4-split-read-6k` (`arm/split-read`),
+`a4-held-meta-6k` (`arm/held-meta`, on split-read), `a4-held-meta-skips-6k` (`arm/held-meta-skips`, on held-meta),
+`a4-no-tables-6k` (`arm/no-tables`, on `main`: the trunk, not on whichever stream arm holds, since those read after
+it runs). Read on loss and on `scripts/probe_gates.py` and `scripts/probe_stream.py` at step 6000, with the arm's
+code; keep each checkpoint until probed. `scripts/probe_residual_writes.py` asserts a block's output is the sum of
+its writes, which the held meta stream breaks; it needs the hold re-applied before it reads those two arms. The
+changed cuda tests of `arm/no-tables` (`test_optim`, `test_train`, the gradient-role test) are unverified; run them
+on the GPU when it is free.
+
 ## Waiting on the maintainer
 
-- **The stream's scale** (`topics/stream-scale.md`): which arms, in the proposed order: the split read (slice raw,
-  meta normed on its own); Full AttnRes on the meta channels with the split read (benched first: estimated +30 to
-  45 % step time, ≤ 0.5 GB); the held meta stream with the split read. No branch built yet.
+- **The t-dependent skip** (PLAN K1): K1 prefers the skip at the readout; proposed in its place, the skip at the
+  input (the slice starts at c(t)·x_t), and a CPU probe first, the trunk's correction regressed on x_t by t on
+  `a4-ref-1ep`. PLAN K1 changes once the form is chosen.
 - **The 5×5 kernel** (PLAN G10): −0.0015 on both sets, inside the seed spread, at 1 % of the step. Merge or wait.
 - **tanh on the gates** (PLAN J7): level at 6000 steps; proposed as superseded by G11.
 - Whether `count_params.py`'s split is right for a4: the refiner and the null keys now count as conditioning, with the
@@ -48,7 +53,6 @@ on `scripts/probe_conv_taps.py` at step 6000 (run with the arm's code) before it
 
 ## Next arms, proposed
 
-- The stream arms above, when the GPU is free.
 - **Conv padding** (PLAN G10): replicate against zero, read on Lunara at 256 px; after the kernel is chosen.
 - Parked: one refiner block against two (likely below one seed's resolution); t at the input without the adaLN.
 
@@ -74,12 +78,14 @@ it resets on reboot (`pkexec nvidia-smi -pl 198`).
 
 ## Branches
 
-`main`: the trunk, a4, with `trunk/adaln-t-only` merged into it. Read, waiting for a decision: `arm/conv5`, `arm/conv7`, `arm/tanh-gates` (their checkpoints deleted). Merged into it and kept as records: `arm/joint-attn`, `arm/caption-refiner`,
-`arm/no-shift`. Not merged, each the record of an arm: `arm/joint-probe` (the probes on a3), `arm/joint-probe-a2`,
-`arm/caption-read`, `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`, `arm/gate-outside-norm`,
-`arm/gdn2-lite`, `arm/gdn2-meta`, `arm/gated-conv`, `arm/conv-designs`, `arm/xside`, `gdn-conv`, `g2-patch16`,
-`pinned-copy` (PLAN H1), and the early `arm/{base,finalnorm,finalr64,idfinal,noconv,slice,solver,solvermlp}`.
-usuitrack is pinned at `lab` `92b23bc`.
+`main`: the trunk, a4, with `trunk/adaln-t-only` merged into it. Queued: `arm/conv-kernel`, `arm/split-read`,
+`arm/held-meta`, `arm/held-meta-skips`, `arm/no-tables`. Read, waiting for a decision: `arm/conv5`, `arm/conv7`,
+`arm/tanh-gates` (their checkpoints deleted). Merged into it and kept as records: `arm/joint-attn`,
+`arm/caption-refiner`, `arm/no-shift`. Not merged, each the record of an arm: `arm/joint-probe` (the probes on a3),
+`arm/joint-probe-a2`, `arm/caption-read`, `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`,
+`arm/gate-outside-norm`, `arm/gdn2-lite`, `arm/gdn2-meta`, `arm/gated-conv`, `arm/conv-designs`, `arm/xside`,
+`gdn-conv`, `g2-patch16`, `pinned-copy` (PLAN H1), and the early
+`arm/{base,finalnorm,finalr64,idfinal,noconv,slice,solver,solvermlp}`. usuitrack is pinned at `lab` `92b23bc`.
 
 ## Open on the harness
 

@@ -60,10 +60,13 @@ added as now. Addresses dilution: the stream cannot grow, and a write's weight a
 give equal participation: each renorm shrinks everything written before, so an early write fades geometrically and
 the newest writes weigh most, a recency stream. With an unbounded gate the gate's size is a learned forget rate,
 the same freedom as a per-channel forget; whether the write's weight is bounded to [0, 1] is a choice inside this
-candidate. Post-norm streams are known to train worse than pre-norm in deep transformers; here the writes start at
-zero, so the renorm starts as the identity. Cost: one norm per sublayer on 640 channels.
+candidate. The recency is accepted (2026-11-21); early writes that fade are carried forward by long skips
+(PLAN M2, the speedrun's U-net skips): the stream after an early block added back before its mirror block.
+Post-norm streams are known to train worse than pre-norm in deep transformers; here the writes start at zero, so the renorm starts as the identity. Cost: one norm per sublayer on 640 channels.
 
 ### Attention over depth on the meta channels (Full AttnRes)
+
+*Not wanted* (2026-11-21): the step time it costs here (below). Kept for its reasoning and the paper's numbers.
 
 Each sublayer's meta input is a learned softmax mix of the meta writes before it instead of their sum (paper below):
 
@@ -133,15 +136,14 @@ sum, so the stream still grows with depth. Superseded by the candidates above un
 Arms at 6000 steps from a4, read on loss by t (held-out and Lunara at 256 px) and on both probes (`probe_gates.py`,
 `probe_stream.py`), against a4-ref-1ep's first 6000 steps and the conv arms' probes at 6000. At 6000 steps the stream
 is a third of its size after the pass, so the probes show whether the growth starts; a loss difference may need the
-full pass, about 4.4 h at 128 px, longer for AttnRes by its step-time cost.
+full pass, about 4.4 h at 128 px.
 
 Proposed order:
 
-1. **The split read** alone: the cheapest, and the base the other two are read against.
-2. **Full AttnRes on the meta channels**, with the split read: `bench_step.py` on the arm first (step time, peak),
-   then 6000 steps.
-3. **The held meta stream**, with the split read: the control that fixes the scale without changing who reads
-   what; or the fallback if AttnRes's step time is too high.
+1. **The split read** alone: the cheapest, and the base the others are read against.
+2. **The held meta stream**, with the split read.
+3. **The held meta stream with long skips**, with the split read.
+4. **Without the per-block tables**, on whichever of the above holds.
 
 ## Source: Attention Residuals
 

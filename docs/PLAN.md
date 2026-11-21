@@ -300,7 +300,8 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 ### G11. The stream's scale
 
 Its own topic doc: `topics/stream-scale.md` (the two workspaces, dilution and drowning, the split read, a held meta
-stream, attention over depth on the meta channels, the tables). State: no arm run; three arms proposed, in order.
+stream with long skips, the tables; attention over depth not wanted for its cost). State: four arms
+queued, in the topic's order.
 
 ---
 
