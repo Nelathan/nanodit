@@ -292,16 +292,8 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 
 ### G11. The stream's scale
 
-*Measured* (log 2026-11-21-stream-scale): the meta channels grow with depth to eight or nine times their input,
-where the per-block tables' gates are large, while the slice stays at the prediction's scale; into the last blocks
-the slice is a hundredth to a thousandth of the energy a block reads. Related: G3 (the common mode, a part of the
-growth), J7 (tanh bounds the same gates), K1 (what the trunk can still read of x_t).
-*Hypothesis*: a pre-norm stream that grows makes later writes need to grow; the tables let it run.
-Candidates:
-- **No per-block tables:** the shared adaLN-single alone; a per-block modulation from t (Lumina 2's form) only if
-  that loses.
-- **Hold the stream's scale:** the gates bounded (J7), or the meta part held at a fixed RMS.
-Settle: arms at 6000 steps, read on loss by t and on both probes. State: no arm run; tanh (J7) queued.
+Its own topic doc: `topics/stream-scale.md` (the two workspaces, dilution and drowning, the split read, a held meta
+stream, attention over depth on the meta channels, the tables). State: no arm run; three arms proposed, in order.
 
 ---
 

@@ -51,6 +51,9 @@ What each source establishes for this project.
 - **diffusers** `transformer_qwenimage.py`, `transformer_lumina2.py`, `transformer_z_image.py`: the modulation of
   Qwen-Image, Lumina 2 and Z-Image as implemented, and the latter two's context refiners. `topics/conditioning.md`.
 - **PixArt-α.** adaLN-single.
+- **Kimi Team, Attention Residuals**, arXiv 2603.15031. The residual sum replaced by a softmax over the earlier
+  layers' outputs with a learned query per layer (Full) or over block sums (Block); PreNorm dilution as the motive;
+  costs and ablations on MoE language models. `topics/stream-scale.md`.
 - **CPVT** (conditional positional encoding) and **SANA** (Mix-FFN with depthwise conv, linear attention).
 
 ## Data
