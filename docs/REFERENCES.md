@@ -7,6 +7,8 @@ What each source establishes for this project.
 - **Ostris, "x0 velocity" thread on X, 2026-10-22.** Kept verbatim in `references/ostris-x0-velocity-thread.md`.
   Target `x_t - v`, conversion by one subtraction, constant residual magnitude, qualitative 1-day single-GPU results
   at 64× compression on MOSS-Image. No quantitative metrics.
+  The figure posted with it, one image under velocity, x0 and x0-velocity targets at five noise levels on one scale:
+  `references/x0-velocity-targets.jpg`.
 - **Li & He, "Back to Basics: Let Denoising Generative Models Denoise" (JiT), arXiv 2511.13720.**
   Pure x0 prediction with large patches; the manifold/bottleneck argument for why the target matters with fat tokens.
 - **Karras et al., EDM / EDM2.** Preconditioning (`c_skip`, `c_out`); EMA length as a major quality knob (EDM2).

@@ -406,8 +406,8 @@ at 6000 steps, where few gates exceed 1 yet. State: proposed as superseded by G1
 
 ## Group K. What the network predicts
 
-Its own topic doc: `topics/prediction-target.md` (the skip derived for this target, AnisoFlow, what of the thread does
-not apply).
+Its own topic doc: `topics/prediction-target.md` (the three targets and their geometry, the skip derived for this
+target, what a4 does with it, AnisoFlow, what of the thread does not apply).
 
 ### K1. A t-dependent skip
 
