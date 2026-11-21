@@ -46,11 +46,17 @@ Reading:
   the first block on, where under (b) every block reads a slice off by (c − 1)·x_t; the meta channels still embed x_t.
   *Measured*: a4's trunk rebuilds the rescale exactly, and at the ends it is most of its correction's energy (log
   2026-11-21-linear-skip-probe).
-- In either form, a second arm clamps c to [0, 1] if the factor 2 at low t proves unstable.
+- **c_out on the slice's writes** (EDM's c_out), on (a): the gates on the slice are scaled by
+  `c_out(t) = 1/√((1 − t)² + t²)`, the RMS of the remainder `T − c(t)·x_t` for unit-variance latents (1 at both
+  ends, √2 at t = 0.5). The trunk then writes a remainder of the same size at every t, as it does with the identity
+  (the correction −v, of one size by construction), and the slice stays the prediction so far. The adaLN gates already depend on t, so
+  c_out is a prior they could learn; the arm reads whether it helps.
+- In either form, a further arm clamps c to [0, 1] if the factor 2 at low t proves unstable.
 
-*Prediction:* the loss falls in the outer t bins (t < 0.25 and t > 0.75), with little change at the middle.
+*Prediction:* the loss falls in the outer t bins (t < 0.25 and t > 0.75), with little change at the middle; c_out,
+read against the linear skip, moves the middle and upper-middle t, where its writes are larger.
 
-Settle: one arm against the reference, read on `loss_by_t` (SPEC §8). First read the existing runs' loss by t; the
+Settle: the linear skip against the reference and c_out against the linear skip, read on `loss_by_t` (SPEC §8). First read the existing runs' loss by t; the
 score grid holds it.
 
 Interaction: the training t is logit-normal (SPEC §4), so the ends carry little mass. At σ 1, which the merged-set

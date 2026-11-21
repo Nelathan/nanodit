@@ -46,6 +46,12 @@ Then `/tmp/nanodit/skip.sh` (console `/tmp/nanodit/skip.out`), waiting on `strea
 to 0.74, where a4's loss peaks. `scripts/probe_linear_skip.py` reads F − x_t, which on this arm includes the
 skip's own (c − 1)·x_t: its slope should still match the true one.
 
+Then `/tmp/nanodit/cout.sh` (console `/tmp/nanodit/cout.out`), waiting on `skip.sh`: `a4-linear-skip-cout-6k` from
+`arm/linear-skip-cout` (on `arm/linear-skip`: the slice's writes scaled by c_out(t)), read against
+`a4-linear-skip-6k` and the reference. On that branch a block takes a `write_scale` argument, so
+`probe_residual_writes.py` and `probe_caption_use.py`, which rebuild writes from the gates, need it before they read
+the arm, and `probe_gates.py` reports the slice's gates before it. Its cuda and compiled-block tests are unverified.
+
 ## Waiting on the maintainer
 
 - **The 5×5 kernel** (PLAN G10): −0.0015 on both sets, inside the seed spread, at 1 % of the step. Merge or wait.
@@ -82,7 +88,7 @@ it resets on reboot (`pkexec nvidia-smi -pl 198`).
 
 `main`: the trunk, a4, with `trunk/adaln-t-only` merged into it. Queued: `arm/conv-kernel`, `arm/split-read`,
 `arm/held-meta`, `arm/held-meta-skips`, `arm/no-tables`,
-`arm/linear-skip`. Read, waiting for a decision: `arm/conv5`, `arm/conv7`,
+`arm/linear-skip`, `arm/linear-skip-cout`. Read, waiting for a decision: `arm/conv5`, `arm/conv7`,
 `arm/tanh-gates` (their checkpoints deleted). Merged into it and kept as records: `arm/joint-attn`,
 `arm/caption-refiner`, `arm/no-shift`. Not merged, each the record of an arm: `arm/joint-probe` (the probes on a3),
 `arm/joint-probe-a2`, `arm/caption-read`, `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`,
