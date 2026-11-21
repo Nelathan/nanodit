@@ -38,6 +38,9 @@ entry points to where its evidence lives. The measurements that stood here befor
   bounds the gates. A bound on them is not the identity (logs 2026-11-21-gate-sizes, 2026-11-21-stream-scale).
 - Every branch normalizes its read over all channels, so as the meta part grows the slice, x_t and the prediction so
   far, fades from what deep blocks read. A probe of the stream reads slice and meta apart (`scripts/probe_stream.py`).
+- The stream's growth and the gates' size build up over the pass: a 6000-step arm sees their start, not the regime
+  a bound on them is for. Read such an arm on the probes as well as on loss (log
+  2026-11-21-conv-kernel-and-tanh-gates).
 - Behind the zero gates every block starts as the identity and every upstream gradient is zero: on the first step
   of the Usui matrices only `ada.1.weight` moves, the patch embed and the blocks follow as the gates open, and a frame fitted to the first
   gradient has nothing to fit (SPEC §5, §6).

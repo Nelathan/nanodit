@@ -284,8 +284,9 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 - **A 5×5 or 7×7 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
   differently from two stacked 3×3s (one filter, no nonlinearity or gate between). Settle: 5×5 and 7×7 arms trained
   at 128 px against a4's first 6000 steps, read on the held-out loss, on Lunara at 256 px (the larger grid, where
-  reach matters more) and on step time at 128 and 256 px (`scripts/bench_step.py` on the Lunara rows). State:
-  `arm/conv5`, `arm/conv7` queued.
+  reach matters more) and on step time at 128 and 256 px (`scripts/bench_step.py` on the Lunara rows). *Measured*
+  (log 2026-11-21-conv-kernel-and-tanh-gates): 5×5 ahead on both sets within the seed spread, at about 1 % of
+  the step; 7×7 level, behind at high t on Lunara, slower. State: 5×5 waits for a decision.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 
@@ -398,7 +399,8 @@ the residual branch" (arXiv 2406.18583 §2.1), with no ablation. Here Usui holds
 init-norm ball; only the per-block tables (fallback) are unbounded. *Hypothesis*: the bound matters only where a
 gate grows, which loss may not show. Settle: one arm on a4, read on loss and on the gates' size over training.
 *Measured* (log 2026-11-21-gate-sizes): after one pass the gates grow with depth, through the per-block tables; in
-the last blocks most exceed 1, so a tanh bends them. State: arm `arm/tanh-gates` queued at 6000 steps.
+the last blocks most exceed 1, so a tanh bends them. *Measured* (log 2026-11-21-conv-kernel-and-tanh-gates): level
+at 6000 steps, where few gates exceed 1 yet. State: proposed as superseded by G11.
 
 ---
 
