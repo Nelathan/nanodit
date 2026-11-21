@@ -109,8 +109,9 @@ Data); it streams, so it would be encoded shard by shard as text-to-image-2M was
 *Decided* (2026-11-16): usui lr 2e-3. At 6000 constant-lr steps at d768x12 on the merged set it ends 0.0113 ahead of
 4e-3 (`log/2026-11-14-reference-6k-lr2e-3.md`); the curve does not say 2e-3 is the optimum, and it is carried to
 depth 24 untested there (G4). Open: the warmup length, and the fallback lr (2.5e-3 in the reference) at 2e-3. Settle:
-config-only arms against the reference. 1e-3 is not tried at depth 24 or at length; the handbook's lr falls as
-compute^−0.5 (`topics/scaling.md`), so a longer run may want it, and a short arm may not show it.
+config-only arms against the reference. 1e-3 over a first pass at depth 24, annealed, ends 0.017 behind held-out
+and 0.011 on Lunara (`log/2026-11-21-lr1e3-one-pass.md`); *Decided* (2026-11-21): the first pass stays at 2e-3. *Hypothesis*: 1e-3 pays
+from the second pass on; not run.
 
 ### C3. Timestep shift values per stage
 
