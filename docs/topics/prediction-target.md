@@ -17,6 +17,40 @@ measurably does with it. Sources: Ostris's thread (`references/ostris-x0-velocit
 - **The skip.** The slice starts at x_t: the patch embed concatenates the raw patch with a projection of it. With
   the gates at zero the model outputs `F = x_t`, so `v̂ = 0`, and each block adds a correction to the slice.
 
+## x0 velocity as Ostris states it
+
+The design takes its target from Ostris's thread (`references/ostris-x0-velocity-thread.md`). What it states, kept
+here so that a change can be argued against it.
+
+**Target.** `x_t − (ε − x) = x + (1 − t)(x − ε)`: plain x0 prediction at the pure-noise end, below that x0
+extrapolated one unit along the flow line.
+
+**Principles.**
+1. **The forward process and the sampling trajectory of flow matching, exactly.**
+2. **One subtraction back to a velocity,** `v̂ = x_t − F`, so any flow-matching sampler, scheduler or guidance runs
+   unchanged. (No division by t follows from it; the thread's reply from @grok says so, Ostris does not.)
+3. **An image-shaped output at every t,** never a noise field.
+4. **A correction of one size at every t.** The difference between the network's input and its target is `−v`,
+   neither shrinking at the clean end, which starves the fine-detail steps (x0), nor growing there, where the network
+   has to reproduce and invert its own input (velocity).
+5. **The loss is exactly the flow-matching velocity loss,** unweighted, with no timestep weighting.
+
+**Claims.** It trains more stably than velocity or x0 prediction, and it is more tolerant of high-frequency content,
+so models do better with more latent channels and deeper compression. A model has to be trained to use it, but
+both kinds warm-start and convert with a little fine-tuning: x0 models pick it up quickly, flow-matching models need
+their output negated.
+
+**Evidence offered.** Qualitative only: MOSS-Image converted to 64× latent compression (patch 8 on the latent in
+place of 2), one day on one GPU per target, still training; samples of each shown side by side, described in the
+reference file's summary as sharper and more coherent for x0 velocity. No metric, no ablation.
+
+**How a4 holds to them.** a4 keeps all five. Principle 4 follows directly here: the slice starts at x_t and is read out
+raw, so the trunk writes exactly the correction `−v`. In a DiT whose output comes through a final projection there
+is no such path, and the correction is only the difference between what goes in and what comes out.
+
+*Decided* (2026-11-21): the design is called x0 velocity only while it keeps the five principles. A change that
+gives one up says which, and the design is then named for what it is.
+
 ## Three targets, one line
 
 The figure `references/x0-velocity-targets.jpg` shows one image under the three targets, at five noise levels, on
@@ -132,6 +166,15 @@ writes only what a rescale of its input cannot give?
 `write_scale` that is `c_out(t)` on the slice and 1 on the meta channels (`skip_out`). Both take unit-variance
 latents; against a4's 1.114 the slope is off by at most 0.03.
 
+**Against the principles.** The target, the loss and the sampler are unchanged in both arms, so principles 1, 2, 3
+and 5 hold: F still regresses onto `x_t − v`. Principle 4 does not hold for the linear skip alone: the target's
+correction is still `−v`, but the skip hands the trunk the rescale, and what the trunk writes is the remainder, of
+RMS 1 at the ends and √2 at the midpoint. c_out does not restore it: the blocks' output before the scale is of one
+size at every t, but what they write on the slice is c_out times that, the same remainder. What both arms keep is
+principle 4's stated reasons: the remainder never vanishes at the clean end, and the trunk never has to reproduce
+and invert its input. Merging either arm gives up principle 4 as stated, and the design is then named for it, x0
+velocity with a linear skip.
+
 *Prediction:* the linear skip lowers the loss at the ends of t (below 0.25 and above 0.75), with little change at the
 midpoint; c_out, against the linear skip, moves the middle and upper-middle t, where its writes are larger.
 
@@ -139,10 +182,12 @@ midpoint; c_out, against the linear skip, moves the middle and upper-middle t, w
 (SPEC §8), and on samples for the grey patches. A further arm clamps c to [0, 1] if the factor 2 at low t proves
 unstable.
 
-**Interaction with the t distribution.** Training t is logit-normal (SPEC §4), centred near the midpoint, where a4 is
-already strongest against the linear predictor; the ends carry little mass. If the skip frees the ends, the mass
-could move: toward the upper-middle band by the shift, rather than spread by a wider σ (archive
-2026-11-18-timestep-sigma).
+**Interaction with the t distribution.** Training t is logit-normal with σ 0.7 at shift 1 (SPEC §4): centred near
+the line's midpoint, where the linear predictor's loss peaks, not on a4's measured loss peak above it; the ends carry
+little mass. *Measured*: at d768x12 over 3000 steps shift 1.5 was worse at every step (archive
+2026-11-04-timestep-sigma); at depth 24 over one pass σ 0.7 led σ 1 at every eval, one seed each, the lead near one
+seed's resolution (archive 2026-11-18-timestep-sigma). The skip changes the work at the ends, so the arms' loss by t is where to read whether
+the distribution still fits.
 
 ## K2. An anisotropic target (AnisoFlow)
 
