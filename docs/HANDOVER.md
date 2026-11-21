@@ -41,11 +41,13 @@ its writes, which the held meta stream breaks; it needs the hold re-applied befo
 changed cuda tests of `arm/no-tables` (`test_optim`, `test_train`, the gradient-role test) are unverified; run them
 on the GPU when it is free.
 
+Then `/tmp/nanodit/skip.sh` (console `/tmp/nanodit/skip.out`), waiting on `stream.sh`: `a4-linear-skip-6k` from
+`arm/linear-skip` (PLAN K1, the slice starts at c(t)·x_t). Read on loss by t, most of all at the ends and at t 0.66
+to 0.74, where a4's loss peaks. `scripts/probe_linear_skip.py` reads F − x_t, which on this arm includes the
+skip's own (c − 1)·x_t: its slope should still match the true one.
+
 ## Waiting on the maintainer
 
-- **The t-dependent skip** (PLAN K1): K1 prefers the skip at the readout; proposed in its place, the skip at the
-  input (the slice starts at c(t)·x_t), and a CPU probe first, the trunk's correction regressed on x_t by t on
-  `a4-ref-1ep`. PLAN K1 changes once the form is chosen.
 - **The 5×5 kernel** (PLAN G10): −0.0015 on both sets, inside the seed spread, at 1 % of the step. Merge or wait.
 - **tanh on the gates** (PLAN J7): level at 6000 steps; proposed as superseded by G11.
 - Whether `count_params.py`'s split is right for a4: the refiner and the null keys now count as conditioning, with the
@@ -79,7 +81,8 @@ it resets on reboot (`pkexec nvidia-smi -pl 198`).
 ## Branches
 
 `main`: the trunk, a4, with `trunk/adaln-t-only` merged into it. Queued: `arm/conv-kernel`, `arm/split-read`,
-`arm/held-meta`, `arm/held-meta-skips`, `arm/no-tables`. Read, waiting for a decision: `arm/conv5`, `arm/conv7`,
+`arm/held-meta`, `arm/held-meta-skips`, `arm/no-tables`,
+`arm/linear-skip`. Read, waiting for a decision: `arm/conv5`, `arm/conv7`,
 `arm/tanh-gates` (their checkpoints deleted). Merged into it and kept as records: `arm/joint-attn`,
 `arm/caption-refiner`, `arm/no-shift`. Not merged, each the record of an arm: `arm/joint-probe` (the probes on a3),
 `arm/joint-probe-a2`, `arm/caption-read`, `arm/caption-read-probe`, `arm/lfm-forms`, `arm/slim-conv`,

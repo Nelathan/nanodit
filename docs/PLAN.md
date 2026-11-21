@@ -412,8 +412,9 @@ not apply).
 ### K1. A t-dependent skip
 
 The identity on x_t is the optimal linear skip only at t = 0.5; `c(t) = 2(1 − t)²/((1 − t)² + t²)` halves the residual
-the trunk must write at both ends. Preferred form: EDM's `c_skip` at the readout, so the slice still carries x_t.
-Settle: one arm, read on the loss by t. State: derived, not run.
+the trunk must write at both ends (`log/2026-11-21-linear-skip-probe.md`). Form armed: the slice starts at c(t)·x_t,
+the read-out stays the raw slice.
+Settle: one arm, read on the loss by t. State: `arm/linear-skip` queued.
 
 ### K2. An anisotropic target (AnisoFlow)
 

@@ -42,7 +42,10 @@ Reading:
   doubles.
 - (b) **The skip at the readout, EDM's `c_skip`:** the slice still starts at x_t, and `F = slice + (c(t) − 1)·x_t`.
   The stream keeps its meaning; only the correction the trunk has to write changes. Parameter-free.
-  *Recommendation:* (b).
+  *Decided* for the arm (2026-11-21): (a). The output stays the raw slice and the slice is the prediction so far from
+  the first block on, where under (b) every block reads a slice off by (c − 1)·x_t; the meta channels still embed x_t.
+  *Measured*: a4's trunk rebuilds the rescale exactly, and at the ends it is most of its correction's energy (log
+  2026-11-21-linear-skip-probe).
 - In either form, a second arm clamps c to [0, 1] if the factor 2 at low t proves unstable.
 
 *Prediction:* the loss falls in the outer t bins (t < 0.25 and t > 0.75), with little change at the middle.
