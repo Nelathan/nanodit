@@ -287,10 +287,12 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
   reach matters more) and on step time at 128 and 256 px (`scripts/bench_step.py` on the Lunara rows). *Measured*
   (log 2026-11-21-conv-kernel-and-tanh-gates): 5×5 ahead on both sets within the seed spread, at about 1 % of
   the step; 7×7 level, behind at high t on Lunara, slower. State: 5×5 waits for a decision.
-- **The kernel by depth.** Larger early, 3×3 late: 7×7 / 5×5 / 3×3 by thirds of the blocks, and the softer 5×5 /
-  3×3 / 3×3. *Measured* (log 2026-11-21-conv-taps-a4-ref): after a pass the first 3×3 kernels stay near or outward
-  of the init share on the ring, the middle ones move to the centre, the last sit between. Settle: both arms at 6000 steps as the kernel arms, read on loss
-  and on `scripts/probe_conv_taps.py`. State: `arm/conv-graded`, `arm/conv-graded-soft` built.
+- **The kernel by depth.** Larger early, 3×3 late, and where attention sits: by thirds 7×7 / 5×5 / 3×3 and 5×5 /
+  3×3 / 3×3; phased, three (attention, 7×7), twelve 3×3, three (attention, 5×5); the period attention, 7×7, 5×5,
+  3×3. *Measured* (log 2026-11-21-conv-taps-a4-ref): after a pass the first 3×3 kernels stay near or outward of the
+  init share on the ring, the middle ones move to the centre, the last sit between. Settle: each at 6000 steps as
+  the kernel arms, read on loss and on `scripts/probe_conv_taps.py`. State: `arm/conv-kernel` (the kernel a field
+  of the block type, four configs) queued.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 

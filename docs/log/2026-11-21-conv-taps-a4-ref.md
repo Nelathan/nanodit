@@ -35,6 +35,6 @@ by each channel's kernel norm.
   blocks sit between (0.75 to 0.85).
 - The centre tap mixes nothing across tokens, so a centre-heavy kernel is, as a proxy, a block doing less spatial
   mixing.
-- The shape is not monotone in depth: the least reach is used in the middle third, not the last. The graded arms
-  (`arm/conv-graded`, 7×7 / 5×5 / 3×3 by thirds; `arm/conv-graded-soft`, 5×5 / 3×3 / 3×3) follow the prior
-  "larger early, smaller late", which this probe supports for the first third only.
+- The shape is not monotone in depth: the least reach is used in the middle third, not the last. A kernel graded
+  "larger early, smaller late" follows a prior this probe supports for the first third only. The middle blocks'
+  locality is read with attention at blocks 10 and 14 beside them.

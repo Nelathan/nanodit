@@ -30,6 +30,12 @@ fallback 1.25e-3; from 12:12, about 4.4 h), then `a4-lr1e3-1ep-anneal6k` from it
 PLAN C2. Read against `a4-ref-1ep` by eval step, and after the anneal against `a4-ref-1ep-anneal6k` (1.2322 /
 1.3030). Its 4000-step checkpoints stay until it is read; then only the last of the pass, if anything continues.
 
+Then `/tmp/nanodit/graded.sh` (console `/tmp/nanodit/graded.out`): from one worktree of `arm/conv-kernel` (the
+conv kernel a field of the block type), four 6000-step layouts in turn: `a4-conv-graded-6k` (7/5/3 by thirds),
+`a4-conv-graded-soft-6k` (5/3/3), `a4-conv-phased-6k` (three attention + 7×7, twelve 3×3, three attention + 5×5),
+`a4-conv-period-6k` (attention, 7×7, 5×5, 3×3). PLAN G10. Read each on loss against `a4-ref-1ep`'s first 6000 and
+on `scripts/probe_conv_taps.py` at step 6000 (run with the arm's code) before its checkpoint is deleted.
+
 ## Waiting on the maintainer
 
 - **The stream's scale** (`topics/stream-scale.md`): which arms, in the proposed order: the split read (slice raw,
