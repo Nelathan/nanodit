@@ -168,10 +168,10 @@ to be confirmed. Settle: by reading, or a short 128 px comparison once training 
 
 ### F1. RoPE frequency base
 
-Base 10000 with 8 frequencies per axis over at most 16 positions: the slowest four
-rotate under 0.15 rad across the whole grid, so about half the rotated dims carry
-almost no position. A base near 100, or frequencies log-spaced from 1 to 1/16,
-would use them.
+Base 10000, 16 frequencies per axis, of which only the fastest quarter rotate (SPEC §3): 1, 0.56, 0.32 and 0.18 rad
+per token (`model.rope_angles`). The slowest turns 1.2 rad across the 8 tokens of a 128 px grid and 2.7 across 16 at
+256 px; the rotated dims all carry position, and the rest carry none by design. A lower base would only speed the
+four up and wrap sooner on large grids. State: the premise of a lower base does not hold; proposed to close without an arm.
 
 ### F2. adaLN scale init scale
 
@@ -280,8 +280,10 @@ t 0.66 to 0.74 against the basic conv; not yet read on samples.
 
 Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/gemini-thread-adaln-and-architecture.md`):
 - **A 5×5 or 7×7 kernel.** Another way to reach (a 16 × 16 grid in 8 convs instead of 15) without depth; it mixes
-  differently from two stacked 3×3s (one filter, no nonlinearity or gate between). Settle: 3×3, 5×5 and 7×7 arms at
-  256 px, read on loss and step time; needs the 256 px set (HANDOVER).
+  differently from two stacked 3×3s (one filter, no nonlinearity or gate between). Settle: 5×5 and 7×7 arms trained
+  at 128 px against a4's first 6000 steps, read on the held-out loss, on Lunara at 256 px (the larger grid, where
+  reach matters more) and on step time at 128 and 256 px (`scripts/bench_step.py` on the Lunara rows). State:
+  `arm/conv5`, `arm/conv7` queued.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 
@@ -380,7 +382,8 @@ linear. Lumina-Next, where it comes from, adds it "to prevent extremely large mo
 the residual branch" (arXiv 2406.18583 §2.1), with no ablation. Here Usui holds the shared projection inside its
 init-norm ball; only the per-block tables (fallback) are unbounded. *Hypothesis*: the bound matters only where a
 gate grows, which loss may not show. Settle: one arm on a4, read on loss and on the gates' size over training.
-State: not run.
+*Measured* (log 2026-11-21-gate-sizes): after one pass the gates grow with depth, through the per-block tables; in
+the last blocks most exceed 1, so a tanh bends them. State: arm `arm/tanh-gates` queued at 6000 steps.
 
 ---
 
