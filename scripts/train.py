@@ -110,12 +110,12 @@ def load_decoder(device: torch.device):
 
 
 @torch.no_grad()
-def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
-    """Fixed prompts, each with its own fixed noise: one PNG grid of the prompts in file order, row-major, as square as fits."""
+def render_grid(model, decoder, prompt, cfg: Config, guidance: float, device: torch.device) -> Image.Image:
+    """Fixed prompts, each with its own fixed noise: one grid of the prompts in file order, row-major, as square as fits."""
     side = cfg.resolution // 2
     n_prompts = len(prompt.mask)
     noise = torch.cat([torch.randn(1, 2, side, side, generator=torch.Generator().manual_seed(cfg.eval_seed + i)) for i in range(n_prompts)])
-    latents = euler_sample(model, noise.to(device), prompt.to(device, torch.float32), cfg.sampler_steps, cfg.guidance)
+    latents = euler_sample(model, noise.to(device), prompt.to(device, torch.float32), cfg.sampler_steps, guidance)
     images = decoder.decode(latents.float()).clamp(-1, 1)
     images = ((images + 1) * 127.5).round().byte().cpu().numpy()  # [P, 3, res, res]
     cols = math.ceil(math.sqrt(n_prompts))
@@ -123,9 +123,15 @@ def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, devi
     cells = np.zeros((rows * cols, 3, cfg.resolution, cfg.resolution), np.uint8)  # black past the last prompt
     cells[:n_prompts] = images
     grid = cells.reshape(rows, cols, 3, cfg.resolution, cfg.resolution).transpose(0, 3, 1, 4, 2)
+    return Image.fromarray(grid.reshape(rows * cfg.resolution, cols * cfg.resolution, 3))
+
+
+def evaluate(model, decoder, prompt, cfg: Config, step: int, run_dir: Path, device: torch.device) -> None:
+    """The eval grid at the run's guidance, into the run directory and wandb."""
     path = run_dir / "eval" / f"step_{step:07d}.png"
     path.parent.mkdir(exist_ok=True)
-    Image.fromarray(grid.reshape(rows * cfg.resolution, cols * cfg.resolution, 3)).save(path)
+    render_grid(model, decoder, prompt, cfg, cfg.guidance, device).save(path)
+    n_prompts = len(prompt.mask)
     append_jsonl(run_dir / "eval.jsonl", dict(step=step, image=str(path), guidance=cfg.guidance, sampler_steps=cfg.sampler_steps, seeds=list(range(cfg.eval_seed, cfg.eval_seed + n_prompts))))
     wandb.log({"eval": wandb.Image(str(path), caption="prompts row-major in eval_prompts.txt order")}, step=step)
 
