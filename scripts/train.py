@@ -21,7 +21,7 @@ from usuitrack.polar import unit_polar
 
 from nanodit.data import Stream, pad_sequences, read_rows
 from nanodit.model import BlockType, DiT, Prompt
-from nanodit.objective import BAND_NAMES, band_energy, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles, target
+from nanodit.objective import BAND_NAMES, band_energy, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles, t_uniform, target
 from nanodit.optim import build_optimizers
 from nanodit.sampler import euler_sample
 
@@ -220,8 +220,8 @@ def wandb_scalars(record: dict, by_t: dict) -> dict:
 
 def wandb_scores(scores: dict, prefix: str) -> dict:
     """A score record, flat: the means under `eval/<prefix>`, and each by-t series as the means of neighbouring grid
-    points, the t's of one fifth of the grid's probability mass each, in one group per topic,
-    `eval_<prefix><topic>_by_t/q<lo>-<hi>`, named by its probability-mass quantiles (not t)."""
+    points, one fifth of the grid each, in one group per topic, `eval_<prefix><topic>_by_t/q<lo>-<hi>`, named by the
+    fifth's quantiles of its grid (on the uniform grid, t itself)."""
     flat = {f"eval/{prefix}{key}": scores[key] for key in ("loss", "r2")}
     flat |= {f"eval/{prefix}r2_{band}": value for band, value in zip(BAND_NAMES, scores["r2_by_band"])}
     size = SCORE_TS // WANDB_BUCKETS
@@ -330,7 +330,7 @@ def main(config_path: str) -> None:
     eval_prompt, decoder = embed_prompts(prompts_path.read_text().splitlines()), load_decoder(device)
     eval_keys = pq.read_table(cfg.eval_set, columns=["key"])["key"].to_pylist()
     assert stream.excluded.issuperset(eval_keys), "the eval rows are in the training stream"
-    score_ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
+    score_ts, uniform_ts = t_quantiles(SCORE_TS, SCORE_SHIFT), t_uniform(SCORE_TS)
     eval_rows = score_rows(cfg.eval_set, cfg.resolution, cfg.eval_seed)
     lunara_rows = score_rows(cfg.lunara_set, cfg.lunara_resolution, cfg.eval_seed)
 
@@ -363,10 +363,15 @@ def main(config_path: str) -> None:
             evaluate(model, decoder, eval_prompt, cfg, step, run_dir, device)
             scores = score(model, *eval_rows, score_ts, cfg.micro_batch, device)
             lunara = score(model, *lunara_rows, score_ts, cfg.micro_batch, device)
+            uniform = score(model, *eval_rows, uniform_ts, cfg.micro_batch, device)
+            lunara_uniform = score(model, *lunara_rows, uniform_ts, cfg.micro_batch, device)
             weights = weight_reads(model, optimizers[0])
             append_jsonl(run_dir / "score.jsonl", dict(step=step, t=score_ts.tolist()) | scores | dict(weights=weights))
             append_jsonl(run_dir / "score_lunara.jsonl", dict(step=step, t=score_ts.tolist()) | lunara)
-            wandb.log(wandb_scores(scores, "") | wandb_scores(lunara, "lunara_") | wandb_weights(weights), step=step)
+            append_jsonl(run_dir / "score_uniform.jsonl", dict(step=step, t=uniform_ts.tolist()) | uniform)
+            append_jsonl(run_dir / "score_lunara_uniform.jsonl", dict(step=step, t=uniform_ts.tolist()) | lunara_uniform)
+            by_grid = wandb_scores(scores, "") | wandb_scores(lunara, "lunara_") | wandb_scores(uniform, "uniform_") | wandb_scores(lunara_uniform, "lunara_uniform_")
+            wandb.log(by_grid | wandb_weights(weights), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only

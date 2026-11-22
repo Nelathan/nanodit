@@ -1,5 +1,6 @@
 """Score a finished run's checkpoint on a joined eval set at another resolution: how a position code, trained at 128 px,
-carries to a bigger token grid. Same loss and noise rule as the training score; appends to RUN_DIR/score_<res>.jsonl.
+carries to a bigger token grid. Same loss, noise rule and two t grids as the training score; appends to
+RUN_DIR/score_<res>.jsonl and RUN_DIR/score_uniform_<res>.jsonl.
 The eval set is the fused shard of `precompute_lunara.py`, which holds both resolutions.
 
 usage: score_checkpoint.py RUN_DIR STEP EVAL_SET RESOLUTION
@@ -12,7 +13,7 @@ import torch
 from safetensors.torch import load_file
 
 from nanodit.data import read_rows
-from nanodit.objective import t_quantiles
+from nanodit.objective import t_quantiles, t_uniform
 from train import SCORE_SHIFT, SCORE_TS, Config, append_jsonl, build_model, score
 
 BATCH = 16
@@ -27,10 +28,10 @@ def main(run_dir: str, step: int, eval_set: str, resolution: int) -> None:
     model.load_state_dict(load_file(run / "checkpoints" / f"step_{step:07d}" / "model.safetensors"))
     x, prompt = read_rows(eval_set, resolution)
     noise = torch.randn(x.shape, generator=torch.Generator().manual_seed(cfg.eval_seed))
-    ts = t_quantiles(SCORE_TS, SCORE_SHIFT)
-    scores = score(model, x, prompt, noise, ts, BATCH, device)
-    append_jsonl(run / f"score_{resolution}.jsonl", dict(step=step, t=ts.tolist()) | scores)
-    print(f"{run.name} step {step} at {resolution}: loss {scores['loss']:.4f}", flush=True)
+    for name, ts in (("score", t_quantiles(SCORE_TS, SCORE_SHIFT)), ("score_uniform", t_uniform(SCORE_TS))):
+        scores = score(model, x, prompt, noise, ts, BATCH, device)
+        append_jsonl(run / f"{name}_{resolution}.jsonl", dict(step=step, t=ts.tolist()) | scores)
+        print(f"{run.name} step {step} at {resolution}, {name}: loss {scores['loss']:.4f}", flush=True)
 
 
 if __name__ == "__main__":

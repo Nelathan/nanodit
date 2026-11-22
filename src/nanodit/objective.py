@@ -21,6 +21,11 @@ def t_quantiles(n: int, shift: float) -> Tensor:
     return torch.sigmoid(torch.special.ndtri(p) + math.log(shift)).float()
 
 
+def t_uniform(n: int) -> Tensor:
+    """The midpoints of `n` equal bins of t: a fixed grid that weights t as the sampler's evenly spaced steps do."""
+    return (torch.arange(n, dtype=torch.float64) + 0.5).div(n).float()
+
+
 def noisy(x: Tensor, eps: Tensor, t: Tensor) -> Tensor:
     t = t.view(-1, *[1] * (x.dim() - 1))
     return (1 - t) * x + t * eps

@@ -125,7 +125,8 @@ Training reads precomputed rows, not images. The pipeline, each step a script wi
 4. `exclude_captions.py`: the set's `excluded_keys.txt`, the rows whose captions match a defect pattern.
 5. `holdout.py`: the set's `heldout_keys.txt` and the held-out eval set, 1,000 rows of the set never streamed.
 6. `precompute_lunara.py`: the out-of-distribution eval set, never trained on.
-7. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl` (held-out rows), `score_lunara.jsonl` (Lunara at 256 px), eval grids and checkpoints to the run directory and
+7. `train.py CONFIG.toml`: writes `train.jsonl`, `score.jsonl` (held-out rows), `score_lunara.jsonl` (Lunara at 256 px), the same on the uniform t grid as `score_uniform.jsonl` and
+   `score_lunara_uniform.jsonl`, eval grids and checkpoints to the run directory and
    mirrors them to wandb.
 
 Scripts take their directories as arguments; the paths in `configs/` are the development machine's. The data is

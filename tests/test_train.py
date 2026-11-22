@@ -151,6 +151,9 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     assert all(s["t"] == pytest.approx(t_quantiles(10, 1.0).tolist()) for s in scores)  # the shift-1 grid, though the run trains at shift 1.5
     lunara = [json.loads(line) for line in (run / "score_lunara.jsonl").read_text().splitlines()]
     assert [s["step"] for s in lunara] == [2, 3] and all("weights" not in s for s in lunara)
+    for name in ("score_uniform", "score_lunara_uniform"):  # the same sets on the evenly spaced grid
+        uniform = [json.loads(line) for line in (run / f"{name}.jsonl").read_text().splitlines()]
+        assert [s["step"] for s in uniform] == [2, 3] and all(s["t"] == pytest.approx([0.05 + 0.1 * i for i in range(10)]) for s in uniform)
     logged = [(step, data) for step, data in sent if "eval/loss" in data]
     assert [step for step, _ in logged] == [2, 3]
     for (_, data), s, o in zip(logged, scores, lunara):  # the means, and each by-t series in fifths
