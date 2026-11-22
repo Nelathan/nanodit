@@ -13,7 +13,7 @@ import torch
 from nanodit.data import read_rows
 from train import load_decoder
 
-EDGES = (1 / 64, 1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2)  # cycles per latent pixel; a token is 8 latent pixels wide
+EDGES = (1 / 128, 1 / 64, 1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2)  # cycles per latent pixel; a token is 8 latent pixels wide
 RMS = (0.05, 0.3)  # against the latents' RMS of about 1
 
 
