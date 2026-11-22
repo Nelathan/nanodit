@@ -307,8 +307,9 @@ stream with long skips, the tables; attention over depth not wanted for its cost
 linear skip adds on top at low t; the tables removed on the old stream cost. *Measured* (log
 2026-11-22-tables-on-held-stream): on held meta with long skips removing the tables costs about what it did on the old
 stream, in mid-t, and per-block scalar write gates in their place cost more; with the linear skip they cost the same
-in mid-t (log 2026-11-22-scalar-gates-linear-skip), each scalar below the tables' meta gate in the same write. State:
-whether the cost sits in the meta channels' write sizes or in the MLP norm's lost gain is open.
+in mid-t (log 2026-11-22-scalar-gates-linear-skip), each scalar below the tables' meta gate in the same write. A slice
+and a meta gate per write take back a quarter to a third of it (log 2026-11-22-split-gates); the conv mixers' meta gates stay
+below the tables'. State: open.
 
 ---
 
