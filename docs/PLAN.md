@@ -293,9 +293,9 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
   3×3. *Measured* (log 2026-11-21-conv-taps-a4-ref): after a pass the first 3×3 kernels stay near or outward of the
   init share on the ring, the middle ones move to the centre, the last sit between. Settle: each at 6000 steps as
   the kernel arms, read on loss and on `scripts/probe_conv_taps.py`. *Measured* (log 2026-11-22-conv-kernel-layouts):
-  the period gains and phased costs, each past the seed spread on three of four scores. State: queued on
-  `arm/conv-kernel`, the period rotated to (3×3, attention, 7×7, 5×5): whether a 3×3 before the first attention
-  helps.
+  the period gains and phased costs, each past the seed spread on three of four scores. *Measured*
+  (log 2026-11-22-conv-period-phase): the same period a block later, (3×3, attention, 7×7, 5×5), is level with the
+  base. State: the period's gain depends on its phase; whether attention first or a 3×3 last carries it is open.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 
