@@ -440,7 +440,8 @@ each frequency of F − T weighted by the gain to the power α, `loss_alpha` (`o
 weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchanged, but the loss is no longer the
 plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base, decided on the sample grids, with
 the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
-α 0.5 running, α 1 queued. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
+*Measured* (log 2026-11-22-freq-weight-arms): α 1 loses on every score, the decoder-weighted one included; α 0.5
+gains on the decoder-weighted score and loses on the plain one; the sample grids wait to be read. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
 holds it flat, and the long-period gain differs by set or size (log 2026-11-22-decoder-gain-256): the floor and β
 are to settle before a 256 px stage.
 
