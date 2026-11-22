@@ -137,11 +137,10 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
         expected = {f"train/{key}": r[key] for key in ("loss", "r2", "lr_usui", "lr_fallback", "fallback_grad_norm", "imgs_per_s")}
         by_t = {key: value for key, value in data.items() if "_by_t/" in key}
         edges = ("0.0-0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8-1.0")
-        assert all(key.split("/")[0] in ("train_loss_by_t", "train_r2_by_t") and key.split("/")[1] in [f"t{e}" for e in edges] for key in by_t)
+        assert all(key.split("/")[0] == "train_by_t" and key.split("/")[1] in [f"t{e}" for e in edges] for key in by_t)
         for key, value in by_t.items():  # a wandb bucket pools its pair of train.jsonl buckets: within their range
-            group, bucket = key.split("/")
-            first = edges.index(bucket[1:]) * 2
-            pair = [v for v in r[group.removeprefix("train_")][first : first + 2] if v is not None]
+            first = edges.index(key.split("/")[1][1:]) * 2
+            pair = [v for v in r["loss_by_t"][first : first + 2] if v is not None]
             assert min(pair) - 1e-6 <= value <= max(pair) + 1e-6
         assert {key: value for key, value in data.items() if "_by_t/" not in key} == expected | {f"usuitrack/{key}": v for key, v in r["usui"].items()}
     assert [step for step, data in sent if "eval" in data] == [2, 3]
@@ -156,15 +155,16 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
         assert [s["step"] for s in uniform] == [2, 3] and all(s["t"] == pytest.approx([0.05 + 0.1 * i for i in range(10)]) for s in uniform)
     logged = [(step, data) for step, data in sent if "eval/loss" in data]
     assert [step for step, _ in logged] == [2, 3]
-    for (_, data), s, o in zip(logged, scores, lunara):  # the means, and each by-t series in fifths
-        assert data["eval/r2"] == s["r2"] and data["eval/loss"] == s["loss"]
-        assert data["eval_r2_by_t/q0.2-0.4"] == pytest.approx((s["r2_by_t"][2] + s["r2_by_t"][3]) / 2)
-        assert {"eval/uniform_loss", "eval/lunara_uniform_loss", "eval_uniform_loss_by_t/q0.8-1.0"} <= data.keys()
-        assert data["eval/lunara_loss"] == o["loss"] and data["eval_lunara_r2_by_t/q0.2-0.4"] == pytest.approx((o["r2_by_t"][2] + o["r2_by_t"][3]) / 2)
+    held_uniform = [json.loads(line) for line in (run / "score_uniform.jsonl").read_text().splitlines()]
+    lunara_uniform = [json.loads(line) for line in (run / "score_lunara_uniform.jsonl").read_text().splitlines()]
+    for (_, data), s, o, u, ou in zip(logged, scores, lunara, held_uniform, lunara_uniform):  # per grid the loss and R² of both sets; the held-out uniform loss by t in fifths
+        assert data["eval/loss"] == s["loss"] and data["eval/r2"] == s["r2"] and data["eval/lunara_loss"] == o["loss"] and data["eval/lunara_r2"] == o["r2"]
+        assert data["eval_uniform/loss"] == u["loss"] and data["eval_uniform/r2"] == u["r2"] and data["eval_uniform/lunara_loss"] == ou["loss"] and data["eval_uniform/lunara_r2"] == ou["r2"]
+        assert data["eval_uniform_by_t/t0.2-0.4"] == pytest.approx((u["loss_by_t"][2] + u["loss_by_t"][3]) / 2)
         weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
                    | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
-        assert len(data) == 4 * (3 + 3 + 3 * 5) + len(weights)  # per set and grid the three means, R² per band, the loss and R² in fifths; the weight reads
+        assert len(data) == 2 * 2 * 2 + 5 + len(weights)  # per grid and set the loss and R², the held-out uniform loss in fifths; the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])

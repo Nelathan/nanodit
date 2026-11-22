@@ -21,7 +21,7 @@ from usuitrack.polar import unit_polar
 
 from nanodit.data import Stream, pad_sequences, read_rows
 from nanodit.model import BlockType, DiT, Prompt
-from nanodit.objective import BAND_NAMES, band_energy, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles, t_uniform, target
+from nanodit.objective import band_energy, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, t_quantiles, t_uniform, target
 from nanodit.optim import build_optimizers
 from nanodit.sampler import euler_sample
 
@@ -214,25 +214,24 @@ def bucket_label(i: int) -> str:
 
 
 def wandb_scalars(record: dict, by_t: dict) -> dict:
-    """A train.jsonl record, flat, under `train/`, with `by_t` (the interval's loss and R² in the wandb buckets)
-    as one group per topic, `train_<topic>_by_t/t<lo>-<hi>`, and Usui's reads under `usuitrack/`, as ai-toolkit
-    names them. wandb groups on the first slash only, so a group holds its series one level deep."""
+    """A train.jsonl record, flat, under `train/`, with the interval's loss in the wandb buckets under
+    `train_by_t/t<lo>-<hi>`, and Usui's reads under `usuitrack/`, as ai-toolkit names them. wandb groups on the first
+    slash only, so a group holds its series one level deep. R² by t is left out: at one t it is the loss rescaled."""
     scalars = {f"train/{key}": value for key, value in record.items() if key not in ("step", "loss_by_t", "r2_by_t", "usui")}
-    for name, values in by_t.items():
-        scalars |= {f"train_{name}/t{bucket_label(i)}": v for i, v in enumerate(values) if v is not None}
+    scalars |= {f"train_by_t/t{bucket_label(i)}": v for i, v in enumerate(by_t["loss_by_t"]) if v is not None}
     return scalars | {f"usuitrack/{key}": v for key, v in record["usui"].items()}
 
 
-def wandb_scores(scores: dict, prefix: str) -> dict:
-    """A score record, flat: the means under `eval/<prefix>`, and each by-t series as the means of neighbouring grid
-    points, one fifth of the grid each, in one group per topic, `eval_<prefix><topic>_by_t/q<lo>-<hi>`, named by the
-    fifth's quantiles of its grid (on the uniform grid, t itself)."""
-    flat = {f"eval/{prefix}{key}": scores[key] for key in ("loss", "loss_decoder", "r2")}
-    flat |= {f"eval/{prefix}r2_{band}": value for band, value in zip(BAND_NAMES, scores["r2_by_band"])}
+def wandb_scores(held_out: dict, lunara: dict, uniform: dict, lunara_uniform: dict) -> dict:
+    """The scores' loss and R², per grid one group, `eval/` and `eval_uniform/`, the held-out set's bare and
+    Lunara's as `lunara_<key>`; and the held-out uniform loss by t, the means of neighbouring grid points, one fifth of
+    the grid each, under `eval_uniform_by_t/t<lo>-<hi>`. The records keep the rest."""
+    flat = {}
+    for group, scores in (("eval", (held_out, lunara)), ("eval_uniform", (uniform, lunara_uniform))):
+        for prefix, record in zip(("", "lunara_"), scores):
+            flat |= {f"{group}/{prefix}{key}": record[key] for key in ("loss", "r2")}
     size = SCORE_TS // WANDB_BUCKETS
-    for key in ("loss_by_t", "loss_decoder_by_t", "r2_by_t"):
-        flat |= {f"eval_{prefix}{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
-    return flat
+    return flat | {f"eval_uniform_by_t/t{bucket_label(i)}": sum(uniform["loss_by_t"][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
 
 
 def wandb_weights(weights: dict) -> dict:
@@ -375,8 +374,7 @@ def main(config_path: str) -> None:
             append_jsonl(run_dir / "score_lunara.jsonl", dict(step=step, t=score_ts.tolist()) | lunara)
             append_jsonl(run_dir / "score_uniform.jsonl", dict(step=step, t=uniform_ts.tolist()) | uniform)
             append_jsonl(run_dir / "score_lunara_uniform.jsonl", dict(step=step, t=uniform_ts.tolist()) | lunara_uniform)
-            by_grid = wandb_scores(scores, "") | wandb_scores(lunara, "lunara_") | wandb_scores(uniform, "uniform_") | wandb_scores(lunara_uniform, "lunara_uniform_")
-            wandb.log(by_grid | wandb_weights(weights), step=step)
+            wandb.log(wandb_scores(scores, lunara, uniform, lunara_uniform) | wandb_weights(weights), step=step)
         if step % cfg.checkpoint_every == 0 or step == last:
             save_checkpoint(model, optimizers, step, run_dir)
         interval.start += time.perf_counter() - paused  # img/s counts training time only
