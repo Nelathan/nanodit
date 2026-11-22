@@ -309,7 +309,10 @@ linear skip adds on top at low t; the tables removed on the old stream cost. *Me
 stream, in mid-t, and per-block scalar write gates in their place cost more; with the linear skip they cost the same
 in mid-t (log 2026-11-22-scalar-gates-linear-skip), each scalar below the tables' meta gate in the same write. A slice
 and a meta gate per write take back a quarter to a third of it (log 2026-11-22-split-gates); the conv mixers' meta gates stay
-below the tables'. State: open.
+below the tables'. *Measured* (log 2026-11-22-modulation-parts-write-scales): the
+tables vary by block and channel, little by t, and one scalar per block carries almost none of their gates' block
+part; under the scalar gates Usui's step follows each writer row's scale demand and none persists; every matrix sits on
+its norm bound. State: open.
 
 ---
 
@@ -440,13 +443,15 @@ latent pixels into about 110 times the image error of one at 2 to 4, and the lat
 bands (log 2026-11-22-decoder-bands); the gain is a power law, f^-1.52 (log 2026-11-22-decoder-gain-power-law). Form:
 each frequency of F − T weighted by the gain to the power α, `loss_alpha` (`objective.spectral_weight`); any fixed
 weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchanged, but the loss is no longer the
-plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base, decided on the sample grids, with
-the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
+plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base on the held-out and uniform-grid
+scores (*Decided*, 2026-11-22: the scores decide, not the sample grids), the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
 *Measured* (log 2026-11-22-freq-weight-arms): α 1 loses on every score, the decoder-weighted one included; α 0.5
 gains on the decoder-weighted score and loses on the plain one. *Measured* (log 2026-11-22-freq-weight-floors): α 1
 with the floor at 16 or 8 px, a token's scale, costs a half and under a third of its plain cost at 64 px. On the
 sample grids α 0.5 wins over the base and α 1 floored at 8 px is the best of the frequency arms (the maintainer's
-read, 2026-11-22); on the plain score the base is ahead or level at every t. State: open. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
+read, 2026-11-22); on the plain score the base is ahead or level at every t. *Measured* (log
+2026-11-22-freq-arms-floor8-decoder): under the decoder weight floored at 8 px, the floor-8 arm's own objective, the
+base is ahead of every frequency arm. State: open. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
 holds it flat, and the long-period gain differs by set or size (log 2026-11-22-decoder-gain-256): the floor and β
 are to settle before a 256 px stage.
 
