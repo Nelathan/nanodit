@@ -17,7 +17,7 @@ from nanodit import data
 from nanodit.data import pad_sequences
 from nanodit.model import DiT, GATE_ROWS, NULL_TOKENS, SEQ_DIM, Prompt
 from nanodit.objective import flow_loss as real_flow_loss
-from nanodit.objective import band_energy, noisy, t_quantiles, target
+from nanodit.objective import band_energy, noisy, per_sample_loss, t_quantiles, target
 from nanodit.optim import build_optimizers
 
 ROOT = Path(__file__).parent.parent
@@ -215,12 +215,13 @@ def test_score_is_the_caption_loss_at_each_t_with_each_rows_own_noise(train):
         t = torch.full((5,), t_value)
         x_t = noisy(x.float(), noise, t)
         by_t.append(float((Echo()(x_t, t, prompt) - target(x.float(), noise, x_t)).square().mean()))
-    torch.testing.assert_close(result["loss_by_t"], by_t)
-    torch.testing.assert_close(result["loss"], sum(by_t) / 2)
+    close = dict(rtol=1e-6, atol=1e-6)  # the score sums the error's power over fft2 bins, the reference over pixels
+    torch.testing.assert_close(result["loss_by_t"], by_t, **close)
+    torch.testing.assert_close(result["loss"], sum(by_t) / 2, **close)
     energy = float(x.float().square().mean())  # R²: one minus the clean-latent error, loss · t², over the latents' energy
     r2_by_t = [1 - loss * t_value**2 / energy for loss, t_value in zip(by_t, ts.tolist())]
-    torch.testing.assert_close(result["r2_by_t"], r2_by_t)
-    torch.testing.assert_close(result["r2"], sum(r2_by_t) / 2)
+    torch.testing.assert_close(result["r2_by_t"], r2_by_t, **close)
+    torch.testing.assert_close(result["r2"], sum(r2_by_t) / 2, **close)
     torch.testing.assert_close(train.score(Echo(), x, prompt, noise, ts, 5, torch.device("cpu")), result)  # a partial last batch changes nothing
     clean = band_energy(x.float()).mean(0)  # the bands' errors add up to the whole error, each weighted by its energy
     for_each_t = [float(((1 - torch.tensor(row)) * clean).sum()) for row in result["r2_by_band_by_t"]]
@@ -349,13 +350,13 @@ class FixedBucket:
         return self.x, self.prompt
 
 
-def fixed_flow_loss(model, x, prompt, shift, sigma):
+def fixed_flow_loss(model, x, prompt, shift, sigma, alpha):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
     x_t = noisy(x, eps, t)
-    per_sample = (model(x_t, t, prompt) - target(x, eps, x_t)).square().flatten(1).mean(1)
-    return per_sample.mean(), per_sample, t
+    out = model(x_t, t, prompt)
+    return per_sample_loss(out, x, eps, x_t, alpha).mean(), per_sample_loss(out, x, eps, x_t).detach(), t
 
 
 def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train, monkeypatch):
