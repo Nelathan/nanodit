@@ -113,9 +113,12 @@ config-only arms against the reference. 1e-3 over a first pass at depth 24, anne
 and 0.011 on Lunara (`log/2026-11-21-lr1e3-one-pass.md`); *Decided* (2026-11-21): the first pass stays at 2e-3. *Hypothesis*: 1e-3 pays
 from the second pass on; not run.
 
-### C3. Timestep shift values per stage
+### C3. The timestep distribution: σ, uniform, shift
 
-The rule is in SPEC §4; the base value is not chosen. Settle: with the sweep or a short follow-up.
+The rule is in SPEC §4: logit-normal, σ 0.7, shift 1 at 128 px, which puts the training's t near the midpoint while
+the sampler steps every t evenly. Question: which of σ 0.7, σ 1, uniform t, each with or without a shift, lowers the
+uniform-grid score most. Settle: arms against the base on the held-out and uniform-grid scores (*Decided*,
+2026-11-22: the scores decide, not the sample grids). State: proposed, no arm.
 
 ### C4. Does an edge-of-stability prediction for momentum optimizers bear on the learning rate chosen?
 
@@ -435,25 +438,6 @@ c(t), behind it at low t and level overall; the skip adds to the held stream. St
 Per-direction mixes of x0 and velocity targets, claimed to help in pixel space and not on SD-VAE latents; Primal 2x2
 tokens sit nearer pixel space. Settle: the spectrum of the 128-d token covariance first, then the paper. State: not
 read.
-
-### K3. A frequency-weighted loss
-
-The latent MSE weights every coordinate alike, while the decoder turns a unit of latent error at periods over 64
-latent pixels into about 110 times the image error of one at 2 to 4, and the latents' energy sits mostly in those fine
-bands (log 2026-11-22-decoder-bands); the gain is a power law, f^-1.52 (log 2026-11-22-decoder-gain-power-law). Form:
-each frequency of F − T weighted by the gain to the power α, `loss_alpha` (`objective.spectral_weight`); any fixed
-weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchanged, but the loss is no longer the
-plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base on the held-out and uniform-grid
-scores (*Decided*, 2026-11-22: the scores decide, not the sample grids), the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
-*Measured* (log 2026-11-22-freq-weight-arms): α 1 loses on every score, the decoder-weighted one included; α 0.5
-gains on the decoder-weighted score and loses on the plain one. *Measured* (log 2026-11-22-freq-weight-floors): α 1
-with the floor at 16 or 8 px, a token's scale, costs a half and under a third of its plain cost at 64 px. On the
-sample grids α 0.5 wins over the base and α 1 floored at 8 px is the best of the frequency arms (the maintainer's
-read, 2026-11-22); on the plain score the base is ahead or level at every t. *Measured* (log
-2026-11-22-freq-arms-floor8-decoder): under the decoder weight floored at 8 px, the floor-8 arm's own objective, the
-base is ahead of every frequency arm. State: open. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
-holds it flat, and the long-period gain differs by set or size (log 2026-11-22-decoder-gain-256): the floor and β
-are to settle before a 256 px stage.
 
 ---
 

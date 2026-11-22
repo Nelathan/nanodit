@@ -85,15 +85,15 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, alpha: float = 0.0) -> tuple[Tensor, Tensor, Tensor]:
-    """Returns the batch loss it trains on, weighted by `alpha`, and the per-sample unweighted losses and the sampled
-    t, for `loss_by_t_bucket` and `explained_variance`, which read the plain MSE whatever alpha."""
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns the batch loss, and the per-sample losses and the sampled t, for `loss_by_t_bucket` and
+    `explained_variance`."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, t)
     prompt = drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2]))
-    power = error_power(model(x_t, t, prompt), x, eps, x_t)
-    return weighted_mean(power, alpha).mean(), power.detach().flatten(1).mean(1), t
+    per_sample = per_sample_loss(model(x_t, t, prompt), x, eps, x_t)
+    return per_sample.mean(), per_sample.detach(), t
 
 
 def loss_by_t_bucket(per_sample: Tensor, t: Tensor, buckets: int) -> Tensor:

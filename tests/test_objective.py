@@ -54,18 +54,6 @@ def test_the_unweighted_loss_is_the_mse_and_a_white_error_keeps_its_loss_under_a
     assert torch.allclose(per_sample_loss(out, x, eps, x_t, alpha=1.0), error.square().flatten(1).mean(1), rtol=0.1)
 
 
-def test_flow_loss_trains_on_the_weighted_loss_and_reports_the_plain_one():
-    x, prompt = torch.randn(8, 2, 32, 32), Prompt(torch.randn(8, 3, 8), torch.ones(8, 3, dtype=torch.bool))
-    reads = []
-    for alpha in (0.0, 1.0):
-        torch.manual_seed(0)
-        reads.append(flow_loss(ZeroNet(), x, prompt, 1.0, alpha=alpha))
-    (plain, plain_per_sample, _), (weighted, weighted_per_sample, _) = reads
-    torch.testing.assert_close(weighted_per_sample, plain_per_sample)
-    torch.testing.assert_close(plain, plain_per_sample.mean())
-    assert (weighted - plain).abs() > 0.01 * plain
-
-
 def test_the_weight_charges_a_layout_error_more_than_a_detail_error_of_the_same_size():
     """At alpha 1 a wave of period 32 latent pixels costs more than one of period 4 by about (32 / 4)^β."""
     rows = torch.arange(64.0)[:, None].expand(64, 64)

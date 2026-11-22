@@ -350,13 +350,14 @@ class FixedBucket:
         return self.x, self.prompt
 
 
-def fixed_flow_loss(model, x, prompt, shift, sigma, alpha):
+def fixed_flow_loss(model, x, prompt, shift, sigma):
     """flow_loss with t and ε a function of the sample, so any split of a batch sees the same draws."""
     t = torch.sigmoid(x.mean((1, 2, 3)) * 10)
     eps = x.flip(-1)
     x_t = noisy(x, eps, t)
     out = model(x_t, t, prompt)
-    return per_sample_loss(out, x, eps, x_t, alpha).mean(), per_sample_loss(out, x, eps, x_t).detach(), t
+    per_sample = per_sample_loss(out, x, eps, x_t)
+    return per_sample.mean(), per_sample.detach(), t
 
 
 def test_accumulation_covers_the_whole_batch_and_leaves_the_mean_gradient(train, monkeypatch):
