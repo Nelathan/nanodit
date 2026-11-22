@@ -442,7 +442,10 @@ weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchan
 plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base, decided on the sample grids, with
 the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
 *Measured* (log 2026-11-22-freq-weight-arms): α 1 loses on every score, the decoder-weighted one included; α 0.5
-gains on the decoder-weighted score and loses on the plain one; the sample grids wait to be read. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
+gains on the decoder-weighted score and loses on the plain one. *Measured* (log 2026-11-22-freq-weight-floors): α 1
+with the floor at 16 or 8 px, a token's scale, costs a half and under a third of its plain cost at 64 px. α 0.5
+wins over the base on the sample grids (the maintainer's read, 2026-11-22). State: α 1 at 16 and 8 px wait on their
+sample grids against α 0.5. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
 holds it flat, and the long-period gain differs by set or size (log 2026-11-22-decoder-gain-256): the floor and β
 are to settle before a 256 px stage.
 
