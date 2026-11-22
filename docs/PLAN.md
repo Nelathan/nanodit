@@ -300,8 +300,9 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 ### G11. The stream's scale
 
 Its own topic doc: `topics/stream-scale.md` (the two workspaces, dilution and drowning, the split read, a held meta
-stream with long skips, the tables; attention over depth not wanted for its cost). State: four arms
-queued, in the topic's order.
+stream with long skips, the tables; attention over depth not wanted for its cost). State: the four arms
+run, read pending the uniform score's backfill. Queued on held meta with long skips: the linear skip
+(`arm/held-meta-skips-linear-skip`) and the tables dropped (`arm/held-meta-skips-no-tables`).
 
 ---
 
@@ -414,7 +415,9 @@ target, what a4 does with it, AnisoFlow, what of the thread does not apply).
 The identity on x_t is the optimal linear skip only at t = 0.5; `c(t) = 2(1 − t)²/((1 − t)² + t²)` halves the residual
 the trunk must write at both ends (`log/2026-11-21-linear-skip-probe.md`). Form armed: the slice starts at c(t)·x_t,
 the read-out stays the raw slice; a second arm adds EDM's c_out on the slice's writes.
-Settle: the two arms, read on the loss by t. State: `arm/linear-skip` and `arm/linear-skip-cout` queued.
+Settle: the two arms, read on the loss by t. State: both run, and a third, the learned skip (`arm/learned-skip`, the
+slice starts at (1 + s(t))·x_t, s on a degree-4 Bernstein basis in t, zero at init); read pending the uniform score's
+backfill.
 
 ### K2. An anisotropic target (AnisoFlow)
 
