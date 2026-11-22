@@ -422,6 +422,17 @@ Per-direction mixes of x0 and velocity targets, claimed to help in pixel space a
 tokens sit nearer pixel space. Settle: the spectrum of the 128-d token covariance first, then the paper. State: not
 read.
 
+### K3. A frequency-weighted loss
+
+The latent MSE weights every coordinate alike, while the decoder turns a unit of latent error at periods over 64
+latent pixels into about 110 times the image error of one at 2 to 4, and the latents' energy sits mostly in those fine
+bands (log 2026-11-22-decoder-bands); the gain is a power law, f^-1.52 (log 2026-11-22-decoder-gain-power-law). Form:
+each frequency of F − T weighted by the gain to the power α, `loss_alpha` (`objective.spectral_weight`); any fixed
+weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchanged, but the loss is no longer the
+plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base, decided on the sample grids, with
+the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
+configs `a4-freq-alpha05-6k`, `a4-freq-alpha1-6k` queued.
+
 ---
 
 ## Group L. Attention dynamics

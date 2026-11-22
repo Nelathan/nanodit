@@ -164,7 +164,7 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
         weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
                    | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
-        assert len(data) == 4 * (2 + 3 + 2 * 5) + len(weights)  # per set and grid the two means, R² per band, the loss and R² in fifths; the weight reads
+        assert len(data) == 4 * (3 + 3 + 3 * 5) + len(weights)  # per set and grid the three means, R² per band, the loss and R² in fifths; the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])

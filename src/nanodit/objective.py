@@ -8,6 +8,8 @@ from torch import Tensor
 from .model import Prompt
 
 PROMPT_DROPOUT = 0.1
+DECODER_GAIN_EXPONENT = 1.52  # the decoder's gain on a latent error falls as f^-1.52 (log 2026-11-22-decoder-gain-power-law)
+GAIN_FLOOR = 1 / 64  # cycles per latent pixel; below it the gain is held
 
 
 def sample_t(batch: int, shift: float, device: torch.device | None = None, sigma: float = 1.0) -> Tensor:
@@ -53,8 +55,28 @@ def band_energy(e: Tensor) -> Tensor:
     return torch.stack([spectrum[:, band == i].sum(-1) for i in range(len(BAND_NAMES))], -1)
 
 
-def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
-    return (out - target(x, eps, x_t)).square().flatten(1).mean(1)
+def spectral_weight(h: int, w: int, alpha: float, device: torch.device | None = None) -> Tensor:
+    """w(f)² [h, w] on the fft2 grid: the decoder's gain to the power alpha, max(f, GAIN_FLOOR)^(-alpha·β), with
+    mean 1 over the grid, so a white error keeps its loss. alpha 0 is the plain MSE, 1 about the image's MSE."""
+    fy, fx = torch.fft.fftfreq(h, device=device), torch.fft.fftfreq(w, device=device)
+    radius = (fy[:, None].square() + fx[None, :].square()).sqrt().clamp(min=GAIN_FLOOR)
+    weight = radius.pow(-alpha * DECODER_GAIN_EXPONENT)
+    return weight / weight.mean()
+
+
+def error_power(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor) -> Tensor:
+    """|fft2(F - T)|² [B, C, H, W], orthonormal: its mean is the error's mean square (Parseval)."""
+    return torch.fft.fft2((out - target(x, eps, x_t)).float(), norm="ortho").abs().square()
+
+
+def weighted_mean(power: Tensor, alpha: float) -> Tensor:
+    """The per-sample mean of `error_power`, each spatial frequency weighted by `spectral_weight`; any fixed weight
+    keeps E[T | x_t] as the minimizer."""
+    return (power * spectral_weight(*power.shape[-2:], alpha, power.device)).flatten(1).mean(1)
+
+
+def per_sample_loss(out: Tensor, x: Tensor, eps: Tensor, x_t: Tensor, alpha: float = 0.0) -> Tensor:
+    return weighted_mean(error_power(out, x, eps, x_t), alpha)
 
 
 def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
@@ -63,14 +85,15 @@ def drop_prompts(prompt: Prompt, null: Prompt) -> Prompt:
     return Prompt(*(torch.where(dropped.view(-1, *[1] * (a.dim() - 1)), b, a) for a, b in zip(prompt, null)))
 
 
-def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0) -> tuple[Tensor, Tensor, Tensor]:
-    """Returns the batch loss, the per-sample losses and the sampled t, for `loss_by_t_bucket`."""
+def flow_loss(model, x: Tensor, prompt: Prompt, shift: float, sigma: float = 1.0, alpha: float = 0.0) -> tuple[Tensor, Tensor, Tensor]:
+    """Returns the batch loss it trains on, weighted by `alpha`, and the per-sample unweighted losses and the sampled
+    t, for `loss_by_t_bucket` and `explained_variance`, which read the plain MSE whatever alpha."""
     t = sample_t(x.shape[0], shift, x.device, sigma)
     eps = torch.randn_like(x)
     x_t = noisy(x, eps, t)
     prompt = drop_prompts(prompt, model.null_prompt(*prompt.tokens.shape[:2]))
-    per_sample = per_sample_loss(model(x_t, t, prompt), x, eps, x_t)
-    return per_sample.mean(), per_sample, t
+    power = error_power(model(x_t, t, prompt), x, eps, x_t)
+    return weighted_mean(power, alpha).mean(), power.detach().flatten(1).mean(1), t
 
 
 def loss_by_t_bucket(per_sample: Tensor, t: Tensor, buckets: int) -> Tensor:

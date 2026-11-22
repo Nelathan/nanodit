@@ -65,6 +65,7 @@ class Config:
     wandb_project: str
     init_from: str | None = None  # a checkpoint directory: its weights and optimizer state, its step count continued
     t_sigma: float = 0.7  # std of the logit-normal t, SPEC §4
+    loss_alpha: float = 0.0  # the loss's frequency weight, the decoder's gain to this power (objective.spectral_weight), PLAN K3
     anneal_to: float | None = None  # an anneal run (SPEC §6), from a checkpoint with warmup = 0: Usui's lr falls by a cosine over `steps` to this value
 
 
@@ -147,11 +148,12 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
     """The loss on fixed rows, each with its caption and fixed noise, at every t of a fixed grid: one number
     comparable across steps and runs, and its value at each t. The same for R² (`explained_variance`), per t and
     over the grid, and per band of spatial frequency (`objective.BAND_EDGES`): one minus the band's share of the clean-latent
-    error over its share of the latents' energy."""
-    energy, per_t, band_errors = x.float().square().mean().item(), [], []
+    error over its share of the latents' energy. And the decoder-weighted loss, the loss at alpha 1 (`spectral_weight`),
+    whatever alpha the run trains with: the image's error up to a scale, comparable within one resolution."""
+    energy, per_t, decoded, band_errors = x.float().square().mean().item(), [], [], []
     band_energies = band_energy(x.float()).mean(0).tolist()
     for t_value in ts.tolist():
-        total, bands = 0.0, 0.0
+        total, total_decoded, bands = 0.0, 0.0, 0.0
         for i in range(0, len(x), batch):
             xb, eb = x[i : i + batch].to(device, torch.float32), noise[i : i + batch].to(device)
             pb = prompt.rows(i, i + batch).to(device, torch.float32)
@@ -159,14 +161,18 @@ def score(model, x, prompt, noise, ts, batch: int, device: torch.device) -> dict
             x_t = noisy(xb, eb, t)
             out = model(x_t, t, pb)
             total += per_sample_loss(out, xb, eb, x_t).sum()
+            total_decoded += per_sample_loss(out, xb, eb, x_t, alpha=1.0).sum()
             bands += band_energy(t_value * (out - target(xb, eb, x_t))).sum(0)  # the clean estimate's error x0_hat - x
         per_t.append(float(total) / len(x))
+        decoded.append(float(total_decoded) / len(x))
         band_errors.append((bands / len(x)).tolist())
     errors = [loss * t_value**2 for loss, t_value in zip(per_t, ts.tolist())]
     by_band_by_t = [[1 - e / b for e, b in zip(row, band_energies)] for row in band_errors]
     return dict(
         loss=sum(per_t) / len(per_t),
         loss_by_t=per_t,
+        loss_decoder=sum(decoded) / len(decoded),
+        loss_decoder_by_t=decoded,
         r2=1 - sum(errors) / len(errors) / energy,
         r2_by_t=[1 - error / energy for error in errors],
         r2_by_band=[sum(col) / len(col) for col in zip(*by_band_by_t)],
@@ -222,10 +228,10 @@ def wandb_scores(scores: dict, prefix: str) -> dict:
     """A score record, flat: the means under `eval/<prefix>`, and each by-t series as the means of neighbouring grid
     points, one fifth of the grid each, in one group per topic, `eval_<prefix><topic>_by_t/q<lo>-<hi>`, named by the
     fifth's quantiles of its grid (on the uniform grid, t itself)."""
-    flat = {f"eval/{prefix}{key}": scores[key] for key in ("loss", "r2")}
+    flat = {f"eval/{prefix}{key}": scores[key] for key in ("loss", "loss_decoder", "r2")}
     flat |= {f"eval/{prefix}r2_{band}": value for band, value in zip(BAND_NAMES, scores["r2_by_band"])}
     size = SCORE_TS // WANDB_BUCKETS
-    for key in ("loss_by_t", "r2_by_t"):
+    for key in ("loss_by_t", "loss_decoder_by_t", "r2_by_t"):
         flat |= {f"eval_{prefix}{key}/q{bucket_label(i)}": sum(scores[key][i * size : (i + 1) * size]) / size for i in range(WANDB_BUCKETS)}
     return flat
 
@@ -282,20 +288,20 @@ class Interval:
         )
 
 
-def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def accumulate_gradients(model, stream: Stream, micro_batches: int, shift: float, sigma: float, alpha: float = 0.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward over `micro_batches` micro-batches without stepping, each micro-batch's loss weighted by its share of
     the batch's tokens, so the fallback parameters end with the gradient of the mean over every latent element of the
-    batch (UsuiTrack ignores gradient scale). Returns that mean flow loss and the per-sample losses, t and clean-latent
-    energy (mean square) of every sample."""
+    batch (UsuiTrack ignores gradient scale). Returns the batch's mean unweighted flow loss (the gradient is the
+    `alpha`-weighted one's) and the per-sample unweighted losses, t and clean-latent energy (mean square) of every sample."""
     buckets = stream.draw(micro_batches)
     sizes = [math.prod(b.shape) for b in buckets]  # latent elements per sample, proportional to its tokens
     weights = [size / sum(sizes) for size in sizes]
     losses, per_samples, ts, energies = [], [], [], []
     for bucket, weight in zip(buckets, weights):
         x, prompt = bucket.next()
-        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma)
+        loss, per_sample, t = flow_loss(model, x, prompt, shift, sigma, alpha)
         (loss * weight).backward()
-        losses.append(loss.detach() * weight), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
+        losses.append(per_sample.mean() * weight), per_samples.append(per_sample.detach()), ts.append(t), energies.append(x.square().flatten(1).mean(1))
     return torch.stack(losses).sum(), torch.cat(per_samples), torch.cat(ts), torch.cat(energies)
 
 
@@ -344,7 +350,7 @@ def main(config_path: str) -> None:
     interval = Interval()
     last = start + cfg.steps
     for step in range(start + 1, last + 1):
-        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma)
+        loss, per_sample, t, energy = accumulate_gradients(model, stream, accumulate, cfg.shift, cfg.t_sigma, cfg.loss_alpha)
         # Tracked matrices have no .grad under Molegrad: this is the fallback parameters' norm.
         fallback_grads = [p.grad for group in optimizers[1].param_groups for p in group["params"] if p.grad is not None]
         interval.add(loss, per_sample, t, energy, torch.nn.utils.get_total_norm(fallback_grads))

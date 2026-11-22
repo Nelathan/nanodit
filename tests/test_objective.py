@@ -5,7 +5,7 @@ import torch
 from conftest import needs_cuda, open_gates
 
 from nanodit.model import Prompt
-from nanodit.objective import PROMPT_DROPOUT, band_energy, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, t_quantiles, target
+from nanodit.objective import PROMPT_DROPOUT, band_energy, drop_prompts, explained_variance, explained_variance_by_t_bucket, flow_loss, loss_by_t_bucket, noisy, per_sample_loss, sample_t, spectral_weight, t_quantiles, target
 
 
 def test_loss_equals_velocity_error():
@@ -43,6 +43,37 @@ def test_shift_moves_t_toward_noise():
     assert abs(sample_t(50000, 1.0).median() - 0.5) < 0.01
     # a shift s sends the median 0.5 to s / (1 + s)
     assert abs(sample_t(50000, 3.0).median() - 0.75) < 0.01
+
+
+def test_the_unweighted_loss_is_the_mse_and_a_white_error_keeps_its_loss_under_any_weight():
+    torch.manual_seed(0)
+    x, eps, x_t = torch.randn(3, 2, 64, 64), torch.randn(3, 2, 64, 64), torch.randn(3, 2, 64, 64)
+    error = torch.randn(3, 2, 64, 64)
+    out = target(x, eps, x_t) + error
+    assert torch.allclose(per_sample_loss(out, x, eps, x_t), error.square().flatten(1).mean(1), rtol=1e-5)
+    assert torch.allclose(per_sample_loss(out, x, eps, x_t, alpha=1.0), error.square().flatten(1).mean(1), rtol=0.1)
+
+
+def test_flow_loss_trains_on_the_weighted_loss_and_reports_the_plain_one():
+    x, prompt = torch.randn(8, 2, 32, 32), Prompt(torch.randn(8, 3, 8), torch.ones(8, 3, dtype=torch.bool))
+    reads = []
+    for alpha in (0.0, 1.0):
+        torch.manual_seed(0)
+        reads.append(flow_loss(ZeroNet(), x, prompt, 1.0, alpha=alpha))
+    (plain, plain_per_sample, _), (weighted, weighted_per_sample, _) = reads
+    torch.testing.assert_close(weighted_per_sample, plain_per_sample)
+    torch.testing.assert_close(plain, plain_per_sample.mean())
+    assert (weighted - plain).abs() > 0.01 * plain
+
+
+def test_the_weight_charges_a_layout_error_more_than_a_detail_error_of_the_same_size():
+    """At alpha 1 a wave of period 32 latent pixels costs more than one of period 4 by about (32 / 4)^β."""
+    rows = torch.arange(64.0)[:, None].expand(64, 64)
+    coarse, fine = [torch.cos(2 * torch.pi * rows / period).expand(1, 2, 64, 64) for period in (32, 4)]
+    zero = torch.zeros(1, 2, 64, 64)
+    cost = [per_sample_loss(e, zero, zero, zero, alpha=1.0).item() for e in (coarse, fine)]
+    assert cost[0] / cost[1] == pytest.approx(8**1.52, rel=1e-3)
+    assert spectral_weight(64, 64, 0.0).eq(1).all() and spectral_weight(64, 64, 1.0).mean().item() == pytest.approx(1)
 
 
 def test_t_quantiles_are_the_training_t_at_equal_probability_steps():
