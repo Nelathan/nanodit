@@ -1,7 +1,8 @@
 """The adaLN modulation of a checkpoint as heatmaps in one self-contained HTML page: per block and t, the RMS of the
 write gates (`mod + table` in the gate rows, before any bound) on the slice and on the meta channels; each block's
-table rows by channel; the shared projection's gate rows by t and channel; and the full gates by block and channel at
-one t. t runs over 20 evenly spaced values in (0, 1). CPU, fp32: it runs beside a training run.
+table rows by channel; how alike the blocks' tables are, the cosine between two blocks' rows about their mean
+over blocks, on the slice and on the meta channels; the shared projection's gate rows by t and channel; and the full
+gates by block and channel at one t. t runs over 20 evenly spaced values in (0, 1). CPU, fp32: it runs beside a training run.
 
 usage: plot_gates.py RUN_DIR STEP OUT_HTML
 """
@@ -60,6 +61,8 @@ for (const [b, name] of [[0, "mixer"], [1, "MLP"]]) for (const [l, lane] of [[0,
   root.appendChild(heat({title: `${name} shared gate, ${lane}`, axes: "t", z: [D.shared_rms.map(tRow => tRow[b][l])], lo: 0, hi: rmsHi, sx: 22, sy: 20, ylabel: () => "shared", xlabel: tl}));
 section("Each block's table by channel (rows: blocks; the black line marks the slice's end)");
 D.table.forEach((z, i) => root.appendChild(heat({title: D.row_names[i] + " table", axes: "block × channel", z, signed: true, sx: 1, split: D.token_dim, ylabel: blk, xlabel: ch})));
+section("How alike two blocks' tables are: cosine of the rows about their mean over blocks (rows and columns: blocks)");
+D.similarity.forEach((lanes, i) => lanes.forEach((z, l) => root.appendChild(heat({title: `${D.row_names[i]}, ${["slice", "meta"][l]}`, axes: "block × block", z, lo: -1, hi: 1, signed: true, sx: 10, sy: 10, ylabel: blk, xlabel: blk}))));
 section("The shared projection's gate rows by t and channel");
 D.shared.forEach((z, i) => root.appendChild(heat({title: ["mixer", "MLP"][i] + " shared gate", axes: "t × channel", z, signed: true, sx: 1, split: D.token_dim, ylabel: tl, xlabel: ch})));
 section(`The full gate, mod + table, by block and channel at t ${D.t_mid.toFixed(3)}`);
@@ -83,6 +86,11 @@ def main(run_dir: str, step: int, out: str) -> None:
     def lanes(g):  # RMS over the slice's channels and over the meta channels: [..., 2]
         return torch.stack([g[..., :TOKEN_DIM].square().mean(-1).sqrt(), g[..., TOKEN_DIM:].square().mean(-1).sqrt()], -1)
 
+    def similarity(rows):  # [block, c] → cosine between blocks of the rows about their mean over blocks
+        a = rows - rows.mean(0)
+        a = a / a.norm(dim=1, keepdim=True)
+        return a @ a.T
+
     mid = TS // 2
     data = {
         "t": t.tolist(), "t_mid": t[mid].item(), "token_dim": TOKEN_DIM, "row_names": ROW_NAMES,
@@ -92,6 +100,7 @@ def main(run_dir: str, step: int, out: str) -> None:
         "table": tables.transpose(0, 1).tolist(),  # [row, block, channel]
         "shared": mod[:, list(GATE_ROWS)].transpose(0, 1).tolist(),  # [branch, t, channel]
         "full_mid": gates[:, mid].transpose(0, 1).tolist(),  # [branch, block, channel]
+        "similarity": [[similarity(tables[:, row, :TOKEN_DIM]).tolist(), similarity(tables[:, row, TOKEN_DIM:]).tolist()] for row in range(N_MOD)],  # [row, lane, block, block]
     }
     note = (f"{run.name} step {step}. Gates before any bound; a write is gate × the branch's output. "
             "Signed maps: red positive, blue negative, white zero, scaled to the largest |value| in the map.")
