@@ -292,17 +292,22 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
   3×3 / 3×3; phased, three (attention, 7×7), twelve 3×3, three (attention, 5×5); the period attention, 7×7, 5×5,
   3×3. *Measured* (log 2026-11-21-conv-taps-a4-ref): after a pass the first 3×3 kernels stay near or outward of the
   init share on the ring, the middle ones move to the centre, the last sit between. Settle: each at 6000 steps as
-  the kernel arms, read on loss and on `scripts/probe_conv_taps.py`. State: `arm/conv-kernel` (the kernel a field
-  of the block type, four configs) queued.
+  the kernel arms, read on loss and on `scripts/probe_conv_taps.py`. *Measured* (log 2026-11-22-conv-kernel-layouts):
+  the period gains and phased costs, each past the seed spread on three of four scores. State: queued on
+  `arm/conv-kernel`, the period rotated to (3×3, attention, 7×7, 5×5): whether a 3×3 before the first attention
+  helps.
 - **Padding.** The conv zero-pads at the grid's border. Replicate or reflect padding avoids a constant 0 around the
   edge. Read at 256 px and on the unseen grid, where border effects would show.
 
 ### G11. The stream's scale
 
 Its own topic doc: `topics/stream-scale.md` (the two workspaces, dilution and drowning, the split read, a held meta
-stream with long skips, the tables; attention over depth not wanted for its cost). State: the four arms
-run, read pending the uniform score's backfill. Queued on held meta with long skips: the linear skip
-(`arm/held-meta-skips-linear-skip`) and the tables dropped (`arm/held-meta-skips-no-tables`).
+stream with long skips, the tables; attention over depth not wanted for its cost). *Measured* (log
+2026-11-22-stream-arms): holding the meta channels gains in mid-t; long skips add in mid-t, unresolved overall; the
+linear skip adds on top at low t; the tables removed on the old stream cost. *Decided* for the arm (2026-11-22): per-block scalar write gates
+through a tanh in place of the tables and the gate rows, the MLP's output norm without a gain. State: queued on held
+meta with long skips: the tables dropped (`arm/held-meta-skips-no-tables`) and the scalar gates
+(`arm/held-meta-skips-scalar-gates`).
 
 ---
 
@@ -415,9 +420,10 @@ target, what a4 does with it, AnisoFlow, what of the thread does not apply).
 The identity on x_t is the optimal linear skip only at t = 0.5; `c(t) = 2(1 − t)²/((1 − t)² + t²)` halves the residual
 the trunk must write at both ends (`log/2026-11-21-linear-skip-probe.md`). Form armed: the slice starts at c(t)·x_t,
 the read-out stays the raw slice; a second arm adds EDM's c_out on the slice's writes.
-Settle: the two arms, read on the loss by t. State: both run, and a third, the learned skip (`arm/learned-skip`, the
-slice starts at (1 + s(t))·x_t, s on a degree-4 Bernstein basis in t, zero at init); read pending the uniform score's
-backfill.
+Settle: the two arms, read on the loss by t; a third, the learned skip (`arm/learned-skip`, the slice starts at
+(1 + s(t))·x_t, s on a degree-4 Bernstein basis in t, zero at init). *Measured* (log 2026-11-22-skip-arms): the linear
+skip gains most at t 0.05–0.15, at high t no more than mid-t; c_out is level with it; the learned skip learns most of
+c(t), behind it at low t and level overall; the skip adds to the held stream. State: waits for a decision.
 
 ### K2. An anisotropic target (AnisoFlow)
 
@@ -434,7 +440,9 @@ each frequency of F − T weighted by the gain to the power α, `loss_alpha` (`o
 weight keeps E[T | x_t] as the minimizer, so the flow and the sampler are unchanged, but the loss is no longer the
 plain velocity loss (Ostris's principle 5). Settle: α 0.5 and 1 against the base, decided on the sample grids, with
 the decoder-weighted score beside the plain one. *Hypothesis*: it moves σ and the kernel layout, which wait for it. State:
-configs `a4-freq-alpha05-6k`, `a4-freq-alpha1-6k` queued.
+α 0.5 running, α 1 queued. At 256 px the gain keeps rising past a period of 64 latent pixels, where the weight's floor
+holds it flat, and the long-period gain differs by set or size (log 2026-11-22-decoder-gain-256): the floor and β
+are to settle before a 256 px stage.
 
 ---
 
@@ -472,7 +480,8 @@ attention's writes to the image channels. State: parked in its source.
 
 ### M2. Long skips
 
-Block i into block L − 1 − i, gated near zero, into the meta channels. State: proposed.
+Block i into block L − 1 − i, gated near zero, into the meta channels. State: run on the held stream under G11
+(log 2026-11-22-stream-arms).
 
 ### M3. The input re-injected
 
