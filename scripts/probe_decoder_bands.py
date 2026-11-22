@@ -1,7 +1,8 @@
 """How the decoder weighs a latent error by spatial frequency: whether the latent MSE the loss counts is the image MSE
 it costs. Each row's latent gets a Gaussian error confined to one radial band of latent frequency, of a fixed RMS; the
 gain is the decoded image's mean-square change over the error's (pixels in [-1, 1]). Also each band's share of the
-latents' energy, and where in the image's spectrum the change lands. CPU, fp32.
+latents' energy, and where in the image's spectrum the change lands; and the power law g ∝ f^-β fitted, in log-log, to
+the gains of the bands between the lowest and the corners, each at its bins' mean frequency. CPU, fp32.
 
 usage: probe_decoder_bands.py EVAL_SET RESOLUTION ROWS
 """
@@ -47,6 +48,7 @@ def main(eval_set: str, resolution: int, rows: int) -> None:
     shares = band_shares(x, masks)
     lows = (0.0,) + EDGES
     highs = EDGES + (0.71,)
+    small_gains = []
     for i, mask in enumerate(masks):
         gains, lands = [], None
         for rms in RMS:
@@ -54,9 +56,18 @@ def main(eval_set: str, resolution: int, rows: int) -> None:
             noise = noise * rms / noise.square().mean().sqrt()
             change = decoder.decode(x + noise) - base
             gains.append((change.square().mean() / noise.square().mean()).item())
+            if rms == RMS[0]:
+                small_gains.append(gains[-1])
             if lands is None:
                 lands = band_shares(change, image_masks)
         print(f"{lows[i]:.4f}-{highs[i]:.4f} | {shares[i]:.4f} | " + " | ".join(f"{g:.4f}" for g in gains) + " | " + " ".join(f"{v:.2f}" for v in lands), flush=True)
+    r = radius(h, w)
+    fit = range(1, len(EDGES))  # the bands with a lower edge, below the corners
+    log_f = torch.tensor([r[masks[i]].mean().log().item() for i in fit])
+    log_g = torch.tensor([small_gains[i] for i in fit]).log()
+    slope = ((log_f - log_f.mean()) * (log_g - log_g.mean())).sum() / (log_f - log_f.mean()).square().sum()
+    residual = log_g - log_g.mean() - slope * (log_f - log_f.mean())
+    print(f"power law over bands {fit.start}-{fit.stop - 1}: beta {-slope.item():.3f}, worst band off by a factor {residual.abs().max().exp().item():.2f}")
 
 
 if __name__ == "__main__":
