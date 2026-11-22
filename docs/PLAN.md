@@ -304,10 +304,10 @@ Candidates (`references/handover-2026-11-12-residual-gating.md` E3, `references/
 Its own topic doc: `topics/stream-scale.md` (the two workspaces, dilution and drowning, the split read, a held meta
 stream with long skips, the tables; attention over depth not wanted for its cost). *Measured* (log
 2026-11-22-stream-arms): holding the meta channels gains in mid-t; long skips add in mid-t, unresolved overall; the
-linear skip adds on top at low t; the tables removed on the old stream cost. *Decided* for the arm (2026-11-22): per-block scalar write gates
-through a tanh in place of the tables and the gate rows, the MLP's output norm without a gain. State: queued on held
-meta with long skips: the tables dropped (`arm/held-meta-skips-no-tables`) and the scalar gates
-(`arm/held-meta-skips-scalar-gates`).
+linear skip adds on top at low t; the tables removed on the old stream cost. *Measured* (log
+2026-11-22-tables-on-held-stream): on held meta with long skips removing the tables costs about what it did on the old
+stream, in mid-t, and per-block scalar write gates in their place cost more. State: what in the tables carries the
+cost, the read scales or the gates, is open.
 
 ---
 
