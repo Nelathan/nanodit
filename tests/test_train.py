@@ -159,11 +159,12 @@ def test_train_writes_logs_eval_grid_and_loadable_checkpoint(train, tmp_path, mo
     for (_, data), s, o in zip(logged, scores, lunara):  # the means, and each by-t series in fifths
         assert data["eval/r2"] == s["r2"] and data["eval/loss"] == s["loss"]
         assert data["eval_r2_by_t/q0.2-0.4"] == pytest.approx((s["r2_by_t"][2] + s["r2_by_t"][3]) / 2)
+        assert {"eval/uniform_loss", "eval/lunara_uniform_loss", "eval_uniform_loss_by_t/q0.8-1.0"} <= data.keys()
         assert data["eval/lunara_loss"] == o["loss"] and data["eval_lunara_r2_by_t/q0.2-0.4"] == pytest.approx((o["r2_by_t"][2] + o["r2_by_t"][3]) / 2)
         weights = ({"weights/norm": s["weights"]["norm"], "weights/norm_ratio": s["weights"]["norm_ratio"]} | {f"stable_rank/{role}": v for role, v in s["weights"]["stable_rank"].items()}
                    | {f"step_norm/{role}": sum(v) / len(v) for role, v in s["weights"]["step_norm"].items()})
         assert {key: value for key, value in data.items() if key in weights} == weights
-        assert len(data) == 2 * (2 + 3 + 2 * 5) + len(weights)  # per score set the two means, R² per band, the loss and R² in fifths; the weight reads
+        assert len(data) == 4 * (2 + 3 + 2 * 5) + len(weights)  # per set and grid the two means, R² per band, the loss and R² in fifths; the weight reads
     for s in scores:  # the ceiling is the init norm: the ratio is at most 1, up to bf16 rounding
         assert 0 < s["weights"]["norm_ratio"] < 1 + 2e-3
         assert {"conv.out", "attn.out", "attn.cross_kv", "ada.1", "patch_embed"} <= set(s["weights"]["stable_rank"])
